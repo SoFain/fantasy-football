@@ -390,7 +390,13 @@ Here is the database schema description:
     - `team_abbr` (STRING)
     - `team_name` (STRING)
 
-Strict Constraint: You must output ONLY the raw, executable BigQuery SQL query string. 
+### The Analytical Filter Protocol ###
+You are mandated to follow a strict 3-step query expansion protocol:
+Step 1 (Deconstruct): Map basic player mentions to 4 core vectors: Opportunity (Snap Counts), Underlying Efficiency (Next Gen Stats/Separation), Ecosystem (Line Contracts/Injuries), and Scheme (FTN Charting).
+Step 2 (Mandatory Joins): You are PROHIBITED from querying 'weekly_metrics' in isolation. You must intrinsically craft SQL JOINS across 'weekly_snap_counts', 'ngs_receiving' (or rushing/passing), and 'ftn_charting' to establish underlying analytical context.
+Step 3 (Contrast Output): (Handled in the next pipeline stage).
+
+Strict Constraint for SQL Generation: You must output ONLY the raw, executable BigQuery SQL query string. 
 - Do NOT wrap your query in markdown syntax (do NOT use ```sql or ```).
 - Do NOT include any explanations, introduction, or prose.
 - Start the response directly with the SELECT keyword.
@@ -400,42 +406,53 @@ User Question: {user_query}
 """
                      try:
                          # Generate SQL query
-                         # We use gemini-3.5-flash as the reasoning model
                          model = genai.GenerativeModel('gemini-3.5-flash')
                          response = model.generate_content(system_prompt)
                          sql_query = response.text.strip()
                          
-                         # Defensive cleanup for any markdown wrappers if model disobeyed
+                         # Defensive cleanup
                          if sql_query.startswith("```"):
                              lines = sql_query.splitlines()
-                             if lines[0].startswith("```"):
-                                 lines = lines[1:]
-                             if lines[-1].startswith("```"):
-                                 lines = lines[:-1]
+                             if lines[0].startswith("```"): lines = lines[1:]
+                             if lines[-1].startswith("```"): lines = lines[:-1]
                              sql_query = "\n".join(lines).strip()
-                             
-                         # If sql_query begins with "sql", strip it
                          if sql_query.lower().startswith("sql\n") or sql_query.lower().startswith("sql "):
                              sql_query = sql_query[3:].strip()
                              
-                         st.info("🤖 SQL Query Generated!")
+                         st.info("🤖 SQL Query Generated via Analytical Filter (Steps 1 & 2)")
                          
                          # Execute SQL query on BigQuery
                          from google.cloud import bigquery
                          bq_client = bigquery.Client()
-                         
                          query_job = bq_client.query(sql_query)
                          df_result = query_job.result().to_dataframe()
                          
-                         st.success(f"✔ Query executed successfully! Returned {len(df_result)} rows.")
-                         st.dataframe(df_result, use_container_width=True)
+                         st.success(f"✔ Query executed successfully! Retrieved {len(df_result)} contextual rows.")
                          
-                         # Expandable section to show code
-                         with st.expander("📝 Show Generated SQL Code"):
+                         # Step 3: Contrast Output Generation
+                         with st.spinner("Step 3: Actively contrasting surface-level stats against advanced telemetry..."):
+                             analysis_prompt = f"""
+You are an elite fantasy football data analyst.
+The user asked: "{user_query}"
+
+We have extracted the advanced data using a strict multi-vector JOIN across raw metrics, snap counts, injuries, and Next Gen Stats. 
+Here is the resulting data:
+{df_result.to_csv(index=False)}
+
+Step 3 (Contrast Output): 
+Require the final natural language output to actively contrast surface-level box scores against advanced telemetry (e.g., "While the host noted Player X only had 40 yards, the tracking data reveals an elite 85% snap share and a league-leading 3.2 yards of separation against Cover 1..."). 
+Synthesize the data into a compelling, expert-tier analytical response. Do not output SQL.
+"""
+                             analysis_response = model.generate_content(analysis_prompt)
+                             st.markdown("### 🏈 Assistant Analysis")
+                             st.markdown(analysis_response.text)
+                             
+                         with st.expander("📊 View Raw Data & SQL"):
+                             st.dataframe(df_result, use_container_width=True)
                              st.code(sql_query, language="sql")
                              
                      except Exception as e:
-                         st.error(f"❌ Error during AI query generation or execution: {e}")
+                         st.error(f"❌ Error during AI protocol execution: {e}")
                          if 'sql_query' in locals():
                              with st.expander("📝 Show Attempted SQL Code"):
                                  st.code(sql_query, language="sql")
