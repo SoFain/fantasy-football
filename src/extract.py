@@ -182,3 +182,51 @@ def get_contracts_data():
     except Exception as e:
         logger.error(f"Error fetching contracts data: {e}")
         return pd.DataFrame()
+
+def get_ngs_passing_data(seasons):
+    """
+    Extracts NFL Next Gen Stats passing data.
+    """
+    logger.info("Fetching NGS passing data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_nextgen_stats, seasons, stat_type="passing")
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching NGS passing data: {e}")
+        return pd.DataFrame()
+
+def get_ngs_rushing_data(seasons):
+    """
+    Extracts NFL Next Gen Stats rushing data.
+    """
+    logger.info("Fetching NGS rushing data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_nextgen_stats, seasons, stat_type="rushing")
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching NGS rushing data: {e}")
+        return pd.DataFrame()
+
+def get_ngs_receiving_data(seasons):
+    """
+    Extracts NFL Next Gen Stats receiving data.
+    """
+    logger.info("Fetching NGS receiving data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_nextgen_stats, seasons, stat_type="receiving")
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching NGS receiving data: {e}")
+        return pd.DataFrame()
+
+def get_ftn_charting_data(seasons):
+    """
+    Extracts NFL FTN charting data.
+    """
+    logger.info("Fetching FTN charting data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_ftn_charting, seasons)
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching FTN charting data: {e}")
+        return pd.DataFrame()

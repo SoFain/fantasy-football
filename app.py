@@ -371,6 +371,15 @@ Here is the database schema description:
     - `play_type` (STRING) - e.g. 'pass', 'run'
     - `yards_gained` (FLOAT64)
     - `epa` (FLOAT64)
+
+- Table: `fantasy_football_brain.ngs_passing`
+  Columns: Includes NGS tracking passing metrics like avg_time_to_throw, avg_completed_air_yards, aggressiveness.
+- Table: `fantasy_football_brain.ngs_rushing`
+  Columns: Includes NGS tracking rushing metrics like efficiency, percent_attempts_gte_eight_defenders, avg_time_to_los.
+- Table: `fantasy_football_brain.ngs_receiving`
+  Columns: Includes NGS tracking receiving metrics like avg_cushion, avg_separation, avg_yac_above_expectation.
+- Table: `fantasy_football_brain.ftn_charting`
+  Columns: Includes FTN premium charting play-by-play data like is_no_huddle, is_play_action, is_screen_pass, is_interception_worthy.
     
 - Table: `fantasy_football_brain.team_descriptions`
   Columns:

@@ -3,8 +3,8 @@ import argparse
 import logging
 from datetime import datetime
 
-from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data
-from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data
+from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data, get_ngs_passing_data, get_ngs_rushing_data, get_ngs_receiving_data, get_ftn_charting_data
+from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data, transform_standard_seasonal_data
 from src.load import get_bigquery_client, create_dataset_if_not_exists, load_df_to_partitioned_table
 
 def setup_logging():
@@ -64,6 +64,18 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         logger.info("Extracting player contract data...")
         contracts_df_raw = get_contracts_data()
         
+        logger.info("Extracting NGS passing data...")
+        ngs_passing_raw = get_ngs_passing_data(seasons)
+        
+        logger.info("Extracting NGS rushing data...")
+        ngs_rushing_raw = get_ngs_rushing_data(seasons)
+        
+        logger.info("Extracting NGS receiving data...")
+        ngs_receiving_raw = get_ngs_receiving_data(seasons)
+        
+        logger.info("Extracting FTN charting data...")
+        ftn_raw = get_ftn_charting_data(seasons)
+        
         # -------------------------------------------------------------
         # STEP 2: TRANSFORMATION
         # -------------------------------------------------------------
@@ -75,6 +87,10 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         draft_df_clean = transform_draft_picks_data(draft_df_raw, seasons)
         players_df_clean = transform_players_data(players_df_raw, seasons)
         contracts_df_clean = transform_contracts_data(contracts_df_raw, seasons)
+        ngs_passing_clean = transform_standard_seasonal_data(ngs_passing_raw, seasons, "NGS Passing")
+        ngs_rushing_clean = transform_standard_seasonal_data(ngs_rushing_raw, seasons, "NGS Rushing")
+        ngs_receiving_clean = transform_standard_seasonal_data(ngs_receiving_raw, seasons, "NGS Receiving")
+        ftn_clean = transform_standard_seasonal_data(ftn_raw, seasons, "FTN Charting")
 
         # -------------------------------------------------------------
         # STEP 3: LOADING TO BIGQUERY
@@ -137,6 +153,12 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
             table_name="player_contracts",
             write_disposition=write_disposition
         )
+
+        # Load NGS and FTN datasets
+        load_df_to_partitioned_table(client=bq_client, df=ngs_passing_clean, dataset_id=dataset_id, table_name="ngs_passing", write_disposition=write_disposition)
+        load_df_to_partitioned_table(client=bq_client, df=ngs_rushing_clean, dataset_id=dataset_id, table_name="ngs_rushing", write_disposition=write_disposition)
+        load_df_to_partitioned_table(client=bq_client, df=ngs_receiving_clean, dataset_id=dataset_id, table_name="ngs_receiving", write_disposition=write_disposition)
+        load_df_to_partitioned_table(client=bq_client, df=ftn_clean, dataset_id=dataset_id, table_name="ftn_charting", write_disposition=write_disposition)
 
         logger.info("=" * 60)
         logger.info(f"NFL Data Pipeline finished successfully at {datetime.now()}!")

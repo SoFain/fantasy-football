@@ -169,3 +169,25 @@ def transform_contracts_data(df, seasons):
     final_df = pd.concat(replicated_dfs, ignore_index=True)
     logger.info(f"Contracts data replicated for seasons {seasons}. Rows: {len(final_df)}")
     return final_df
+
+def transform_standard_seasonal_data(df, seasons, dataset_name):
+    """
+    Transforms seasonal data (NGS and FTN):
+    - Cleans column names
+    - Filters to only the requested seasons
+    """
+    if df.empty:
+        return df
+        
+    logger.info(f"Transforming {dataset_name} data...")
+    df = clean_column_names(df)
+    
+    if 'season' in df.columns:
+        df = df.dropna(subset=['season'])
+        df['season'] = df['season'].astype('int64')
+        df = df[df['season'].isin(seasons)]
+    else:
+        raise ValueError(f"{dataset_name} missing season")
+        
+    logger.info(f"{dataset_name} Transformation complete. Rows: {len(df)}")
+    return df
