@@ -138,6 +138,151 @@ def get_warehouse_metrics():
         logging.getLogger("app.metrics").warning(f"Could not fetch warehouse metrics: {e}")
     return 0, 0.0
 
+def render_ai_cohost():
+    st.markdown("### 💬 AI Data Co-Host")
+    st.markdown("Chat with your conversational AI co-host! It will seamlessly use BigQuery to pull contextual tracking data before responding to your analytical questions.")
+
+    active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not active_gemini_key:
+        st.info("⚠️ Please enter a **Gemini API Key** in the sidebar to activate the AI Co-Host.")
+    else:
+        # Initialize session state for messages and chat session
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+        
+        import google.generativeai as genai
+        genai.configure(api_key=active_gemini_key)
+    
+        # Define the BigQuery tool
+        def execute_bigquery_sql(sql_query: str) -> str:
+            """Executes a BigQuery SQL query against the fantasy_football_brain dataset and returns a CSV string of the results."""
+            st.session_state.messages.append({
+                "role": "tool_status",
+                "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
+                "code": sql_query
+            })
+            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
+                st.code(sql_query, language="sql")
+                from google.cloud import bigquery
+                try:
+                    bq_client = bigquery.Client()
+                    query_job = bq_client.query(sql_query)
+                    df = query_job.result().to_dataframe()
+                    status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
+                    if df.empty:
+                        return "Query executed successfully, but returned 0 rows."
+                    return df.to_csv(index=False)
+                except Exception as e:
+                    status.update(label="❌ Query failed", state="error")
+                    return f"Error executing query: {str(e)}"
+                
+        # Define Co-Host System Prompt
+        system_prompt = f"""
+    You are an expert conversational AI Data Co-Host for a Fantasy Football dashboard. You are engaging, analytical, and ready for banter.
+    The active BigQuery project ID is '{os.environ.get("GCP_PROJECT", "fantasy-football-498121")}' and the dataset is 'fantasy_football_brain'.
+
+    Here is the database schema description:
+    - Table: `fantasy_football_brain.weekly_metrics` (also accessible as `historical_player_metrics`)
+      Columns:
+    - `season` (INT64) - The NFL season year (e.g. 2024).
+    - `week` (INT64) - The NFL week (e.g. 1 to 18).
+    - `player_name` (STRING) - The name of the player.
+    - `position` (STRING) - Player's position (e.g. 'QB', 'RB', 'WR', 'TE').
+    - `team` (STRING) - Team abbreviation (e.g. 'KC', 'BUF').
+    - `target_share` (FLOAT64) - Share of team targets.
+    - `epa_per_play` (FLOAT64) - Expected Points Added per play.
+    - `rushing_yards` (FLOAT64) - Rushing yards gained.
+    - `targets` (FLOAT64) - Number of pass targets.
+    - `receptions` (FLOAT64) - Number of pass catches.
+    - `fantasy_points` (FLOAT64) - Standard fantasy points.
+    - `fantasy_points_ppr` (FLOAT64) - PPR fantasy points.
+
+    - Table: `fantasy_football_brain.active_league_rosters`
+      Columns:
+    - `username` (STRING)
+    - `sleeper_id` (STRING)
+    - `player_name` (STRING)
+    - `position` (STRING)
+
+    - Table: `fantasy_football_brain.play_by_play`
+      Columns:
+    - `season` (INT64)
+    - `week` (INT64)
+    - `play_type` (STRING)
+    - `yards_gained` (FLOAT64)
+    - `epa` (FLOAT64)
+
+    - Table: `fantasy_football_brain.ngs_passing`
+      Columns: Includes NGS tracking passing metrics like avg_time_to_throw, avg_completed_air_yards, aggressiveness.
+    - Table: `fantasy_football_brain.ngs_rushing`
+      Columns: Includes NGS tracking rushing metrics like efficiency, percent_attempts_gte_eight_defenders, avg_time_to_los.
+    - Table: `fantasy_football_brain.ngs_receiving`
+      Columns: Includes NGS tracking receiving metrics like avg_cushion, avg_separation, avg_yac_above_expectation.
+    - Table: `fantasy_football_brain.ftn_charting`
+      Columns: Includes FTN premium charting play-by-play data like is_no_huddle, is_play_action, is_screen_pass, is_interception_worthy.
+    - Table: `fantasy_football_brain.weekly_snap_counts`
+      Columns: Includes weekly player snap metrics like offense_snaps, offense_pct, defense_pct, st_pct.
+    - Table: `fantasy_football_brain.injury_reports`
+      Columns: Includes weekly injury data like report_primary_injury, report_status, practice_status.
+
+    - Table: `fantasy_football_brain.team_descriptions`
+      Columns:
+    - `team_abbr` (STRING)
+    - `team_name` (STRING)
+
+    ### The Analytical Filter Protocol ###
+    You are mandated to follow a strict 3-step query expansion protocol when analyzing players:
+    Step 1 (Deconstruct): Map basic player mentions to 4 core vectors: Opportunity (Snap Counts), Underlying Efficiency (Next Gen Stats/Separation), Ecosystem (Line Contracts/Injuries), and Scheme (FTN Charting).
+    Step 2 (Mandatory Joins): You are PROHIBITED from querying 'weekly_metrics' in isolation. You must intrinsically craft SQL JOINS across 'weekly_snap_counts', 'ngs_receiving' (or rushing/passing), and 'ftn_charting' to establish underlying analytical context.
+    Step 3 (Contrast Output): Require the final natural language output to actively contrast surface-level box scores against advanced telemetry (e.g., "While the host noted Player X only had 40 yards, the tracking data reveals an elite 85% snap share and a league-leading 3.2 yards of separation against Cover 1..."). 
+
+    Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
+    """
+    
+        if "chat_session" not in st.session_state:
+            model = genai.GenerativeModel(
+                'gemini-3.5-flash',
+                tools=[execute_bigquery_sql],
+                system_instruction=system_prompt
+            )
+            st.session_state.chat_session = model.start_chat(enable_automatic_function_calling=True)
+        
+        # Display chat history
+        for msg in st.session_state.messages:
+            if msg["role"] == "tool_status":
+                with st.status(msg["status_msg"], state="complete"):
+                    st.code(msg["code"], language="sql")
+            else:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+                
+        # Chat input
+        if prompt := st.chat_input("Ask your co-host a question..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            with st.chat_message("assistant"):
+                message_placeholder = st.empty()
+                try:
+                    response = st.session_state.chat_session.send_message(prompt)
+                    message_placeholder.markdown(response.text)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    st.error(f"Error communicating with AI Co-Host: {e}")
+
+view_mode = st.query_params.get("view", "default")
+if view_mode == "broadcast":
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] {display: none !important;}
+            [data-testid="stHeader"] {display: none !important;}
+            .block-container {padding-top: 2rem !important; padding-bottom: 2rem !important;}
+        </style>
+    """, unsafe_allow_html=True)
+    render_ai_cohost()
+    st.stop()
+
 # --- SIDEBAR CONFIGURATION ---
 st.sidebar.image("https://img.icons8.com/color/96/american-football.png", width=80)
 st.sidebar.title("NFL Studio Setup")
@@ -309,134 +454,4 @@ with tab_validate:
 
 # --- TAB 3: AI DATA ASSISTANT ---
 with tab_ai:
-    st.markdown("### 💬 AI Data Co-Host")
-    st.markdown("Chat with your conversational AI co-host! It will seamlessly use BigQuery to pull contextual tracking data before responding to your analytical questions.")
-    
-    active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if not active_gemini_key:
-        st.info("⚠️ Please enter a **Gemini API Key** in the sidebar to activate the AI Co-Host.")
-    else:
-        # Initialize session state for messages and chat session
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-            
-        import google.generativeai as genai
-        genai.configure(api_key=active_gemini_key)
-        
-        # Define the BigQuery tool
-        def execute_bigquery_sql(sql_query: str) -> str:
-            """Executes a BigQuery SQL query against the fantasy_football_brain dataset and returns a CSV string of the results."""
-            st.session_state.messages.append({
-                "role": "tool_status",
-                "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
-                "code": sql_query
-            })
-            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
-                st.code(sql_query, language="sql")
-                from google.cloud import bigquery
-                try:
-                    bq_client = bigquery.Client()
-                    query_job = bq_client.query(sql_query)
-                    df = query_job.result().to_dataframe()
-                    status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
-                    if df.empty:
-                        return "Query executed successfully, but returned 0 rows."
-                    return df.to_csv(index=False)
-                except Exception as e:
-                    status.update(label="❌ Query failed", state="error")
-                    return f"Error executing query: {str(e)}"
-                    
-        # Define Co-Host System Prompt
-        system_prompt = f"""
-You are an expert conversational AI Data Co-Host for a Fantasy Football dashboard. You are engaging, analytical, and ready for banter.
-The active BigQuery project ID is '{os.environ.get("GCP_PROJECT", "fantasy-football-498121")}' and the dataset is 'fantasy_football_brain'.
-
-Here is the database schema description:
-- Table: `fantasy_football_brain.weekly_metrics` (also accessible as `historical_player_metrics`)
-  Columns:
-    - `season` (INT64) - The NFL season year (e.g. 2024).
-    - `week` (INT64) - The NFL week (e.g. 1 to 18).
-    - `player_name` (STRING) - The name of the player.
-    - `position` (STRING) - Player's position (e.g. 'QB', 'RB', 'WR', 'TE').
-    - `team` (STRING) - Team abbreviation (e.g. 'KC', 'BUF').
-    - `target_share` (FLOAT64) - Share of team targets.
-    - `epa_per_play` (FLOAT64) - Expected Points Added per play.
-    - `rushing_yards` (FLOAT64) - Rushing yards gained.
-    - `targets` (FLOAT64) - Number of pass targets.
-    - `receptions` (FLOAT64) - Number of pass catches.
-    - `fantasy_points` (FLOAT64) - Standard fantasy points.
-    - `fantasy_points_ppr` (FLOAT64) - PPR fantasy points.
-
-- Table: `fantasy_football_brain.active_league_rosters`
-  Columns:
-    - `username` (STRING)
-    - `sleeper_id` (STRING)
-    - `player_name` (STRING)
-    - `position` (STRING)
-    
-- Table: `fantasy_football_brain.play_by_play`
-  Columns:
-    - `season` (INT64)
-    - `week` (INT64)
-    - `play_type` (STRING)
-    - `yards_gained` (FLOAT64)
-    - `epa` (FLOAT64)
-
-- Table: `fantasy_football_brain.ngs_passing`
-  Columns: Includes NGS tracking passing metrics like avg_time_to_throw, avg_completed_air_yards, aggressiveness.
-- Table: `fantasy_football_brain.ngs_rushing`
-  Columns: Includes NGS tracking rushing metrics like efficiency, percent_attempts_gte_eight_defenders, avg_time_to_los.
-- Table: `fantasy_football_brain.ngs_receiving`
-  Columns: Includes NGS tracking receiving metrics like avg_cushion, avg_separation, avg_yac_above_expectation.
-- Table: `fantasy_football_brain.ftn_charting`
-  Columns: Includes FTN premium charting play-by-play data like is_no_huddle, is_play_action, is_screen_pass, is_interception_worthy.
-- Table: `fantasy_football_brain.weekly_snap_counts`
-  Columns: Includes weekly player snap metrics like offense_snaps, offense_pct, defense_pct, st_pct.
-- Table: `fantasy_football_brain.injury_reports`
-  Columns: Includes weekly injury data like report_primary_injury, report_status, practice_status.
-    
-- Table: `fantasy_football_brain.team_descriptions`
-  Columns:
-    - `team_abbr` (STRING)
-    - `team_name` (STRING)
-
-### The Analytical Filter Protocol ###
-You are mandated to follow a strict 3-step query expansion protocol when analyzing players:
-Step 1 (Deconstruct): Map basic player mentions to 4 core vectors: Opportunity (Snap Counts), Underlying Efficiency (Next Gen Stats/Separation), Ecosystem (Line Contracts/Injuries), and Scheme (FTN Charting).
-Step 2 (Mandatory Joins): You are PROHIBITED from querying 'weekly_metrics' in isolation. You must intrinsically craft SQL JOINS across 'weekly_snap_counts', 'ngs_receiving' (or rushing/passing), and 'ftn_charting' to establish underlying analytical context.
-Step 3 (Contrast Output): Require the final natural language output to actively contrast surface-level box scores against advanced telemetry (e.g., "While the host noted Player X only had 40 yards, the tracking data reveals an elite 85% snap share and a league-leading 3.2 yards of separation against Cover 1..."). 
-
-Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
-"""
-        
-        if "chat_session" not in st.session_state:
-            model = genai.GenerativeModel(
-                'gemini-3.5-flash',
-                tools=[execute_bigquery_sql],
-                system_instruction=system_prompt
-            )
-            st.session_state.chat_session = model.start_chat(enable_automatic_function_calling=True)
-            
-        # Display chat history
-        for msg in st.session_state.messages:
-            if msg["role"] == "tool_status":
-                with st.status(msg["status_msg"], state="complete"):
-                    st.code(msg["code"], language="sql")
-            else:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-                    
-        # Chat input
-        if prompt := st.chat_input("Ask your co-host a question..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-                
-            with st.chat_message("assistant"):
-                message_placeholder = st.empty()
-                try:
-                    response = st.session_state.chat_session.send_message(prompt)
-                    message_placeholder.markdown(response.text)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                except Exception as e:
-                    st.error(f"Error communicating with AI Co-Host: {e}")
+    render_ai_cohost()
