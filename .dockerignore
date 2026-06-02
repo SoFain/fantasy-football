@@ -1,0 +1,30 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python execution files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local caches and logs
+cache/
+*.parquet
+*.log
+pipeline_execution.log
+
+# Credentials and keys (Security block)
+*.json
+
+# PyInstaller compilation directories
+build/
+dist/
+*.spec
+
+# IDE configs and git folders
+.git/
+.gitignore
+.vscode/
+.idea/

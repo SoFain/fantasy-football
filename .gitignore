@@ -1,0 +1,17 @@
+# Cache data directory
+cache/
+*.parquet
+
+# Python environments & compilation
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# IDE configs
+.vscode/
+.idea/
+
+# Google Cloud credentials keys
+*.json
+!requirements.txt

@@ -1,0 +1,55 @@
+2026-06-01 20:52:53,212 [INFO] src.pipeline - ============================================================
+2026-06-01 20:52:53,212 [INFO] src.pipeline - Starting NFL Data Pipeline execution at 2026-06-01 20:52:53.212393
+2026-06-01 20:52:53,212 [INFO] src.pipeline - Target Seasons: [2025, 2026]
+2026-06-01 20:52:53,212 [INFO] src.pipeline - Write Disposition: WRITE_APPEND
+2026-06-01 20:52:53,212 [INFO] src.pipeline - Dataset Name: fantasy_football_brain
+2026-06-01 20:52:53,212 [INFO] src.pipeline - ============================================================
+2026-06-01 20:52:53,212 [INFO] src.pipeline - --- Starting Step 1: Extraction ---
+2026-06-01 20:52:53,212 [INFO] src.pipeline - Extracting play-by-play data for seasons [2025, 2026]...
+2026-06-01 20:52:53,213 [INFO] src.extract - Fetching play-by-play data for season 2025 from nflreadpy
+2026-06-01 20:52:54,306 [INFO] src.extract - Fetching play-by-play data for season 2026 from nflreadpy
+2026-06-01 20:52:54,306 [WARNING] src.extract - 🏈 Play-by-play data for season 2026 is not available (typically a future/unstarted season or invalid year). Skipping this season. Error details: Season must be between 1999 and 2025
+2026-06-01 20:52:54,306 [INFO] src.pipeline - Extracting weekly player metrics data for seasons [2025, 2026]...
+2026-06-01 20:52:54,306 [INFO] src.extract - Fetching weekly player metrics for season 2025 from nflreadpy
+2026-06-01 20:52:54,427 [INFO] src.extract - Fetching weekly player metrics for season 2026 from nflreadpy
+2026-06-01 20:52:54,592 [WARNING] src.extract - Transient network/HTTP error (status: None) calling load_player_stats. Retrying in 2 seconds (Attempt 1/5)... Error: Failed to download https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet: 404 Client Error: Not Found for url: https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet
+2026-06-01 20:52:56,771 [WARNING] src.extract - Transient network/HTTP error (status: None) calling load_player_stats. Retrying in 4 seconds (Attempt 2/5)... Error: Failed to download https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet: 404 Client Error: Not Found for url: https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet
+2026-06-01 20:53:00,956 [WARNING] src.extract - Transient network/HTTP error (status: None) calling load_player_stats. Retrying in 8 seconds (Attempt 3/5)... Error: Failed to download https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet: 404 Client Error: Not Found for url: https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet
+2026-06-01 20:53:09,161 [WARNING] src.extract - Transient network/HTTP error (status: None) calling load_player_stats. Retrying in 16 seconds (Attempt 4/5)... Error: Failed to download https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet: 404 Client Error: Not Found for url: https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet
+2026-06-01 20:54:26,792 [INFO] src.pipeline - ============================================================
+2026-06-01 20:54:26,792 [INFO] src.pipeline - Starting NFL Data Pipeline execution at 2026-06-01 20:54:26.792842
+2026-06-01 20:54:26,792 [INFO] src.pipeline - Target Seasons: [2025, 2026]
+2026-06-01 20:54:26,792 [INFO] src.pipeline - Write Disposition: WRITE_APPEND
+2026-06-01 20:54:26,792 [INFO] src.pipeline - Dataset Name: fantasy_football_brain
+2026-06-01 20:54:26,792 [INFO] src.pipeline - ============================================================
+2026-06-01 20:54:26,792 [INFO] src.pipeline - --- Starting Step 1: Extraction ---
+2026-06-01 20:54:26,793 [INFO] src.pipeline - Extracting play-by-play data for seasons [2025, 2026]...
+2026-06-01 20:54:26,793 [INFO] src.extract - Fetching play-by-play data for season 2025 from nflreadpy
+2026-06-01 20:54:27,838 [INFO] src.extract - Fetching play-by-play data for season 2026 from nflreadpy
+2026-06-01 20:54:27,838 [WARNING] src.extract - 🏈 Play-by-play data for season 2026 is not available (typically a future/unstarted season or invalid year). Skipping this season. Error details: Season must be between 1999 and 2025
+2026-06-01 20:54:27,838 [INFO] src.pipeline - Extracting weekly player metrics data for seasons [2025, 2026]...
+2026-06-01 20:54:27,839 [INFO] src.extract - Fetching weekly player metrics for season 2025 from nflreadpy
+2026-06-01 20:54:28,001 [INFO] src.extract - Fetching weekly player metrics for season 2026 from nflreadpy
+2026-06-01 20:54:28,197 [ERROR] src.extract - Non-retryable 404 HTTP error calling load_player_stats. Raising immediately.
+2026-06-01 20:54:28,197 [WARNING] src.extract - 🏈 Weekly metrics data for season 2026 is not available (typically a future/unstarted season or invalid year). Skipping this season. Error details: 404 Not Found
+2026-06-01 20:54:28,198 [INFO] src.pipeline - Extracting team descriptions...
+2026-06-01 20:54:28,198 [INFO] src.extract - Fetching team descriptions from nflreadpy
+2026-06-01 20:54:28,459 [INFO] src.pipeline - --- Starting Step 2: Transformation ---
+2026-06-01 20:54:28,459 [INFO] src.transform - Transforming Play-by-Play data...
+2026-06-01 20:54:28,536 [INFO] src.transform - PBP Transformation complete. Rows: 48771
+2026-06-01 20:54:28,536 [INFO] src.transform - Transforming Weekly player metrics data...
+2026-06-01 20:54:28,541 [INFO] src.transform - Weekly Transformation complete. Rows: 19421
+2026-06-01 20:54:28,541 [INFO] src.transform - Transforming Team Description data...
+2026-06-01 20:54:28,542 [INFO] src.transform - Team data replicated for seasons [2025, 2026]. Rows: 72
+2026-06-01 20:54:28,542 [INFO] src.pipeline - --- Starting Step 3: Loading ---
+2026-06-01 20:54:28,616 [INFO] src.load - Initialized BigQuery client with project: ahlh-493616
+2026-06-01 20:54:29,793 [INFO] src.load - Successfully created BigQuery Dataset 'ahlh-493616.fantasy_football_brain' in location US.
+2026-06-01 20:54:29,794 [INFO] src.load - Starting load job for 'ahlh-493616.fantasy_football_brain.play_by_play' with write disposition: WRITE_APPEND...
+2026-06-01 20:54:38,592 [INFO] src.load - Successfully loaded 48771 rows into partitioned table 'ahlh-493616.fantasy_football_brain.play_by_play'.
+2026-06-01 20:54:38,593 [INFO] src.load - Starting load job for 'ahlh-493616.fantasy_football_brain.weekly_metrics' with write disposition: WRITE_APPEND...
+2026-06-01 20:54:41,541 [INFO] src.load - Successfully loaded 19421 rows into partitioned table 'ahlh-493616.fantasy_football_brain.weekly_metrics'.
+2026-06-01 20:54:41,541 [INFO] src.load - Starting load job for 'ahlh-493616.fantasy_football_brain.team_descriptions' with write disposition: WRITE_APPEND...
+2026-06-01 20:54:44,312 [INFO] src.load - Successfully loaded 72 rows into partitioned table 'ahlh-493616.fantasy_football_brain.team_descriptions'.
+2026-06-01 20:54:44,312 [INFO] src.pipeline - ============================================================
+2026-06-01 20:54:44,312 [INFO] src.pipeline - NFL Data Pipeline finished successfully at 2026-06-01 20:54:44.312486!
+2026-06-01 20:54:44,312 [INFO] src.pipeline - ============================================================
