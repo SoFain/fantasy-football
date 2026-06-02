@@ -146,3 +146,39 @@ def get_team_data():
     except Exception as e:
         logger.error(f"Error fetching team data: {e}")
         return pd.DataFrame()
+
+def get_draft_picks_data():
+    """
+    Extracts NFL draft picks data.
+    """
+    logger.info("Fetching draft picks data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_draft_picks)
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching draft picks data: {e}")
+        return pd.DataFrame()
+
+def get_players_data():
+    """
+    Extracts NFL player roster data.
+    """
+    logger.info("Fetching players data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_players)
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching players data: {e}")
+        return pd.DataFrame()
+
+def get_contracts_data():
+    """
+    Extracts NFL player contracts data.
+    """
+    logger.info("Fetching contracts data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_contracts)
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching contracts data: {e}")
+        return pd.DataFrame()

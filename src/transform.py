@@ -103,3 +103,69 @@ def transform_team_data(df, seasons):
     final_df = pd.concat(replicated_dfs, ignore_index=True)
     logger.info(f"Team data replicated for seasons {seasons}. Rows: {len(final_df)}")
     return final_df
+
+def transform_draft_picks_data(df, seasons):
+    """
+    Transforms draft picks data:
+    - Cleans column names
+    - Filters to only the requested seasons
+    """
+    if df.empty:
+        return df
+        
+    logger.info("Transforming Draft Picks data...")
+    df = clean_column_names(df)
+    
+    if 'season' in df.columns:
+        df = df.dropna(subset=['season'])
+        df['season'] = df['season'].astype('int64')
+        df = df[df['season'].isin(seasons)]
+    else:
+        raise ValueError("Draft picks missing season")
+        
+    logger.info(f"Draft Picks Transformation complete. Rows: {len(df)}")
+    return df
+
+def transform_players_data(df, seasons):
+    """
+    Transforms players data:
+    - Cleans column names
+    - Replicates data for each season to enable partitioning by 'season'
+    """
+    if df.empty:
+        return df
+        
+    logger.info("Transforming Players data...")
+    df = clean_column_names(df)
+    
+    replicated_dfs = []
+    for season in seasons:
+        season_df = df.copy()
+        season_df['season'] = int(season)
+        replicated_dfs.append(season_df)
+        
+    final_df = pd.concat(replicated_dfs, ignore_index=True)
+    logger.info(f"Players data replicated for seasons {seasons}. Rows: {len(final_df)}")
+    return final_df
+
+def transform_contracts_data(df, seasons):
+    """
+    Transforms contracts data:
+    - Cleans column names
+    - Replicates data for each season to enable partitioning by 'season'
+    """
+    if df.empty:
+        return df
+        
+    logger.info("Transforming Contracts data...")
+    df = clean_column_names(df)
+    
+    replicated_dfs = []
+    for season in seasons:
+        season_df = df.copy()
+        season_df['season'] = int(season)
+        replicated_dfs.append(season_df)
+        
+    final_df = pd.concat(replicated_dfs, ignore_index=True)
+    logger.info(f"Contracts data replicated for seasons {seasons}. Rows: {len(final_df)}")
+    return final_df

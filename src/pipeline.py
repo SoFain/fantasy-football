@@ -3,8 +3,8 @@ import argparse
 import logging
 from datetime import datetime
 
-from src.extract import get_pbp_data, get_weekly_data, get_team_data
-from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data
+from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data
+from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data
 from src.load import get_bigquery_client, create_dataset_if_not_exists, load_df_to_partitioned_table
 
 def setup_logging():
@@ -55,6 +55,15 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         logger.info("Extracting team descriptions...")
         team_df_raw = get_team_data()
         
+        logger.info("Extracting draft picks data...")
+        draft_df_raw = get_draft_picks_data()
+        
+        logger.info("Extracting player roster data...")
+        players_df_raw = get_players_data()
+        
+        logger.info("Extracting player contract data...")
+        contracts_df_raw = get_contracts_data()
+        
         # -------------------------------------------------------------
         # STEP 2: TRANSFORMATION
         # -------------------------------------------------------------
@@ -63,6 +72,9 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         pbp_df_clean = transform_pbp_data(pbp_df_raw)
         weekly_df_clean = transform_weekly_data(weekly_df_raw)
         team_df_clean = transform_team_data(team_df_raw, seasons)
+        draft_df_clean = transform_draft_picks_data(draft_df_raw, seasons)
+        players_df_clean = transform_players_data(players_df_raw, seasons)
+        contracts_df_clean = transform_contracts_data(contracts_df_raw, seasons)
 
         # -------------------------------------------------------------
         # STEP 3: LOADING TO BIGQUERY
@@ -96,6 +108,33 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
             df=team_df_clean,
             dataset_id=dataset_id,
             table_name="team_descriptions",
+            write_disposition=write_disposition
+        )
+
+        # Load draft picks
+        load_df_to_partitioned_table(
+            client=bq_client,
+            df=draft_df_clean,
+            dataset_id=dataset_id,
+            table_name="draft_picks",
+            write_disposition=write_disposition
+        )
+
+        # Load player rosters
+        load_df_to_partitioned_table(
+            client=bq_client,
+            df=players_df_clean,
+            dataset_id=dataset_id,
+            table_name="player_rosters",
+            write_disposition=write_disposition
+        )
+
+        # Load player contracts
+        load_df_to_partitioned_table(
+            client=bq_client,
+            df=contracts_df_clean,
+            dataset_id=dataset_id,
+            table_name="player_contracts",
             write_disposition=write_disposition
         )
 

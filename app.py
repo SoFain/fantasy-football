@@ -248,6 +248,7 @@ def run_subprocess_live(args, custom_env=None):
         
         if return_code == 0:
             status_area.success("✔ Subprocess completed successfully!")
+            st.rerun()
         else:
             status_area.error(f"❌ Subprocess failed with exit code: {return_code}")
             
