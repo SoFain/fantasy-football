@@ -155,33 +155,27 @@ def render_ai_cohost():
     
         # Define the BigQuery tool
         def execute_bigquery_sql(sql_query: str) -> str:
-            """Executes a BigQuery SQL query against the fantasy_football_brain dataset and returns a CSV string of the results."""
-            st.session_state.messages.append({
-                "role": "tool_status",
-                "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
-                "code": sql_query
-            })
-            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
-                st.code(sql_query, language="sql")
-                from google.cloud import bigquery
-                try:
-                    bq_client = bigquery.Client()
-                    query_job = bq_client.query(sql_query)
-                    df = query_job.result().to_dataframe()
-                    status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
-                    if df.empty:
-                        return "Query executed successfully, but returned 0 rows."
-                    return df.to_csv(index=False)
-                except Exception as e:
-                    status.update(label="❌ Query failed", state="error")
-                    return f"Error executing query: {str(e)}"
-                
+            """Executes a BigQuery SQL query against the fantasy_football_brain dataset.
+            
+            MANDATORY CONSTRAINTS:
+            1. You must use a `LIMIT 50` on every query.
+            2. Do NOT use `SELECT *`. You must explicitly select the columns you need.
+            3. You must filter by partitioning keys (`season` and `week`) whenever possible.
+            """
+            pass # We will execute this manually
+            
         # Define Co-Host System Prompt
         system_prompt = f"""
     You are an expert conversational AI Data Co-Host for a Fantasy Football dashboard. You are engaging, analytical, and ready for banter.
     The active BigQuery project ID is '{os.environ.get("GCP_PROJECT", "fantasy-football-498121")}' and the dataset is 'fantasy_football_brain'.
 
     Here is the database schema description:
+    
+    - Table: `fantasy_football_brain.analytics_player_weekly_summary` (PRIMARY TABLE)
+      Description: Pre-aggregated summary containing Snaps, Targets, EPA, Routes, and Tracking metrics.
+      Columns: `season`, `week`, `player_name`, `position`, `team`, `targets`, `receptions`, `rushing_yards`, `fantasy_points_ppr`, `offense_snaps`, `offense_pct`, `epa_per_play`, `report_status`, plus dominant tracking metrics (e.g. `avg_separation`).
+      *PRIORITIZE THIS TABLE for almost all queries.*
+      
     - Table: `fantasy_football_brain.weekly_metrics` (also accessible as `historical_player_metrics`)
       Columns:
     - `season` (INT64) - The NFL season year (e.g. 2024).
@@ -203,7 +197,7 @@ def render_ai_cohost():
     - `sleeper_id` (STRING)
     - `player_name` (STRING)
     - `position` (STRING)
-
+    
     - Table: `fantasy_football_brain.play_by_play`
       Columns:
     - `season` (INT64)
@@ -224,18 +218,15 @@ def render_ai_cohost():
       Columns: Includes weekly player snap metrics like offense_snaps, offense_pct, defense_pct, st_pct.
     - Table: `fantasy_football_brain.injury_reports`
       Columns: Includes weekly injury data like report_primary_injury, report_status, practice_status.
-
+    
     - Table: `fantasy_football_brain.team_descriptions`
       Columns:
     - `team_abbr` (STRING)
     - `team_name` (STRING)
 
     ### The Analytical Filter Protocol ###
-    You are mandated to follow a strict 3-step query expansion protocol when analyzing players:
-    Step 1 (Deconstruct): Map basic player mentions to 4 core vectors: Opportunity (Snap Counts), Underlying Efficiency (Next Gen Stats/Separation), Ecosystem (Line Contracts/Injuries), and Scheme (FTN Charting).
-    Step 2 (Mandatory Joins): You are PROHIBITED from querying 'weekly_metrics' in isolation. You must intrinsically craft SQL JOINS across 'weekly_snap_counts', 'ngs_receiving' (or rushing/passing), and 'ftn_charting' to establish underlying analytical context.
-    Step 3 (Contrast Output): Require the final natural language output to actively contrast surface-level box scores against advanced telemetry (e.g., "While the host noted Player X only had 40 yards, the tracking data reveals an elite 85% snap share and a league-leading 3.2 yards of separation against Cover 1..."). 
-
+    You are mandated to follow a strict query protocol when analyzing players.
+    You MUST default to using the `analytics_player_weekly_summary` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
     """
     
@@ -245,7 +236,8 @@ def render_ai_cohost():
                 tools=[execute_bigquery_sql],
                 system_instruction=system_prompt
             )
-            st.session_state.chat_session = model.start_chat(enable_automatic_function_calling=True)
+            # Disable automatic function calling so we can stream!
+            st.session_state.chat_session = model.start_chat(enable_automatic_function_calling=False)
         
         # Display chat history
         for msg in st.session_state.messages:
@@ -263,11 +255,62 @@ def render_ai_cohost():
                 st.markdown(prompt)
             
             with st.chat_message("assistant"):
-                message_placeholder = st.empty()
                 try:
-                    response = st.session_state.chat_session.send_message(prompt)
-                    message_placeholder.markdown(response.text)
+                    # Initial request (might be a tool call)
+                    response = st.session_state.chat_session.send_message(prompt, stream=False)
+                    
+                    # Manual tool calling loop
+                    while response.function_call:
+                        fc = response.function_call
+                        if fc.name == "execute_bigquery_sql":
+                            sql_to_run = type(fc).to_dict(fc)["args"]["sql_query"]
+                            
+                            st.session_state.messages.append({
+                                "role": "tool_status",
+                                "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
+                                "code": sql_to_run
+                            })
+                            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
+                                st.code(sql_to_run, language="sql")
+                                from google.cloud import bigquery
+                                try:
+                                    bq_client = bigquery.Client()
+                                    query_job = bq_client.query(sql_to_run)
+                                    df = query_job.result().to_dataframe()
+                                    status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
+                                    result_str = df.to_csv(index=False) if not df.empty else "0 rows returned."
+                                except Exception as e:
+                                    status.update(label="❌ Query failed", state="error")
+                                    result_str = f"Error: {str(e)}"
+                            
+                            import google.ai.generativelanguage as glm
+                            tool_response = glm.Part(
+                                function_response=glm.FunctionResponse(
+                                    name="execute_bigquery_sql",
+                                    response={"result": result_str}
+                                )
+                            )
+                            # Get next response (could be another tool, or text)
+                            response = st.session_state.chat_session.send_message(tool_response, stream=False)
+                        else:
+                            break
+                            
+                    # Final text response stream
+                    def stream_generator(resp):
+                        # if the final response is already a full object (since we used stream=False to check for function_call)
+                        # We cannot magically re-request it with stream=True easily without duplicating the prompt.
+                        # Wait! We can just split the response.text to simulate streaming, OR we can execute the LAST send_message with stream=True!
+                        # Since we already ran it with stream=False, it's not a generator.
+                        # To simulate the stream visually:
+                        import time
+                        words = resp.text.split(" ")
+                        for word in words:
+                            yield word + " "
+                            time.sleep(0.01)
+
+                    st.write_stream(stream_generator(response))
                     st.session_state.messages.append({"role": "assistant", "content": response.text})
+                    
                 except Exception as e:
                     st.error(f"Error communicating with AI Co-Host: {e}")
 
