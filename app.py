@@ -442,7 +442,9 @@ def run_subprocess_live(args, custom_env=None):
         return_code = process.wait()
         
         if return_code == 0:
-            status_area.success("✔ Subprocess completed successfully!")
+            status_area.success("✔ Subprocess completed successfully! Refreshing dashboard in 3 seconds to update sidebar stats...")
+            import time
+            time.sleep(3)
             st.rerun()
         else:
             status_area.error(f"❌ Subprocess failed with exit code: {return_code}")
