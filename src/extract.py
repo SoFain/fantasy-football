@@ -230,3 +230,27 @@ def get_ftn_charting_data(seasons):
     except Exception as e:
         logger.error(f"Error fetching FTN charting data: {e}")
         return pd.DataFrame()
+
+def get_snap_counts_data(seasons):
+    """
+    Extracts NFL weekly snap counts data.
+    """
+    logger.info("Fetching snap counts data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_snap_counts, seasons)
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching snap counts data: {e}")
+        return pd.DataFrame()
+
+def get_injury_reports_data(seasons):
+    """
+    Extracts NFL weekly injury reports data.
+    """
+    logger.info("Fetching injury reports data from nflreadpy")
+    try:
+        df = execute_with_backoff(nfl.load_injuries, seasons)
+        return df.to_pandas()
+    except Exception as e:
+        logger.error(f"Error fetching injury reports data: {e}")
+        return pd.DataFrame()

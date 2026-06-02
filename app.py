@@ -380,6 +380,10 @@ Here is the database schema description:
   Columns: Includes NGS tracking receiving metrics like avg_cushion, avg_separation, avg_yac_above_expectation.
 - Table: `fantasy_football_brain.ftn_charting`
   Columns: Includes FTN premium charting play-by-play data like is_no_huddle, is_play_action, is_screen_pass, is_interception_worthy.
+- Table: `fantasy_football_brain.weekly_snap_counts`
+  Columns: Includes weekly player snap metrics like offense_snaps, offense_pct, defense_pct, st_pct.
+- Table: `fantasy_football_brain.injury_reports`
+  Columns: Includes weekly injury data like report_primary_injury, report_status, practice_status.
     
 - Table: `fantasy_football_brain.team_descriptions`
   Columns:

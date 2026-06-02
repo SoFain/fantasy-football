@@ -3,7 +3,7 @@ import argparse
 import logging
 from datetime import datetime
 
-from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data, get_ngs_passing_data, get_ngs_rushing_data, get_ngs_receiving_data, get_ftn_charting_data
+from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data, get_ngs_passing_data, get_ngs_rushing_data, get_ngs_receiving_data, get_ftn_charting_data, get_snap_counts_data, get_injury_reports_data
 from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data, transform_standard_seasonal_data
 from src.load import get_bigquery_client, create_dataset_if_not_exists, load_df_to_partitioned_table
 
@@ -76,6 +76,12 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         logger.info("Extracting FTN charting data...")
         ftn_raw = get_ftn_charting_data(seasons)
         
+        logger.info("Extracting snap counts data...")
+        snap_counts_raw = get_snap_counts_data(seasons)
+        
+        logger.info("Extracting injury reports data...")
+        injury_reports_raw = get_injury_reports_data(seasons)
+        
         # -------------------------------------------------------------
         # STEP 2: TRANSFORMATION
         # -------------------------------------------------------------
@@ -91,6 +97,8 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         ngs_rushing_clean = transform_standard_seasonal_data(ngs_rushing_raw, seasons, "NGS Rushing")
         ngs_receiving_clean = transform_standard_seasonal_data(ngs_receiving_raw, seasons, "NGS Receiving")
         ftn_clean = transform_standard_seasonal_data(ftn_raw, seasons, "FTN Charting")
+        snap_counts_clean = transform_standard_seasonal_data(snap_counts_raw, seasons, "Snap Counts")
+        injury_reports_clean = transform_standard_seasonal_data(injury_reports_raw, seasons, "Injury Reports")
 
         # -------------------------------------------------------------
         # STEP 3: LOADING TO BIGQUERY
@@ -159,6 +167,10 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         load_df_to_partitioned_table(client=bq_client, df=ngs_rushing_clean, dataset_id=dataset_id, table_name="ngs_rushing", write_disposition=write_disposition)
         load_df_to_partitioned_table(client=bq_client, df=ngs_receiving_clean, dataset_id=dataset_id, table_name="ngs_receiving", write_disposition=write_disposition)
         load_df_to_partitioned_table(client=bq_client, df=ftn_clean, dataset_id=dataset_id, table_name="ftn_charting", write_disposition=write_disposition)
+        
+        # Load snap counts and injury reports
+        load_df_to_partitioned_table(client=bq_client, df=snap_counts_clean, dataset_id=dataset_id, table_name="weekly_snap_counts", write_disposition=write_disposition)
+        load_df_to_partitioned_table(client=bq_client, df=injury_reports_clean, dataset_id=dataset_id, table_name="injury_reports", write_disposition=write_disposition)
 
         logger.info("=" * 60)
         logger.info(f"NFL Data Pipeline finished successfully at {datetime.now()}!")
