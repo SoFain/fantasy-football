@@ -167,17 +167,16 @@ else:
     st.sidebar.info("Using Application Default Credentials (ADC) or Metadata Server role.")
 
 # Gemini API key for AI assistant
-gemini_key_input = st.sidebar.text_input(
-    "Gemini API Key",
-    value=os.environ.get("GEMINI_API_KEY", ""),
-    type="password",
-    placeholder="e.g. AIzaSy...",
-    help="Google AI Studio Gemini API Key for the data assistant."
-)
-if gemini_key_input:
-    os.environ["GEMINI_API_KEY"] = gemini_key_input
-else:
-    os.environ.pop("GEMINI_API_KEY", None)
+gemini_api_key = os.environ.get("GEMINI_API_KEY")
+if not gemini_api_key:
+    gemini_key_input = st.sidebar.text_input(
+        "Gemini API Key",
+        type="password",
+        placeholder="e.g. AIzaSy...",
+        help="Google AI Studio Gemini API Key for the data assistant."
+    )
+    if gemini_key_input:
+        os.environ["GEMINI_API_KEY"] = gemini_key_input
 
 # Warehouse Metrics in Sidebar
 st.sidebar.markdown("---")
