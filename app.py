@@ -309,36 +309,46 @@ with tab_validate:
 
 # --- TAB 3: AI DATA ASSISTANT ---
 with tab_ai:
-    st.markdown("### 💬 Natural Language Data Assistant")
-    st.markdown(
-        "Ask questions about your league's statistics, rosters, or team data in plain English. "
-        "Gemini will generate and execute the BigQuery SQL query to retrieve the results."
-    )
+    st.markdown("### 💬 AI Data Co-Host")
+    st.markdown("Chat with your conversational AI co-host! It will seamlessly use BigQuery to pull contextual tracking data before responding to your analytical questions.")
     
-    # Check for API key
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    
     if not active_gemini_key:
-        st.info("⚠️ Please enter a **Gemini API Key** in the sidebar to activate the AI Assistant.")
+        st.info("⚠️ Please enter a **Gemini API Key** in the sidebar to activate the AI Co-Host.")
     else:
-        user_query = st.text_input(
-            "What would you like to know about the league data?",
-            placeholder="e.g. Show me the top 5 players by epa_per_play in 2024 with more than 50 targets."
-        )
+        # Initialize session state for messages and chat session
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+            
+        import google.generativeai as genai
+        genai.configure(api_key=active_gemini_key)
         
-        if st.button("🔍 Ask Assistant", type="primary"):
-            if not user_query.strip():
-                 st.error("Please enter a question.")
-            else:
-                 with st.spinner("Gemini is analyzing schemas and generating query..."):
-                     import google.generativeai as genai
-                     
-                     # Configure model
-                     genai.configure(api_key=active_gemini_key)
-                     
-                     # System prompt outlining the database schema
-                     system_prompt = f"""
-You are an expert Google BigQuery SQL developer analyzing fantasy football data.
+        # Define the BigQuery tool
+        def execute_bigquery_sql(sql_query: str) -> str:
+            """Executes a BigQuery SQL query against the fantasy_football_brain dataset and returns a CSV string of the results."""
+            st.session_state.messages.append({
+                "role": "tool_status",
+                "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
+                "code": sql_query
+            })
+            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
+                st.code(sql_query, language="sql")
+                from google.cloud import bigquery
+                try:
+                    bq_client = bigquery.Client()
+                    query_job = bq_client.query(sql_query)
+                    df = query_job.result().to_dataframe()
+                    status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
+                    if df.empty:
+                        return "Query executed successfully, but returned 0 rows."
+                    return df.to_csv(index=False)
+                except Exception as e:
+                    status.update(label="❌ Query failed", state="error")
+                    return f"Error executing query: {str(e)}"
+                    
+        # Define Co-Host System Prompt
+        system_prompt = f"""
+You are an expert conversational AI Data Co-Host for a Fantasy Football dashboard. You are engaging, analytical, and ready for banter.
 The active BigQuery project ID is '{os.environ.get("GCP_PROJECT", "fantasy-football-498121")}' and the dataset is 'fantasy_football_brain'.
 
 Here is the database schema description:
@@ -357,18 +367,18 @@ Here is the database schema description:
     - `fantasy_points` (FLOAT64) - Standard fantasy points.
     - `fantasy_points_ppr` (FLOAT64) - PPR fantasy points.
 
-- Table: `fantasy_football_brain.active_league_rosters` (also accessible as `active_league_rosters`)
+- Table: `fantasy_football_brain.active_league_rosters`
   Columns:
-    - `username` (STRING) - The Sleeper league manager's username.
-    - `sleeper_id` (STRING) - The Sleeper ID of the player.
-    - `player_name` (STRING) - The name of the player.
-    - `position` (STRING) - Player's position.
+    - `username` (STRING)
+    - `sleeper_id` (STRING)
+    - `player_name` (STRING)
+    - `position` (STRING)
     
 - Table: `fantasy_football_brain.play_by_play`
   Columns:
     - `season` (INT64)
     - `week` (INT64)
-    - `play_type` (STRING) - e.g. 'pass', 'run'
+    - `play_type` (STRING)
     - `yards_gained` (FLOAT64)
     - `epa` (FLOAT64)
 
@@ -391,68 +401,42 @@ Here is the database schema description:
     - `team_name` (STRING)
 
 ### The Analytical Filter Protocol ###
-You are mandated to follow a strict 3-step query expansion protocol:
+You are mandated to follow a strict 3-step query expansion protocol when analyzing players:
 Step 1 (Deconstruct): Map basic player mentions to 4 core vectors: Opportunity (Snap Counts), Underlying Efficiency (Next Gen Stats/Separation), Ecosystem (Line Contracts/Injuries), and Scheme (FTN Charting).
 Step 2 (Mandatory Joins): You are PROHIBITED from querying 'weekly_metrics' in isolation. You must intrinsically craft SQL JOINS across 'weekly_snap_counts', 'ngs_receiving' (or rushing/passing), and 'ftn_charting' to establish underlying analytical context.
-Step 3 (Contrast Output): (Handled in the next pipeline stage).
+Step 3 (Contrast Output): Require the final natural language output to actively contrast surface-level box scores against advanced telemetry (e.g., "While the host noted Player X only had 40 yards, the tracking data reveals an elite 85% snap share and a league-leading 3.2 yards of separation against Cover 1..."). 
 
-Strict Constraint for SQL Generation: You must output ONLY the raw, executable BigQuery SQL query string. 
-- Do NOT wrap your query in markdown syntax (do NOT use ```sql or ```).
-- Do NOT include any explanations, introduction, or prose.
-- Start the response directly with the SELECT keyword.
-- Always reference tables with their fully-qualified name: `fantasy_football_brain.table_name`.
-
-User Question: {user_query}
+Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
 """
-                     try:
-                         # Generate SQL query
-                         model = genai.GenerativeModel('gemini-3.5-flash')
-                         response = model.generate_content(system_prompt)
-                         sql_query = response.text.strip()
-                         
-                         # Defensive cleanup
-                         if sql_query.startswith("```"):
-                             lines = sql_query.splitlines()
-                             if lines[0].startswith("```"): lines = lines[1:]
-                             if lines[-1].startswith("```"): lines = lines[:-1]
-                             sql_query = "\n".join(lines).strip()
-                         if sql_query.lower().startswith("sql\n") or sql_query.lower().startswith("sql "):
-                             sql_query = sql_query[3:].strip()
-                             
-                         st.info("🤖 SQL Query Generated via Analytical Filter (Steps 1 & 2)")
-                         
-                         # Execute SQL query on BigQuery
-                         from google.cloud import bigquery
-                         bq_client = bigquery.Client()
-                         query_job = bq_client.query(sql_query)
-                         df_result = query_job.result().to_dataframe()
-                         
-                         st.success(f"✔ Query executed successfully! Retrieved {len(df_result)} contextual rows.")
-                         
-                         # Step 3: Contrast Output Generation
-                         with st.spinner("Step 3: Actively contrasting surface-level stats against advanced telemetry..."):
-                             analysis_prompt = f"""
-You are an elite fantasy football data analyst.
-The user asked: "{user_query}"
-
-We have extracted the advanced data using a strict multi-vector JOIN across raw metrics, snap counts, injuries, and Next Gen Stats. 
-Here is the resulting data:
-{df_result.to_csv(index=False)}
-
-Step 3 (Contrast Output): 
-Require the final natural language output to actively contrast surface-level box scores against advanced telemetry (e.g., "While the host noted Player X only had 40 yards, the tracking data reveals an elite 85% snap share and a league-leading 3.2 yards of separation against Cover 1..."). 
-Synthesize the data into a compelling, expert-tier analytical response. Do not output SQL.
-"""
-                             analysis_response = model.generate_content(analysis_prompt)
-                             st.markdown("### 🏈 Assistant Analysis")
-                             st.markdown(analysis_response.text)
-                             
-                         with st.expander("📊 View Raw Data & SQL"):
-                             st.dataframe(df_result, use_container_width=True)
-                             st.code(sql_query, language="sql")
-                             
-                     except Exception as e:
-                         st.error(f"❌ Error during AI protocol execution: {e}")
-                         if 'sql_query' in locals():
-                             with st.expander("📝 Show Attempted SQL Code"):
-                                 st.code(sql_query, language="sql")
+        
+        if "chat_session" not in st.session_state:
+            model = genai.GenerativeModel(
+                'gemini-3.5-flash',
+                tools=[execute_bigquery_sql],
+                system_instruction=system_prompt
+            )
+            st.session_state.chat_session = model.start_chat(enable_automatic_function_calling=True)
+            
+        # Display chat history
+        for msg in st.session_state.messages:
+            if msg["role"] == "tool_status":
+                with st.status(msg["status_msg"], state="complete"):
+                    st.code(msg["code"], language="sql")
+            else:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+                    
+        # Chat input
+        if prompt := st.chat_input("Ask your co-host a question..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+                
+            with st.chat_message("assistant"):
+                message_placeholder = st.empty()
+                try:
+                    response = st.session_state.chat_session.send_message(prompt)
+                    message_placeholder.markdown(response.text)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    st.error(f"Error communicating with AI Co-Host: {e}")
