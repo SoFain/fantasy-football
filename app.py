@@ -138,6 +138,14 @@ def get_warehouse_metrics():
         logging.getLogger("app.metrics").warning(f"Could not fetch warehouse metrics: {e}")
     return 0, 0.0
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def execute_bq_cached(sql_query: str):
+    from google.cloud import bigquery
+    bq_client = bigquery.Client()
+    query_job = bq_client.query(sql_query)
+    df = query_job.result().to_dataframe()
+    return df
+
 def render_ai_cohost():
     st.markdown("### 💬 AI Data Co-Host")
     st.markdown("Chat with your conversational AI co-host! It will seamlessly use BigQuery to pull contextual tracking data before responding to your analytical questions.")
@@ -208,6 +216,10 @@ def render_ai_cohost():
 
     - Table: `fantasy_football_brain.ngs_passing`
       Columns: Includes NGS tracking passing metrics like avg_time_to_throw, avg_completed_air_yards, aggressiveness.
+      
+    - Table: `fantasy_football_brain.realtime_player_news`
+      Columns: `player_id` (STRING), `gsis_id` (STRING), `player_name` (STRING), `position` (STRING), `team` (STRING), `trend_type` (STRING, 'ADD' or 'DROP'), `trend_count` (INT64).
+      Description: Real-time trending Sleeper data for tracking recent add/drop volume.
     - Table: `fantasy_football_brain.ngs_rushing`
       Columns: Includes NGS tracking rushing metrics like efficiency, percent_attempts_gte_eight_defenders, avg_time_to_los.
     - Table: `fantasy_football_brain.ngs_receiving`
@@ -278,11 +290,8 @@ def render_ai_cohost():
                             })
                             with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
                                 st.code(sql_to_run, language="sql")
-                                from google.cloud import bigquery
                                 try:
-                                    bq_client = bigquery.Client()
-                                    query_job = bq_client.query(sql_to_run)
-                                    df = query_job.result().to_dataframe()
+                                    df = execute_bq_cached(sql_to_run)
                                     status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
                                     result_str = df.to_csv(index=False) if not df.empty else "0 rows returned."
                                 except Exception as e:
@@ -488,6 +497,15 @@ with tab_ingest:
                 exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
 
             run_subprocess_live(cmd_args, custom_env=exec_env)
+
+    if st.button("🚀 Ingest Realtime Player News", type="secondary"):
+        cmd_args = ["-m", "src.ingest_news"]
+        
+        exec_env = {}
+        if gcp_key_path:
+            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+        run_subprocess_live(cmd_args, custom_env=exec_env)
 
 # --- TAB 2: VERIFICATION ---
 with tab_validate:

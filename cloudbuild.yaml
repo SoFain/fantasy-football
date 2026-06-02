@@ -1,0 +1,7 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/fantasy-football-498121/nfl-dashboard', '--no-cache', '--build-arg', 'COMMIT_HASH=${_COMMIT_HASH}', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/fantasy-football-498121/nfl-dashboard']
+images:
+- 'gcr.io/fantasy-football-498121/nfl-dashboard'
