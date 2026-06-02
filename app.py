@@ -259,9 +259,15 @@ def render_ai_cohost():
                     # Initial request (might be a tool call)
                     response = st.session_state.chat_session.send_message(prompt, stream=False)
                     
+                    def get_fc(resp):
+                        try:
+                            return resp.parts[0].function_call
+                        except (AttributeError, IndexError):
+                            return None
+
                     # Manual tool calling loop
-                    while response.function_call:
-                        fc = response.function_call
+                    fc = get_fc(response)
+                    while fc:
                         if fc.name == "execute_bigquery_sql":
                             sql_to_run = type(fc).to_dict(fc)["args"]["sql_query"]
                             
@@ -292,6 +298,7 @@ def render_ai_cohost():
                             )
                             # Get next response (could be another tool, or text)
                             response = st.session_state.chat_session.send_message(tool_response, stream=False)
+                            fc = get_fc(response)
                         else:
                             break
                             
