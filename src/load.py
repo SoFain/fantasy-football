@@ -1,8 +1,19 @@
 import logging
+import os
 from google.cloud import bigquery
 from google.api_core.exceptions import GoogleAPIError, Conflict
 
 logger = logging.getLogger(__name__)
+DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
+
+
+def get_bigquery_project():
+    return (
+        os.environ.get("BQ_PROJECT")
+        or os.environ.get("GCP_PROJECT")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or DEFAULT_BIGQUERY_PROJECT
+    )
 
 def get_bigquery_client():
     """
@@ -10,7 +21,7 @@ def get_bigquery_client():
     Uses default credentials from the environment.
     """
     try:
-        client = bigquery.Client()
+        client = bigquery.Client(project=get_bigquery_project())
         logger.info(f"Initialized BigQuery client with project: {client.project}")
         return client
     except Exception as e:

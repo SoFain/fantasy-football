@@ -3,6 +3,15 @@ import sys
 import subprocess
 import streamlit as st
 
+DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
+BIGQUERY_PROJECT_ID = (
+    os.environ.get("BQ_PROJECT")
+    or os.environ.get("GCP_PROJECT")
+    or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    or DEFAULT_BIGQUERY_PROJECT
+)
+os.environ.setdefault("BQ_PROJECT", BIGQUERY_PROJECT_ID)
+
 # Set Streamlit Page Configuration
 st.set_page_config(
     page_title="NFL Data Studio",
@@ -112,27 +121,21 @@ def get_python_executable():
     return "python"
 
 def get_warehouse_metrics():
-    """Queries BigQuery INFORMATION_SCHEMA for active tables and total data size in MB."""
+    """Fetches BigQuery table count and logical size from table metadata."""
     try:
         from google.cloud import bigquery
-        client = bigquery.Client()
-        project_id = client.project
+        client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
         dataset_id = "fantasy_football_brain"
-        
-        query = f"""
-            SELECT 
-                COUNT(*) as active_tables,
-                SUM(total_logical_bytes) / (1024 * 1024) as total_size_mb
-            FROM `{project_id}.{dataset_id}.INFORMATION_SCHEMA.TABLE_STORAGE`
-        """
-        job = client.query(query)
-        result = list(job.result())
-        
-        if result and len(result) > 0:
-            row = result[0]
-            tables = row.active_tables if row.active_tables else 0
-            size_mb = row.total_size_mb if row.total_size_mb else 0.0
-            return tables, size_mb
+        dataset_ref = f"{client.project}.{dataset_id}"
+
+        active_tables = 0
+        total_bytes = 0
+        for table_item in client.list_tables(dataset_ref):
+            active_tables += 1
+            table = client.get_table(table_item.reference)
+            total_bytes += table.num_bytes or 0
+
+        return active_tables, total_bytes / (1024 * 1024)
     except Exception as e:
         import logging
         logging.getLogger("app.metrics").warning(f"Could not fetch warehouse metrics: {e}")
@@ -141,14 +144,14 @@ def get_warehouse_metrics():
 @st.cache_data(ttl=3600, show_spinner=False)
 def execute_bq_cached(sql_query: str):
     from google.cloud import bigquery
-    bq_client = bigquery.Client()
+    bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
     query_job = bq_client.query(sql_query)
     df = query_job.result().to_dataframe()
     return df
 
 def render_ai_cohost():
-    st.markdown("### 💬 AI Data Co-Host")
-    st.markdown("Chat with your conversational AI co-host! It will seamlessly use BigQuery to pull contextual tracking data before responding to your analytical questions.")
+    st.markdown("### 💬 Pigskin")
+    st.markdown("Chat with Pigskin, the AI vs Vibes co-host built to roast bad process and back it up with data.")
 
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not active_gemini_key:
@@ -172,17 +175,43 @@ def render_ai_cohost():
             """
             pass # We will execute this manually
             
+        active_project_id = BIGQUERY_PROJECT_ID
+
         # Define Co-Host System Prompt
         system_prompt = f"""
-    You are an expert conversational AI Data Co-Host for a Fantasy Football dashboard. You are engaging, analytical, and ready for banter.
-    The active BigQuery project ID is '{os.environ.get("GCP_PROJECT", "fantasy-football-498121")}' and the dataset is 'fantasy_football_brain'.
+    You are Pigskin, the analytical co-host for AI vs Vibes, a fantasy football show built around evidence beating narrative.
+    Your job is to be the thinking machine in the room: ruthless about bad calls, allergic to lazy narratives, and impossible to impress without evidence.
+    Be direct, skeptical, funny, and sharp. Ground every criticism in data.
+    Separate points from process, punish touchdown chasing, punish stale rankings, and explain what would change your mind.
+
+    ### Pigskin Voice Contract ###
+    You are not a polite default assistant. You have a snarky, modern, football-sick personality.
+    When a take is bad, say it is bad. If the data says a player is a trap, say the market is getting cooked. If a roster build is fragile, call it fragile.
+    When praising a player, team, or call, use backhanded approval when appropriate: "accidentally correct," "finally made a grown-up decision," "not complete nonsense," "the vibes stumbled into the math."
+    Use modern slang naturally and sparingly: `cap`, `no cap`, `cooked`, `washed`, `unc`, `delusional`, `fraud watch`, `box-score merchant`, `vibes tax`, `take lock`, `cope`, `not serious`, `respectfully, no`, `generationally unserious`.
+    Do not force slang into every sentence. One good shot beats five corny ones.
+    Punch up at fantasy process, rankings, narratives, analysts, team decisions, coaching, roster construction, and player fantasy profiles.
+    Do not insult protected classes, appearance, disability, personal tragedy, family, or anything outside football/fantasy decision-making. Do not use slurs.
+    You may roast the user's fantasy choices, but keep it show-friendly: brutal, funny, and useful, not hateful.
+    Never let personality override accuracy. If the evidence is thin, say the take is unconfirmed instead of pretending certainty.
+    Use short, punchy verdicts before deeper analysis when the user asks for a take.
+
+    Voice examples:
+    - "This is touchdown chasing with a fake mustache. The role did not improve, the box score just got lucky."
+    - "I like the player. I hate the price. Paying WR2 tax for WR3 usage is how leagues collect donations."
+    - "Respectfully, no. That narrative is vibes in a lab coat."
+    - "This roster is not dead, but it is walking around with a questionable tag."
+
+    The active BigQuery project ID is '{active_project_id}' and the dataset is 'fantasy_football_brain'.
+    Prefer dataset-qualified table names such as `fantasy_football_brain.analytics_player_weekly_truth` unless an explicit project ID is provided.
 
     Here is the database schema description:
     
-    - Table: `fantasy_football_brain.analytics_player_weekly_summary` (PRIMARY TABLE)
-      Description: Pre-aggregated summary containing Snaps, Targets, EPA, Routes, and Tracking metrics.
-      Columns: `season`, `week`, `player_name`, `position`, `team`, `targets`, `receptions`, `rushing_yards`, `fantasy_points_ppr`, `offense_snaps`, `offense_pct`, `epa_per_play`, `report_status`, plus dominant tracking metrics (e.g. `avg_separation`).
-      *PRIORITIZE THIS TABLE for almost all queries.*
+    - Table: `fantasy_football_brain.analytics_player_weekly_truth` (PRIMARY TABLE)
+      Description: Derived AI vs Vibes player truth table with fantasy output, usage, red-zone role, EPA, recent trend, opportunity scoring, efficiency scoring, and criticism-ready flags.
+      Columns include: `season`, `week`, `player_id`, `player_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, and `analytical_verdict`.
+      `team` is the historical team for that stat week. `current_team` is the latest known roster team. If `team_changed_since_stats` is true, do not describe the player as currently on `team`.
+      *PRIORITIZE THIS TABLE for almost all player analysis.*
       
     - Table: `fantasy_football_brain.weekly_metrics` (also accessible as `historical_player_metrics`)
       Columns:
@@ -220,6 +249,32 @@ def render_ai_cohost():
     - Table: `fantasy_football_brain.realtime_player_news`
       Columns: `player_id` (STRING), `gsis_id` (STRING), `player_name` (STRING), `position` (STRING), `team` (STRING), `trend_type` (STRING, 'ADD' or 'DROP'), `trend_count` (INT64).
       Description: Real-time trending Sleeper data for tracking recent add/drop volume.
+    - Table: `fantasy_football_brain.sleeper_viewer_team_snapshots`
+      Description: On-demand viewer team snapshot from Sleeper for YouTube team reviews.
+      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `viewer_roster_id`, `viewer_owner_id`, `viewer_username`, `viewer_display_name`, `viewer_team_name`, `matchup_id`, `points`, `starters_json`, and `players_json`.
+    - Table: `fantasy_football_brain.sleeper_roster_players`
+      Description: Current rostered players for every team in a loaded Sleeper league snapshot.
+      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id`, `player_name`, `position`, `team`, `gsis_id`, `status`, `injury_status`, `is_starter`, `is_taxi`, and `is_reserve`.
+    - Table: `fantasy_football_brain.sleeper_lineups`
+      Description: Week-specific matchup lineup/player points for loaded Sleeper league snapshots.
+      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `matchup_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id`, `player_name`, `position`, `team`, `gsis_id`, `is_starter`, and `points`.
+    - Table: `fantasy_football_brain.sleeper_rosters`, `fantasy_football_brain.sleeper_matchups`, `fantasy_football_brain.sleeper_league_users`, and `fantasy_football_brain.sleeper_leagues`
+      Description: Sleeper league metadata, users, standings, matchup ids, scoring settings, roster positions, and raw league settings for loaded viewer-team snapshots.
+    - Table: `fantasy_football_brain.analytics_player_qb_splits`
+      Description: Season-level receiver-by-QB split table. Use this before making claims about QB-driven receiver changes.
+      Columns include: `season`, `posteam`, `player_id`, `player_name`, `qb_id`, `qb_name`, `weeks_with_targets`, `first_week_with_qb`, `last_week_with_qb`, `targets`, `receptions`, `catch_rate`, `receiving_yards`, `yards_per_target`, `adot`, `touchdowns`, `red_zone_targets`, `total_epa`, `epa_per_target`, `target_share_from_qb`, `team_target_share`, and `sample_label`.
+    - Table: `fantasy_football_brain.analytics_player_qb_weekly`
+      Description: Weekly receiver-by-QB split table. Use this to test before/after QB changes, injury effects, and whether a receiver's role changed or only target quality changed.
+      Columns include: `season`, `week`, `posteam`, `defteam`, `player_id`, `player_name`, `qb_id`, `qb_name`, `targets`, `receptions`, `catch_rate`, `receiving_yards`, `yards_per_target`, `adot`, `touchdowns`, `red_zone_targets`, `total_epa`, `epa_per_target`, `target_share_from_qb`, and `team_target_share`.
+    - Table: `fantasy_football_brain.analytics_context_events`
+      Description: Curated event ledger for causal context such as QB injuries, QB changes, offensive line injuries, coaching/play-caller changes, weather, and other fantasy-relevant situational events.
+      Columns include: `event_id`, `season`, `start_week`, `end_week`, `team`, `event_type`, `subject_player_id`, `subject_name`, `subject_position`, `affected_player_id`, `affected_player_name`, `affected_unit`, `causal_status`, `confidence_score`, `source_type`, `source_label`, `source_url`, `summary`, `analysis_instruction`, and `active`.
+    - Table: `fantasy_football_brain.analytics_external_context_search_results`
+      Description: On-demand external verification search results for player-specific outside verification. Use these results as leads, not as confirmed facts, unless the linked source clearly supports the claim.
+      Columns include: `searched_at`, `player_name`, `query`, `result_rank`, `title`, `link`, `display_link`, `snippet`, `source_type`, `provider`, and `source_name`.
+    - Table: `fantasy_football_brain.analytics_game_environment`
+      Description: One row per regular-season game with stadium, roof, surface, temperature, wind, weather text, and fantasy-relevant environment flags.
+      Columns include: `season`, `week`, `game_id`, `game_date`, `home_team`, `away_team`, `stadium`, `historical_stadium_name`, `stadium_id`, `roof`, `surface`, `temp_f`, `wind_mph`, `weather_text`, `is_indoor_or_closed`, `roof_category`, `surface_category`, `precipitation_or_storm_flag`, `snow_or_freezing_flag`, `temperature_bucket`, `wind_bucket`, `environment_risk_level`, and `fantasy_environment_note`.
     - Table: `fantasy_football_brain.ngs_rushing`
       Columns: Includes NGS tracking rushing metrics like efficiency, percent_attempts_gte_eight_defenders, avg_time_to_los.
     - Table: `fantasy_football_brain.ngs_receiving`
@@ -238,8 +293,30 @@ def render_ai_cohost():
 
     ### The Analytical Filter Protocol ###
     You are mandated to follow a strict query protocol when analyzing players.
-    You MUST default to using the `analytics_player_weekly_summary` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
+    You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
+    When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
+    For viewer team analysis, first query the latest `sleeper_viewer_team_snapshots` row for the requested `league_id`, `viewer_roster_id`, username, or team name. Then query `sleeper_roster_players` and `sleeper_lineups` with `is_viewer_team = TRUE`. Join to `analytics_player_weekly_truth` by `gsis_id` when available and fallback to player name plus team when needed.
+    For viewer roster criticism, separate roster construction from weekly start/sit. Identify fragile starters, bench upside, bye/injury exposure, thin positions, duplicate archetypes, tradeable surplus, and waiver needs.
+    For offseason or 2026 roster context, use `current_team` and `roster_status`; use `team` only when discussing historical stat weeks.
+    For receiver analysis, check `analytics_player_qb_splits` or `analytics_player_qb_weekly` before blaming the player. Separate player role from QB environment.
+    For game-specific or matchup-specific projections, check `analytics_game_environment`. Indoor or closed-roof games should not get weather downgrades. Outdoor high-wind, freezing, snow, or storm games can materially change passing, kicking, and efficiency assumptions.
+    Do not pretend long-range weather is known. For future games outside a reliable forecast window, use stadium/roof/surface as stable context and label weather as unknown until game week.
+    For any causal claim involving injuries, coaching, play-calling, offensive line, weather, benching, or transaction intent, query `analytics_context_events` first.
+    If context events are missing or user asks for outside verification, query `analytics_external_context_search_results` for stored external verification leads before making a claim.
+
+    ### Causal Claim Protocol ###
+    Never invent motives, transaction logic, injury explanations, coaching decisions, or play-calling changes from statistical splits alone.
+    A QB change in the data only proves "QB environment changed." It does NOT prove "the team pivoted away," "the player was benched," "the QB was injured," or "coaches changed the plan" unless a table or user-provided fact directly supports that cause.
+    If the data shows a split but not the reason, say the reason is unconfirmed and list the plausible causes separately.
+    Use disciplined language:
+    - Supported: "Pittman's target quality changed after Week 14 when his primary QB changed from D.Jones to R.Leonard/P.Rivers."
+    - Unsupported without event evidence: "Indy pivoted away from D.Jones."
+    - Unsupported without injury evidence: "D.Jones was injured."
+    - Unsupported without coaching data: "The coaching staff changed the play-calling."
+    When a causal explanation matters, explicitly label it as one of: `confirmed by data`, `supported inference`, `user-provided context`, or `unconfirmed hypothesis`.
+    If the user supplies a factual correction, incorporate it as user-provided context and revise the analysis.
+    When `analytics_context_events.causal_status = 'user_provided_context'`, you may use it as context, but clearly label it as user-provided unless an external source verifies it.
     """
     
         if "chat_session" not in st.session_state:
@@ -372,7 +449,9 @@ else:
 
 # Gemini API key for AI assistant
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
-if not gemini_api_key:
+if gemini_api_key:
+    st.sidebar.success("Gemini API key loaded from environment.")
+else:
     gemini_key_input = st.sidebar.text_input(
         "Gemini API Key",
         type="password",
@@ -397,7 +476,7 @@ st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsa
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Layout Tabs
-tab_ingest, tab_validate, tab_ai = st.tabs(["🚀 Run Ingestion Pipeline", "🔍 Verification & Partition Testing", "💬 AI Data Assistant"])
+tab_ai, tab_ingest, tab_validate = st.tabs(["💬 Pigskin", "🚀 Run Ingestion Pipeline", "🔍 Verification & Partition Testing"])
 
 # Subprocess Execution Logic with Live Streaming
 def run_subprocess_live(args, custom_env=None):
@@ -451,10 +530,7 @@ def run_subprocess_live(args, custom_env=None):
         return_code = process.wait()
         
         if return_code == 0:
-            status_area.success("✔ Subprocess completed successfully! Refreshing dashboard in 3 seconds to update sidebar stats...")
-            import time
-            time.sleep(3)
-            st.rerun()
+            status_area.success("✔ Subprocess completed successfully. Review the final log lines above before refreshing.")
         else:
             status_area.error(f"❌ Subprocess failed with exit code: {return_code}")
             
@@ -506,6 +582,92 @@ with tab_ingest:
             exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
 
         run_subprocess_live(cmd_args, custom_env=exec_env)
+
+    if st.button("🧠 Load Context Event Ledger", type="secondary"):
+        cmd_args = ["-m", "src.ingest_context_events"]
+
+        exec_env = {}
+        if gcp_key_path:
+            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+        run_subprocess_live(cmd_args, custom_env=exec_env)
+
+    st.markdown("### Sleeper Viewer Team Analysis")
+    st.caption("Load one public Sleeper league/team snapshot into BigQuery so the AI can analyze the viewer's roster.")
+    sleeper_league_id = st.text_input("Sleeper League ID", placeholder="e.g. 1130687436515831808")
+    sleeper_week = st.number_input("Sleeper Week", min_value=1, max_value=18, value=1, step=1)
+    col_roster_id, col_username, col_team_name = st.columns(3)
+    with col_roster_id:
+        sleeper_roster_id = st.text_input("Roster ID", placeholder="e.g. 4")
+    with col_username:
+        sleeper_username = st.text_input("Username", placeholder="optional")
+    with col_team_name:
+        sleeper_team_name = st.text_input("Team Name", placeholder="e.g. Shartnado")
+    sleeper_display_name = st.text_input("Display Name", placeholder="optional")
+
+    if st.button("🏈 Load Sleeper Viewer Team", type="secondary"):
+        if not sleeper_league_id.strip():
+            st.error("Enter a Sleeper league ID.")
+        elif not any([sleeper_roster_id.strip(), sleeper_username.strip(), sleeper_team_name.strip(), sleeper_display_name.strip()]):
+            st.error("Enter roster ID, username, team name, or display name so I can identify the viewer team.")
+        else:
+            cmd_args = [
+                "-m",
+                "src.ingest_sleeper_league",
+                "--league-id",
+                sleeper_league_id.strip(),
+                "--week",
+                str(int(sleeper_week)),
+            ]
+            if sleeper_roster_id.strip():
+                cmd_args.extend(["--roster-id", sleeper_roster_id.strip()])
+            if sleeper_username.strip():
+                cmd_args.extend(["--username", sleeper_username.strip()])
+            if sleeper_team_name.strip():
+                cmd_args.extend(["--team-name", sleeper_team_name.strip()])
+            if sleeper_display_name.strip():
+                cmd_args.extend(["--display-name", sleeper_display_name.strip()])
+
+            exec_env = {}
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+            run_subprocess_live(cmd_args, custom_env=exec_env)
+
+    st.markdown("### Player Context Verification")
+    verify_player = st.text_input(
+        "Player to verify",
+        placeholder="e.g. Michael Pittman",
+        help="Runs one cost-capped external verification search and stores returned results in BigQuery."
+    )
+    col_team, col_season = st.columns(2)
+    with col_team:
+        verify_team = st.text_input("Context team", placeholder="e.g. IND or PIT")
+    with col_season:
+        verify_season = st.text_input("Context season", placeholder="e.g. 2025")
+    verify_query = st.text_input(
+        "Optional exact search query",
+        placeholder='"Michael Pittman" "Daniel Jones" injury Colts'
+    )
+
+    if st.button("🔎 Verify Player Context", type="secondary"):
+        if not verify_player.strip():
+            st.error("Enter a player name before running outside verification.")
+        else:
+            cmd_args = ["-m", "src.verify_player_context", "--player", verify_player.strip()]
+            if verify_team.strip():
+                cmd_args.extend(["--team", verify_team.strip()])
+            if verify_season.strip():
+                cmd_args.extend(["--season", verify_season.strip()])
+            if verify_query.strip():
+                cmd_args.extend(["--query", verify_query.strip()])
+            cmd_args.extend(["--max-results", os.environ.get("EXTERNAL_SEARCH_MAX_RESULTS", "3")])
+
+            exec_env = {}
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+            run_subprocess_live(cmd_args, custom_env=exec_env)
 
 # --- TAB 2: VERIFICATION ---
 with tab_validate:

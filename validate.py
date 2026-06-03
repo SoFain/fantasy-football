@@ -1,7 +1,10 @@
 import sys
 import logging
+import os
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
+
+DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
 
 # Set up logging for validation script
 logging.basicConfig(
@@ -60,7 +63,13 @@ def validate_pipeline_upload(dataset_name="fantasy_football_brain"):
     logger.info("=" * 60)
 
     try:
-        client = bigquery.Client()
+        project_id = (
+            os.environ.get("BQ_PROJECT")
+            or os.environ.get("GCP_PROJECT")
+            or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            or DEFAULT_BIGQUERY_PROJECT
+        )
+        client = bigquery.Client(project=project_id)
     except Exception as e:
         logger.error(f"Could not initialize BigQuery Client. Make sure GOOGLE_APPLICATION_CREDENTIALS is set: {e}")
         sys.exit(1)

@@ -6,6 +6,7 @@ from datetime import datetime
 from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data, get_ngs_passing_data, get_ngs_rushing_data, get_ngs_receiving_data, get_ftn_charting_data, get_snap_counts_data, get_injury_reports_data
 from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data, transform_standard_seasonal_data
 from src.load import get_bigquery_client, create_dataset_if_not_exists, load_df_to_partitioned_table
+from src.materialize import materialize_all
 
 def setup_logging():
     """
@@ -89,16 +90,23 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         
         pbp_df_clean = transform_pbp_data(pbp_df_raw)
         weekly_df_clean = transform_weekly_data(weekly_df_raw)
-        team_df_clean = transform_team_data(team_df_raw, seasons)
-        draft_df_clean = transform_draft_picks_data(draft_df_raw, seasons)
-        players_df_clean = transform_players_data(players_df_raw, seasons)
-        contracts_df_clean = transform_contracts_data(contracts_df_raw, seasons)
-        ngs_passing_clean = transform_standard_seasonal_data(ngs_passing_raw, seasons, "NGS Passing")
-        ngs_rushing_clean = transform_standard_seasonal_data(ngs_rushing_raw, seasons, "NGS Rushing")
-        ngs_receiving_clean = transform_standard_seasonal_data(ngs_receiving_raw, seasons, "NGS Receiving")
-        ftn_clean = transform_standard_seasonal_data(ftn_raw, seasons, "FTN Charting")
-        snap_counts_clean = transform_standard_seasonal_data(snap_counts_raw, seasons, "Snap Counts")
-        injury_reports_clean = transform_standard_seasonal_data(injury_reports_raw, seasons, "Injury Reports")
+        loaded_seasons = sorted(
+            {int(season) for season in (pbp_df_clean["season"].unique() if not pbp_df_clean.empty else [])}
+            | {int(season) for season in (weekly_df_clean["season"].unique() if not weekly_df_clean.empty else [])}
+        )
+        if loaded_seasons != seasons:
+            logger.info(f"Using loaded seasons {loaded_seasons} for derived/static tables instead of requested seasons {seasons}.")
+
+        team_df_clean = transform_team_data(team_df_raw, loaded_seasons)
+        draft_df_clean = transform_draft_picks_data(draft_df_raw, loaded_seasons)
+        players_df_clean = transform_players_data(players_df_raw, loaded_seasons)
+        contracts_df_clean = transform_contracts_data(contracts_df_raw, loaded_seasons)
+        ngs_passing_clean = transform_standard_seasonal_data(ngs_passing_raw, loaded_seasons, "NGS Passing")
+        ngs_rushing_clean = transform_standard_seasonal_data(ngs_rushing_raw, loaded_seasons, "NGS Rushing")
+        ngs_receiving_clean = transform_standard_seasonal_data(ngs_receiving_raw, loaded_seasons, "NGS Receiving")
+        ftn_clean = transform_standard_seasonal_data(ftn_raw, loaded_seasons, "FTN Charting")
+        snap_counts_clean = transform_standard_seasonal_data(snap_counts_raw, loaded_seasons, "Snap Counts")
+        injury_reports_clean = transform_standard_seasonal_data(injury_reports_raw, loaded_seasons, "Injury Reports")
 
         # -------------------------------------------------------------
         # STEP 3: LOADING TO BIGQUERY
@@ -171,6 +179,10 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         # Load snap counts and injury reports
         load_df_to_partitioned_table(client=bq_client, df=snap_counts_clean, dataset_id=dataset_id, table_name="weekly_snap_counts", write_disposition=write_disposition)
         load_df_to_partitioned_table(client=bq_client, df=injury_reports_clean, dataset_id=dataset_id, table_name="injury_reports", write_disposition=write_disposition)
+
+        logger.info("--- Starting Step 4: Materializing AI vs Vibes truth table ---")
+        materialize_all(bq_client, dataset_id=dataset_name)
+        logger.info("Successfully materialized AI vs Vibes analytics tables.")
 
         logger.info("=" * 60)
         logger.info(f"NFL Data Pipeline finished successfully at {datetime.now()}!")

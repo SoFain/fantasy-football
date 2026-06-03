@@ -9,6 +9,17 @@ import nflreadpy as nfl
 # Configure Logger
 logger = logging.getLogger(__name__)
 
+
+def filter_supported_seasons(seasons, min_season, max_season, dataset_name):
+    supported = [season for season in seasons if min_season <= season <= max_season]
+    skipped = [season for season in seasons if season not in supported]
+    if skipped:
+        logger.warning(
+            f"Skipping unsupported {dataset_name} seasons {skipped}. "
+            f"Supported range is {min_season}-{max_season}."
+        )
+    return supported
+
 def execute_with_backoff(func, *args, max_retries=5, initial_backoff=2, backoff_factor=2, **kwargs):
     """
     Executes a callable with exponential backoff on HTTP 429/5xx status codes and connection errors.
@@ -187,6 +198,10 @@ def get_ngs_passing_data(seasons):
     """
     Extracts NFL Next Gen Stats passing data.
     """
+    seasons = filter_supported_seasons(seasons, 2016, 2025, "NGS passing")
+    if not seasons:
+        return pd.DataFrame()
+
     logger.info("Fetching NGS passing data from nflreadpy")
     try:
         df = execute_with_backoff(nfl.load_nextgen_stats, seasons, stat_type="passing")
@@ -199,6 +214,10 @@ def get_ngs_rushing_data(seasons):
     """
     Extracts NFL Next Gen Stats rushing data.
     """
+    seasons = filter_supported_seasons(seasons, 2016, 2025, "NGS rushing")
+    if not seasons:
+        return pd.DataFrame()
+
     logger.info("Fetching NGS rushing data from nflreadpy")
     try:
         df = execute_with_backoff(nfl.load_nextgen_stats, seasons, stat_type="rushing")
@@ -211,6 +230,10 @@ def get_ngs_receiving_data(seasons):
     """
     Extracts NFL Next Gen Stats receiving data.
     """
+    seasons = filter_supported_seasons(seasons, 2016, 2025, "NGS receiving")
+    if not seasons:
+        return pd.DataFrame()
+
     logger.info("Fetching NGS receiving data from nflreadpy")
     try:
         df = execute_with_backoff(nfl.load_nextgen_stats, seasons, stat_type="receiving")
@@ -223,6 +246,10 @@ def get_ftn_charting_data(seasons):
     """
     Extracts NFL FTN charting data.
     """
+    seasons = filter_supported_seasons(seasons, 2022, 2025, "FTN charting")
+    if not seasons:
+        return pd.DataFrame()
+
     logger.info("Fetching FTN charting data from nflreadpy")
     try:
         df = execute_with_backoff(nfl.load_ftn_charting, seasons)
@@ -235,6 +262,10 @@ def get_snap_counts_data(seasons):
     """
     Extracts NFL weekly snap counts data.
     """
+    seasons = filter_supported_seasons(seasons, 2012, 2025, "snap counts")
+    if not seasons:
+        return pd.DataFrame()
+
     logger.info("Fetching snap counts data from nflreadpy")
     try:
         df = execute_with_backoff(nfl.load_snap_counts, seasons)
@@ -247,6 +278,10 @@ def get_injury_reports_data(seasons):
     """
     Extracts NFL weekly injury reports data.
     """
+    seasons = filter_supported_seasons(seasons, 2009, 2025, "injury reports")
+    if not seasons:
+        return pd.DataFrame()
+
     logger.info("Fetching injury reports data from nflreadpy")
     try:
         df = execute_with_backoff(nfl.load_injuries, seasons)

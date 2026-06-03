@@ -18,6 +18,15 @@ if exist "%~dp0venv\Scripts\activate.bat" (
 )
 
 echo.
+set "BQ_PROJECT=fantasy-football-498121"
+if exist "%~dp0fantasy-football-498121-dab0c1eb06fd.json" (
+    set "GOOGLE_APPLICATION_CREDENTIALS=%~dp0fantasy-football-498121-dab0c1eb06fd.json"
+    echo [INFO] Using local fantasy-football-498121 service account key.
+) else (
+    echo [INFO] No local service account key found. Using active Google credentials.
+)
+
+echo.
 echo [INFO] Running Streamlit interface (app.py)...
 streamlit run "%~dp0app.py" --server.fileWatcherType=none
 

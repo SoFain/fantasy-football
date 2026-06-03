@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source files
 COPY app.py validate.py ./
 COPY src/ ./src/
+COPY data/ ./data/
 
 # Set Streamlit environment variables
 ENV STREAMLIT_SERVER_PORT=8501 \

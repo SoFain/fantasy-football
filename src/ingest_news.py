@@ -2,21 +2,46 @@ import requests
 import pandas as pd
 from google.cloud import bigquery
 import logging
+import time
+
+from src.load import get_bigquery_project
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('ingest_news')
 
+SLEEPER_MAX_CALLS_PER_MINUTE = 900
+_sleeper_call_timestamps = []
+
+
+def sleeper_get(url):
+    now = time.monotonic()
+    cutoff = now - 60
+    while _sleeper_call_timestamps and _sleeper_call_timestamps[0] < cutoff:
+        _sleeper_call_timestamps.pop(0)
+
+    if len(_sleeper_call_timestamps) >= SLEEPER_MAX_CALLS_PER_MINUTE:
+        sleep_for = 60 - (now - _sleeper_call_timestamps[0])
+        logger.warning("Sleeper API throttle reached. Sleeping %.2f seconds.", max(sleep_for, 0))
+        time.sleep(max(sleep_for, 0))
+        now = time.monotonic()
+        cutoff = now - 60
+        while _sleeper_call_timestamps and _sleeper_call_timestamps[0] < cutoff:
+            _sleeper_call_timestamps.pop(0)
+
+    response = requests.get(url, timeout=30)
+    _sleeper_call_timestamps.append(time.monotonic())
+    response.raise_for_status()
+    return response
+
+
 def load_realtime_news():
     logger.info("Fetching Sleeper global player map...")
-    players_resp = requests.get("https://api.sleeper.app/v1/players/nfl")
-    players_resp.raise_for_status()
+    players_resp = sleeper_get("https://api.sleeper.app/v1/players/nfl")
     players_map = players_resp.json()
 
     logger.info("Fetching Sleeper trending add/drop vectors...")
-    add_resp = requests.get("https://api.sleeper.app/v1/players/nfl/trending/add?lookback_hours=24&limit=50")
-    drop_resp = requests.get("https://api.sleeper.app/v1/players/nfl/trending/drop?lookback_hours=24&limit=50")
-    add_resp.raise_for_status()
-    drop_resp.raise_for_status()
+    add_resp = sleeper_get("https://api.sleeper.app/v1/players/nfl/trending/add?lookback_hours=24&limit=50")
+    drop_resp = sleeper_get("https://api.sleeper.app/v1/players/nfl/trending/drop?lookback_hours=24&limit=50")
     
     trending_adds = add_resp.json()
     trending_drops = drop_resp.json()
@@ -81,7 +106,7 @@ def load_realtime_news():
     
     logger.info(f"Processed {len(df)} trending records. Pushing to BigQuery...")
     
-    client = bigquery.Client()
+    client = bigquery.Client(project=get_bigquery_project())
     project_id = client.project
     table_id = f"{project_id}.fantasy_football_brain.realtime_player_news"
 
