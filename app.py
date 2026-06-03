@@ -149,6 +149,63 @@ def execute_bq_cached(sql_query: str):
     df = query_job.result().to_dataframe()
     return df
 
+def render_fraud_watch_segment():
+    st.markdown("### Fraud Watch")
+    st.markdown("Weekly box-score spikes ranked against role quality, usage stability, touchdown dependence, and snap trust.")
+
+    sql_query = f"""
+    WITH latest AS (
+        SELECT season, MAX(week) AS week
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_fraud_watch`
+        WHERE season = (
+            SELECT MAX(season)
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_fraud_watch`
+        )
+        GROUP BY season
+    )
+    SELECT
+        f.player_name,
+        f.position,
+        f.team,
+        f.current_team,
+        f.season,
+        f.week,
+        ROUND(f.fantasy_points_ppr, 2) AS ppr,
+        f.skill_player_opportunities AS opps,
+        ROUND(f.target_share, 3) AS target_share,
+        ROUND(f.wopr, 3) AS wopr,
+        f.touchdowns,
+        ROUND(f.touchdown_dependency_rate, 2) AS td_points_share,
+        ROUND(f.role_quality_score, 2) AS role_quality,
+        ROUND(f.role_fragility_score, 2) AS fragility,
+        ROUND(f.fraud_score, 2) AS fraud_score,
+        f.fraud_label,
+        f.fraud_case
+    FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_fraud_watch` f
+    JOIN latest
+        ON f.season = latest.season
+        AND f.week = latest.week
+    ORDER BY f.fraud_score DESC, f.fantasy_points_ppr DESC
+    LIMIT 20
+    """
+
+    try:
+        df = execute_bq_cached(sql_query)
+    except Exception as e:
+        st.info(f"Fraud Watch is not materialized yet: {e}")
+        return
+
+    if df.empty:
+        st.info("Fraud Watch has no candidates for the latest loaded week.")
+        return
+
+    top = df.iloc[0]
+    cols = st.columns(3)
+    cols[0].metric("Top Candidate", top["player_name"])
+    cols[1].metric("Fraud Score", f'{top["fraud_score"]:.1f}')
+    cols[2].metric("Label", top["fraud_label"])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
 def render_ai_cohost():
     st.markdown("### 💬 Pigskin")
     st.markdown("Chat with Pigskin, the AI vs Vibes co-host built to roast bad process and back it up with data.")
@@ -209,9 +266,13 @@ def render_ai_cohost():
     
     - Table: `fantasy_football_brain.analytics_player_weekly_truth` (PRIMARY TABLE)
       Description: Derived AI vs Vibes player truth table with fantasy output, usage, red-zone role, EPA, recent trend, opportunity scoring, efficiency scoring, and criticism-ready flags.
-      Columns include: `season`, `week`, `player_id`, `player_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, and `analytical_verdict`.
+      Columns include: `season`, `week`, `player_id`, `player_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, `points_outran_role`, `thin_role_big_week`, `fragile_role`, `role_backed_production`, and `analytical_verdict`.
       `team` is the historical team for that stat week. `current_team` is the latest known roster team. If `team_changed_since_stats` is true, do not describe the player as currently on `team`.
       *PRIORITIZE THIS TABLE for almost all player analysis.*
+
+    - Table: `fantasy_football_brain.analytics_fraud_watch`
+      Description: First AI vs Vibes show segment table. Use it to identify fantasy box scores that outran the player's actual role quality.
+      Columns include: `season`, `week`, `player_name`, `position`, `team`, `current_team`, `fantasy_points_ppr`, `skill_player_opportunities`, `target_share`, `wopr`, `offense_pct`, `touchdowns`, `touchdown_dependency_rate`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `fraud_score`, `fraud_label`, `fraud_case`, and `what_would_change_mind`.
       
     - Table: `fantasy_football_brain.weekly_metrics` (also accessible as `historical_player_metrics`)
       Columns:
@@ -296,6 +357,7 @@ def render_ai_cohost():
     You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
+    For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
     For viewer team analysis, first query the latest `sleeper_viewer_team_snapshots` row for the requested `league_id`, `viewer_roster_id`, username, or team name. Then query `sleeper_roster_players` and `sleeper_lineups` with `is_viewer_team = TRUE`. Join to `analytics_player_weekly_truth` by `gsis_id` when available and fallback to player name plus team when needed.
     For viewer roster criticism, separate roster construction from weekly start/sit. Identify fragile starters, bench upside, bye/injury exposure, thin positions, duplicate archetypes, tradeable surplus, and waiver needs.
     For offseason or 2026 roster context, use `current_team` and `roster_status`; use `team` only when discussing historical stat weeks.
@@ -686,4 +748,5 @@ with tab_validate:
 
 # --- TAB 3: AI DATA ASSISTANT ---
 with tab_ai:
+    render_fraud_watch_segment()
     render_ai_cohost()
