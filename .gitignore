@@ -1,6 +1,8 @@
 # Cache data directory
 cache/
 *.parquet
+build/
+dist/
 
 # Python environments & compilation
 venv/
