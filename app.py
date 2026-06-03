@@ -229,6 +229,7 @@ def render_ai_cohost():
             1. You must use a `LIMIT 50` on every query.
             2. Do NOT use `SELECT *`. You must explicitly select the columns you need.
             3. You must filter by partitioning keys (`season` and `week`) whenever possible.
+            4. For player analysis, select `current_team`, `team_changed_since_stats`, and `roster_status` when available.
             """
             pass # We will execute this manually
             
@@ -361,6 +362,9 @@ def render_ai_cohost():
     For viewer team analysis, first query the latest `sleeper_viewer_team_snapshots` row for the requested `league_id`, `viewer_roster_id`, username, or team name. Then query `sleeper_roster_players` and `sleeper_lineups` with `is_viewer_team = TRUE`. Join to `analytics_player_weekly_truth` by `gsis_id` when available and fallback to player name plus team when needed.
     For viewer roster criticism, separate roster construction from weekly start/sit. Identify fragile starters, bench upside, bye/injury exposure, thin positions, duplicate archetypes, tradeable surplus, and waiver needs.
     For offseason or 2026 roster context, use `current_team` and `roster_status`; use `team` only when discussing historical stat weeks.
+    For any player question about "this season", "right now", "current", "2026", rankings, draft price, or team fit, your first player query MUST select `current_team`, `team_changed_since_stats`, and `roster_status`. Never describe `team` as the player's current team.
+    If a query fails, do not answer from memory. Stop and say the warehouse query failed.
+    If a player query returns zero rows, try one alternate name query using `LOWER(player_name) LIKE` or `LOWER(player_display_name) LIKE` before giving up.
     For receiver analysis, check `analytics_player_qb_splits` or `analytics_player_qb_weekly` before blaming the player. Separate player role from QB environment.
     For game-specific or matchup-specific projections, check `analytics_game_environment`. Indoor or closed-roof games should not get weather downgrades. Outdoor high-wind, freezing, snow, or storm games can materially change passing, kicking, and efficiency assumptions.
     Do not pretend long-range weather is known. For future games outside a reliable forecast window, use stadium/roof/surface as stable context and label weather as unknown until game week.
