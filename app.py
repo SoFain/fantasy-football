@@ -393,8 +393,14 @@ def render_ai_cohost():
         # Display chat history
         for msg in st.session_state.messages:
             if msg["role"] == "tool_status":
-                with st.status(msg["status_msg"], state="complete"):
+                with st.status(
+                    msg["status_msg"],
+                    state=msg.get("state", "complete"),
+                    expanded=msg.get("expanded", False),
+                ):
                     st.code(msg["code"], language="sql")
+                    if msg.get("error"):
+                        st.error(msg["error"])
             else:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
@@ -421,21 +427,45 @@ def render_ai_cohost():
                     while fc:
                         if fc.name == "execute_bigquery_sql":
                             sql_to_run = type(fc).to_dict(fc)["args"]["sql_query"]
-                            
-                            st.session_state.messages.append({
+
+                            tool_message = {
                                 "role": "tool_status",
                                 "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
-                                "code": sql_to_run
-                            })
-                            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
+                                "code": sql_to_run,
+                                "state": "running",
+                                "expanded": True,
+                            }
+                            st.session_state.messages.append(tool_message)
+                            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=True) as status:
                                 st.code(sql_to_run, language="sql")
                                 try:
                                     df = execute_bq_cached(sql_to_run)
                                     status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
                                     result_str = df.to_csv(index=False) if not df.empty else "0 rows returned."
                                 except Exception as e:
-                                    status.update(label="❌ Query failed", state="error")
-                                    result_str = f"Error: {str(e)}"
+                                    error_text = str(e)
+                                    status.update(label="❌ Query failed", state="error", expanded=True)
+                                    st.error(error_text)
+                                    tool_message.update({
+                                        "status_msg": "❌ Query failed",
+                                        "state": "error",
+                                        "expanded": True,
+                                        "error": error_text,
+                                    })
+                                    failure_text = (
+                                        "Pigskin tried to query BigQuery, but the warehouse query failed. "
+                                        "I am stopping here instead of giving you a fake data-backed take. "
+                                        "The failed SQL and error are shown above."
+                                    )
+                                    st.error(failure_text)
+                                    st.session_state.messages.append({"role": "assistant", "content": failure_text})
+                                    return
+
+                            tool_message.update({
+                                "status_msg": f"🤖 Analysis complete! ({len(df)} rows retrieved)",
+                                "state": "complete",
+                                "expanded": False,
+                            })
                             
                             import google.ai.generativelanguage as glm
                             tool_response = glm.Part(
