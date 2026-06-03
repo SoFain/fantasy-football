@@ -407,6 +407,212 @@ def render_ai_cohost():
                 except Exception as e:
                     st.error(f"Error communicating with AI Co-Host: {e}")
 
+def render_value_analyzer():
+    import pandas as pd
+    st.markdown("### 📊 Trade & Value Analyzer")
+    st.markdown("Compare player and draft pick values side-by-side using crowdsourced market transactions and AI projections.")
+
+    # Load market players from BQ
+    @st.cache_data(ttl=600, show_spinner=False)
+    def load_market_players():
+        try:
+            query = f"""
+                SELECT player_display_name, position, team, market_value, overall_rank, position_rank, redraft_value, tier
+                FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.market_values`
+                ORDER BY market_value DESC
+            """
+            return execute_bq_cached(query)
+        except Exception as e:
+            st.error(f"Could not load market values: {e}")
+            return None
+
+    market_df = load_market_players()
+    if market_df is None or market_df.empty:
+        st.info("⚠️ No market value data found in BigQuery. Please run the ingestion pipeline or check the database.")
+        return
+
+    # Prepare selection list
+    player_options = []
+    player_map = {}
+    for idx, row in market_df.iterrows():
+        name = row['player_display_name']
+        pos = row['position']
+        team = row['team']
+        val = row['market_value']
+        
+        if pd.isna(pos) or not pos:
+            label = f"🎫 {name} (Value: {val})"
+        else:
+            label = f"🏃 {name} ({pos} - {team}) (Value: {val})"
+        player_options.append(label)
+        player_map[label] = row
+
+    col_sel_A, col_sel_B = st.columns(2)
+    with col_sel_A:
+        selected_A = st.selectbox("Select Asset A", player_options, index=0, key="sel_a")
+        asset_A = player_map[selected_A]
+    with col_sel_B:
+        selected_B = st.selectbox("Select Asset B", player_options, index=min(1, len(player_options)-1), key="sel_b")
+        asset_B = player_map[selected_B]
+
+    # Display Side-by-Side Cards
+    st.markdown("#### ⚖️ Side-by-Side Comparison")
+    col_card_A, col_card_B = st.columns(2)
+    
+    val_A = asset_A['market_value'] or 0
+    val_B = asset_B['market_value'] or 0
+    
+    def calculate_3yr_score(row):
+        pos = row['position']
+        val = row['market_value'] or 0
+        
+        if pd.isna(pos) or not pos:
+            return min(95, max(40, int(val / 65)))
+            
+        rank = row['overall_rank'] or 300
+        base_score = max(5, int(100 - (rank / 3)))
+        
+        if pos == 'QB':
+            longevity_bonus = 8
+        elif pos == 'WR':
+            longevity_bonus = 5
+        elif pos == 'TE':
+            longevity_bonus = 3
+        else:
+            longevity_bonus = -5
+            
+        return min(99, max(5, base_score + longevity_bonus))
+
+    score_A = calculate_3yr_score(asset_A)
+    score_B = calculate_3yr_score(asset_B)
+
+    with col_card_A:
+        st.markdown(f"""
+        <div class="metric-card" style="border-left: 5px solid #10B981; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
+            <h3 style="margin-top: 0; color: #065F46;">{asset_A['player_display_name']}</h3>
+            <p><b>Position:</b> {asset_A['position'] if not pd.isna(asset_A['position']) else 'Draft Pick'}</p>
+            <p><b>Team:</b> {asset_A['team'] if not pd.isna(asset_A['team']) else 'N/A'}</p>
+            <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #10B981;">{val_A}</span></p>
+            <p><b>Overall Rank:</b> #{asset_A['overall_rank'] or 'N/A'}</p>
+            <p><b>Position Rank:</b> #{asset_A['position_rank'] or 'N/A'}</p>
+            <p><b>Tier:</b> {asset_A['tier'] or 'N/A'}</p>
+            <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
+            <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #065F46;">{score_A}/100</span></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_card_B:
+        st.markdown(f"""
+        <div class="metric-card" style="border-left: 5px solid #3B82F6; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
+            <h3 style="margin-top: 0; color: #1E40AF;">{asset_B['player_display_name']}</h3>
+            <p><b>Position:</b> {asset_B['position'] if not pd.isna(asset_B['position']) else 'Draft Pick'}</p>
+            <p><b>Team:</b> {asset_B['team'] if not pd.isna(asset_B['team']) else 'N/A'}</p>
+            <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #3B82F6;">{val_B}</span></p>
+            <p><b>Overall Rank:</b> #{asset_B['overall_rank'] or 'N/A'}</p>
+            <p><b>Position Rank:</b> #{asset_B['position_rank'] or 'N/A'}</p>
+            <p><b>Tier:</b> {asset_B['tier'] or 'N/A'}</p>
+            <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
+            <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #1E40AF;">{score_B}/100</span></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Difference & recommendation
+    diff = abs(val_A - val_B)
+    st.markdown("#### ⚖️ Value Difference Analysis")
+    if val_A > val_B:
+        st.success(f"📈 **{asset_A['player_display_name']}** has a higher value than **{asset_B['player_display_name']}** by **{diff} points**.")
+    elif val_B > val_A:
+        st.info(f"📈 **{asset_B['player_display_name']}** has a higher value than **{asset_B['player_display_name']}** by **{diff} points**.")
+    else:
+        st.warning("⚖️ Both assets are valued equally by the market.")
+
+    # Deep AI 3-Year Outlook using Gemini
+    st.markdown("#### 🧠 AI 3-Year Outlook Analysis")
+    st.markdown("Use Gemini to analyze their metrics and crawl recent team news for 3-year outlook projections.")
+
+    active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not active_gemini_key:
+        st.info("⚠️ Enter your **Gemini API Key** in the sidebar to activate the AI Analysis option.")
+    else:
+        if st.button("🧠 Run AI 3-Year Outlook Analysis", type="primary"):
+            with st.spinner("AI is fetching stats, injury reports, and crawling web news for both players..."):
+                try:
+                    # 1. Fetch metrics from BQ
+                    from google.cloud import bigquery
+                    bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+                    
+                    def query_player_history(name):
+                        q = f"""
+                            SELECT season, week, rushing_yards, rushing_tds, receiving_yards, receiving_tds, receptions, targets, fantasy_points_ppr
+                            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.weekly_metrics`
+                            WHERE LOWER(player_display_name) = LOWER(@name)
+                            ORDER BY season DESC, week DESC LIMIT 10
+                        """
+                        jc = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)])
+                        return bq_client.query(q, job_config=jc).to_dataframe()
+
+                    hist_A = query_player_history(asset_A['player_display_name'])
+                    hist_B = query_player_history(asset_B['player_display_name'])
+
+                    # 2. Get search snippets from Discovery Engine (Search App)
+                    def get_search_news(name):
+                        try:
+                            from google.cloud import discoveryengine_v1 as discoveryengine
+                            client = discoveryengine.SearchServiceClient()
+                            serving_config = f"projects/{BIGQUERY_PROJECT_ID}/locations/global/collections/default_collection/engines/fantasy-football-search-engine/servingConfigs/default_config"
+                            request = discoveryengine.SearchRequest(
+                                serving_config=serving_config,
+                                query=f"{name} fantasy news injury update",
+                                page_size=3,
+                            )
+                            resp = client.search(request)
+                            results = []
+                            for r in resp.results:
+                                title = r.document.derived_struct_data.get('title', '')
+                                snip = ""
+                                if 'snippets' in r.document.derived_struct_data and len(r.document.derived_struct_data['snippets']) > 0:
+                                    snip = r.document.derived_struct_data['snippets'][0].get('htmlSnippet', '')
+                                results.append(f"Title: {title}\nSnippet: {snip}")
+                            return "\n".join(results)
+                        except Exception:
+                            return "No web matches found."
+
+                    news_A = get_search_news(asset_A['player_display_name']) if not pd.isna(asset_A['position']) else ""
+                    news_B = get_search_news(asset_B['player_display_name']) if not pd.isna(asset_B['position']) else ""
+
+                    # 3. Call Gemini
+                    import google.generativeai as genai
+                    genai.configure(api_key=active_gemini_key)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    prompt = f"""
+                    Compare these two fantasy football assets side-by-side:
+                    
+                    Asset A: {asset_A['player_display_name']} ({asset_A['position'] if not pd.isna(asset_A['position']) else 'Pick'})
+                    - Market Value: {val_A}
+                    - Overall Rank: {asset_A['overall_rank']}
+                    - Recent Stats:\n{hist_A.to_string(index=False) if not hist_A.empty else 'No stats available'}
+                    - Recent News:\n{news_A}
+                    
+                    Asset B: {asset_B['player_display_name']} ({asset_B['position'] if not pd.isna(asset_B['position']) else 'Pick'})
+                    - Market Value: {val_B}
+                    - Overall Rank: {asset_B['overall_rank']}
+                    - Recent Stats:\n{hist_B.to_string(index=False) if not hist_B.empty else 'No stats available'}
+                    - Recent News:\n{news_B}
+                    
+                    Provide a detailed 3-year outlook comparison. Ground your comparison in age, position value degradation, offensive environment, and current news/injury profiles.
+                    Conclude with:
+                    1. Who is the safer dynasty asset?
+                    2. Who has the higher ceiling?
+                    3. What are their respective AI 3-Year Outlook Scores (0-100)?
+                    """
+                    
+                    res = model.generate_content(prompt)
+                    st.markdown("### 🧠 AI Dynasty Comparison Report")
+                    st.write(res.text)
+                except Exception as ex:
+                    st.error(f"Failed to generate AI analysis: {ex}")
+
 view_mode = st.query_params.get("view", "default")
 if view_mode == "broadcast":
     st.markdown("""
@@ -476,7 +682,7 @@ st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsa
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Layout Tabs
-tab_ai, tab_ingest, tab_validate = st.tabs(["💬 Pigskin", "🚀 Run Ingestion Pipeline", "🔍 Verification & Partition Testing"])
+tab_ai, tab_ingest, tab_validate, tab_analyzer = st.tabs(["💬 Pigskin", "🚀 Run Ingestion Pipeline", "🔍 Verification & Partition Testing", "📊 Trade & Value Analyzer"])
 
 # Subprocess Execution Logic with Live Streaming
 def run_subprocess_live(args, custom_env=None):
@@ -687,3 +893,7 @@ with tab_validate:
 # --- TAB 3: AI DATA ASSISTANT ---
 with tab_ai:
     render_ai_cohost()
+
+# --- TAB 4: TRADE & VALUE ANALYZER ---
+with tab_analyzer:
+    render_value_analyzer()
