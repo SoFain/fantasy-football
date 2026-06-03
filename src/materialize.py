@@ -487,24 +487,70 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
                 ORDER BY week
                 ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
             )
+    ),
+    truth AS (
+        SELECT
+            *,
+            ROUND(opportunity_score + efficiency_score, 2) AS analytical_grade,
+            ROUND(
+                COALESCE(opportunity_score, 0)
+                + LEAST(COALESCE(rolling_3_week_opportunities, 0) * 1.2, 18)
+                + COALESCE(offense_pct, 0) * 10,
+                2
+            ) AS role_quality_score,
+            ROUND(fantasy_points_ppr - SAFE_DIVIDE(opportunity_score, 3.5), 2) AS points_over_role_score,
+            LEAST(
+                GREATEST(
+                    ROUND(
+                        IF(fantasy_points_ppr >= 14, 10, 0)
+                        + IF(skill_player_opportunities < 8, 20, 0)
+                        + IF(skill_player_opportunities < 10 AND COALESCE(rolling_3_week_opportunities, 0) < 10, 15, 0)
+                        + IF(touchdown_dependency_rate >= 0.45 AND touchdowns > 0, 25, 0)
+                        + IF(fantasy_points_per_opportunity >= 2.5 AND skill_player_opportunities < 10, 15, 0)
+                        + IF(offense_pct IS NOT NULL AND offense_pct < 0.65, 10, 0)
+                        + IF(position IN ('WR', 'TE') AND COALESCE(target_share, 0) < 0.18, 10, 0)
+                        + IF(position IN ('WR', 'TE') AND COALESCE(wopr, 0) < 0.45, 8, 0)
+                        - IF(target_share >= 0.22 OR wopr >= 0.55, 15, 0)
+                        - IF(skill_player_opportunities >= 12, 15, 0)
+                        - IF(red_zone_touches >= 3, 5, 0),
+                        2
+                    ),
+                    0
+                ),
+                100
+            ) AS role_fragility_score
+        FROM scored
     )
     SELECT
         *,
-        ROUND(opportunity_score + efficiency_score, 2) AS analytical_grade,
         touchdown_dependency_rate >= 0.45 AND touchdowns > 0 AS touchdown_dependent,
-        fantasy_points_ppr >= 15
-            AND skill_player_opportunities < 8
-            AND touchdown_dependency_rate >= 0.45 AS box_score_trap,
+        role_fragility_score >= 55
+            AND fantasy_points_ppr >= 12 AS box_score_trap,
         target_share >= 0.22 OR wopr >= 0.55 AS target_earner,
         skill_player_opportunities >= 12
             AND fantasy_points_ppr < 10 AS empty_volume,
         skill_player_opportunities < 8
             AND fantasy_points_ppr >= 12 AS usage_warning,
+        fantasy_points_ppr >= 14
+            AND points_over_role_score >= 8
+            AND role_fragility_score >= 45 AS points_outran_role,
+        fantasy_points_ppr >= 12
+            AND skill_player_opportunities < 8 AS thin_role_big_week,
+        role_fragility_score >= 55 AS fragile_role,
+        fantasy_points_ppr >= 14
+            AND role_quality_score >= 45
+            AND role_fragility_score < 35 AS role_backed_production,
         CASE
             WHEN fantasy_points_ppr >= 18
-                AND skill_player_opportunities < 8
-                AND touchdown_dependency_rate >= 0.45
+                AND role_fragility_score >= 55
                 THEN 'Box-score trap: points beat role'
+            WHEN fantasy_points_ppr >= 14
+                AND touchdown_dependency_rate >= 0.45
+                AND touchdowns > 0
+                THEN 'Touchdown-dependent spike'
+            WHEN fantasy_points_ppr >= 12
+                AND skill_player_opportunities < 8
+                THEN 'Thin role, loud box score'
             WHEN skill_player_opportunities >= 14
                 AND fantasy_points_ppr < 10
                 THEN 'Volume survived, box score failed'
@@ -519,7 +565,119 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
                 THEN 'Thin role, no excuse'
             ELSE 'Needs context'
         END AS analytical_verdict
-    FROM scored
+    FROM truth
+    """
+
+
+def build_fraud_watch_sql(project_id, dataset_id):
+    return f"""
+    CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.analytics_fraud_watch`
+    PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(2000, 2050, 1))
+    CLUSTER BY fraud_label, position, player_name AS
+    WITH candidates AS (
+        SELECT
+            season,
+            week,
+            player_id,
+            player_name,
+            player_display_name,
+            position,
+            team,
+            current_team,
+            opponent_team,
+            fantasy_points_ppr,
+            targets,
+            receptions,
+            carries,
+            target_share,
+            air_yards_share,
+            wopr,
+            offense_snaps,
+            offense_pct,
+            red_zone_touches,
+            touchdowns,
+            skill_player_opportunities,
+            rolling_3_week_opportunities,
+            fantasy_points_per_opportunity,
+            opportunity_score,
+            role_quality_score,
+            points_over_role_score,
+            role_fragility_score,
+            touchdown_dependency_rate,
+            total_epa,
+            analytical_grade,
+            analytical_verdict,
+            primary_qb_name,
+            primary_qb_epa_per_target,
+            qbs_targeted_by,
+            injury_status,
+            primary_injury,
+            sleeper_add_count,
+            sleeper_drop_count,
+            thin_role_big_week,
+            points_outran_role,
+            role_backed_production,
+            ROUND(
+                role_fragility_score
+                + IF(points_outran_role, 15, 0)
+                + IF(thin_role_big_week, 15, 0)
+                + IF(touchdown_dependency_rate >= 0.45 AND touchdowns > 0, 15, 0)
+                + IF(fantasy_points_per_opportunity >= 2.5 AND skill_player_opportunities < 10, 10, 0)
+                - IF(role_backed_production, 35, 0),
+                2
+            ) AS fraud_score
+        FROM `{project_id}.{dataset_id}.analytics_player_weekly_truth`
+        WHERE position IN ('QB', 'RB', 'WR', 'TE')
+            AND season_type = 'REG'
+            AND fantasy_points_ppr >= 8
+    )
+    SELECT
+        *,
+        CASE
+            WHEN role_backed_production THEN 'Not fraud: role backed it up'
+            WHEN touchdown_dependency_rate >= 0.45
+                AND touchdowns > 0
+                AND skill_player_opportunities < 12
+                THEN 'TD merchant'
+            WHEN thin_role_big_week THEN 'Thin role, loud box score'
+            WHEN offense_pct IS NOT NULL
+                AND offense_pct < 0.65
+                AND fantasy_points_ppr >= 12
+                THEN 'Snap-count fraud watch'
+            WHEN points_outran_role THEN 'Points outran role'
+            WHEN role_fragility_score >= 55 THEN 'Fragile role'
+            ELSE 'Monitor only'
+        END AS fraud_label,
+        CASE
+            WHEN role_backed_production
+                THEN 'The production has enough role support. Do not force a fraud take just because the points were high.'
+            WHEN touchdown_dependency_rate >= 0.45
+                AND touchdowns > 0
+                AND skill_player_opportunities < 12
+                THEN 'The fantasy week leaned too hard on touchdown points without a sturdy weekly workload.'
+            WHEN thin_role_big_week
+                THEN 'The box score was louder than the actual touch or target base.'
+            WHEN offense_pct IS NOT NULL
+                AND offense_pct < 0.65
+                AND fantasy_points_ppr >= 12
+                THEN 'Useful points came from a player who was not living on the field enough to trust blindly.'
+            WHEN points_outran_role
+                THEN 'The scoring result materially beat the role score. Treat it as repeatability risk until usage confirms it.'
+            WHEN role_fragility_score >= 55
+                THEN 'The role profile is fragile enough that the next ranking bump needs proof, not vibes.'
+            ELSE 'The profile is not clean enough to trust or loud enough to roast without more context.'
+        END AS fraud_case,
+        CASE
+            WHEN position IN ('WR', 'TE')
+                THEN 'Rising target share, WOPR, routes or snap share would make the box score more believable.'
+            WHEN position = 'RB'
+                THEN 'A stable carry base, pass-game role, and goal-line work would make the production more repeatable.'
+            WHEN position = 'QB'
+                THEN 'Repeatable rushing volume, pass volume, and EPA would separate signal from one-week noise.'
+            ELSE 'Better weekly role evidence would soften the fraud read.'
+        END AS what_would_change_mind
+    FROM candidates
+    WHERE fraud_score >= 25
     """
 
 
@@ -690,6 +848,19 @@ def materialize_player_weekly_truth(client, dataset_id="fantasy_football_brain",
     return job
 
 
+def materialize_fraud_watch(client, dataset_id="fantasy_football_brain", dry_run=False):
+    existing_tables = get_existing_tables(client, dataset_id)
+    if "analytics_player_weekly_truth" not in existing_tables:
+        raise RuntimeError(f"Missing required table: {dataset_id}.analytics_player_weekly_truth")
+
+    query = build_fraud_watch_sql(client.project, dataset_id)
+    job_config = bigquery.QueryJobConfig(dry_run=True) if dry_run else None
+    job = client.query(query, job_config=job_config)
+    if not dry_run:
+        job.result()
+    return job
+
+
 def materialize_player_qb_context(client, dataset_id="fantasy_football_brain", dry_run=False):
     existing_tables = get_existing_tables(client, dataset_id)
     if "play_by_play" not in existing_tables:
@@ -727,6 +898,7 @@ def materialize_all(client, dataset_id="fantasy_football_brain", dry_run=False):
     jobs.append(materialize_game_environment(client, dataset_id=dataset_id, dry_run=dry_run))
     jobs.extend(materialize_player_qb_context(client, dataset_id=dataset_id, dry_run=dry_run))
     jobs.append(materialize_player_weekly_truth(client, dataset_id=dataset_id, dry_run=dry_run))
+    jobs.append(materialize_fraud_watch(client, dataset_id=dataset_id, dry_run=dry_run))
     return jobs
 
 
