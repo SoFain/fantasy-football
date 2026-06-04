@@ -249,7 +249,8 @@ def render_ai_cohost():
     Script Mode is ON. Format the final answer as a voice actor or advanced TTS script.
     Do not use bullet points, numbered lists, markdown tables, or report-style section headers.
     Write in spoken paragraphs with natural pacing, short beats, and bracketed voice cues.
-    Use bracketed cues such as [sigh], [laughs], [disappointed], [sarcastic], [deadpan], [annoyed], [pause], [leans in], [mocking], [matter-of-fact], and [smirks].
+    Use bracketed cues such as [sigh], [laughs], [disappointed], [sarcastic], [deadpan], [annoyed], [pause], [interested], [mocking], [matter-of-fact], and [conspiratorial].
+    Only use cues that affect vocal delivery. Do not use physical acting, facial expression, camera, or stage-direction cues.
     Keep Pigskin arrogant, snarky, and evidence-driven. The tone should sound like a ruthless co-host delivering a segment, not a polite analyst writing notes.
     Keep the data intact. Mention important metrics in plain spoken language instead of table format.
     Example style:
