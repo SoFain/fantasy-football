@@ -898,6 +898,49 @@ def run_subprocess_live(args, custom_env=None):
     except Exception as e:
         status_area.error(f"❌ Critical exception during subprocess execution: {e}")
 
+def render_sleeper_viewer_team_analysis():
+    st.markdown("### Sleeper Viewer Team Analysis")
+    st.caption("Load one public Sleeper league/team snapshot into BigQuery so the AI can analyze the viewer's roster.")
+    sleeper_league_id = st.text_input("Sleeper League ID", placeholder="e.g. 1130687436515831808")
+    sleeper_week = st.number_input("Sleeper Week", min_value=1, max_value=18, value=1, step=1)
+    col_roster_id, col_username, col_team_name = st.columns(3)
+    with col_roster_id:
+        sleeper_roster_id = st.text_input("Roster ID", placeholder="e.g. 4")
+    with col_username:
+        sleeper_username = st.text_input("Username", placeholder="optional")
+    with col_team_name:
+        sleeper_team_name = st.text_input("Team Name", placeholder="e.g. Shartnado")
+    sleeper_display_name = st.text_input("Display Name", placeholder="optional")
+
+    if st.button("🏈 Load Sleeper Viewer Team", type="secondary"):
+        if not sleeper_league_id.strip():
+            st.error("Enter a Sleeper league ID.")
+        elif not any([sleeper_roster_id.strip(), sleeper_username.strip(), sleeper_team_name.strip(), sleeper_display_name.strip()]):
+            st.error("Enter roster ID, username, team name, or display name so I can identify the viewer team.")
+        else:
+            cmd_args = [
+                "-m",
+                "src.ingest_sleeper_league",
+                "--league-id",
+                sleeper_league_id.strip(),
+                "--week",
+                str(int(sleeper_week)),
+            ]
+            if sleeper_roster_id.strip():
+                cmd_args.extend(["--roster-id", sleeper_roster_id.strip()])
+            if sleeper_username.strip():
+                cmd_args.extend(["--username", sleeper_username.strip()])
+            if sleeper_team_name.strip():
+                cmd_args.extend(["--team-name", sleeper_team_name.strip()])
+            if sleeper_display_name.strip():
+                cmd_args.extend(["--display-name", sleeper_display_name.strip()])
+
+            exec_env = {}
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+            run_subprocess_live(cmd_args, custom_env=exec_env)
+
 # --- TAB 1: INGESTION PIPELINE ---
 with tab_ingest:
     st.markdown("### Run Statistics Ingestion")
@@ -967,48 +1010,6 @@ with tab_ingest:
             exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
 
         run_subprocess_live(cmd_args, custom_env=exec_env)
-
-    st.markdown("### Sleeper Viewer Team Analysis")
-    st.caption("Load one public Sleeper league/team snapshot into BigQuery so the AI can analyze the viewer's roster.")
-    sleeper_league_id = st.text_input("Sleeper League ID", placeholder="e.g. 1130687436515831808")
-    sleeper_week = st.number_input("Sleeper Week", min_value=1, max_value=18, value=1, step=1)
-    col_roster_id, col_username, col_team_name = st.columns(3)
-    with col_roster_id:
-        sleeper_roster_id = st.text_input("Roster ID", placeholder="e.g. 4")
-    with col_username:
-        sleeper_username = st.text_input("Username", placeholder="optional")
-    with col_team_name:
-        sleeper_team_name = st.text_input("Team Name", placeholder="e.g. Shartnado")
-    sleeper_display_name = st.text_input("Display Name", placeholder="optional")
-
-    if st.button("🏈 Load Sleeper Viewer Team", type="secondary"):
-        if not sleeper_league_id.strip():
-            st.error("Enter a Sleeper league ID.")
-        elif not any([sleeper_roster_id.strip(), sleeper_username.strip(), sleeper_team_name.strip(), sleeper_display_name.strip()]):
-            st.error("Enter roster ID, username, team name, or display name so I can identify the viewer team.")
-        else:
-            cmd_args = [
-                "-m",
-                "src.ingest_sleeper_league",
-                "--league-id",
-                sleeper_league_id.strip(),
-                "--week",
-                str(int(sleeper_week)),
-            ]
-            if sleeper_roster_id.strip():
-                cmd_args.extend(["--roster-id", sleeper_roster_id.strip()])
-            if sleeper_username.strip():
-                cmd_args.extend(["--username", sleeper_username.strip()])
-            if sleeper_team_name.strip():
-                cmd_args.extend(["--team-name", sleeper_team_name.strip()])
-            if sleeper_display_name.strip():
-                cmd_args.extend(["--display-name", sleeper_display_name.strip()])
-
-            exec_env = {}
-            if gcp_key_path:
-                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-
-            run_subprocess_live(cmd_args, custom_env=exec_env)
 
     st.markdown("### Player Context Verification")
     verify_player = st.text_input(
@@ -1177,6 +1178,8 @@ with tab_segments:
     st.markdown("### Segment Charts")
     st.markdown("Production-ready charts and data cuts for show segments. Keep the chat tab clean and use this space for visual prep.")
     render_fraud_watch_segment()
+    st.divider()
+    render_sleeper_viewer_team_analysis()
 
 # --- TAB 4: AI DATA ASSISTANT ---
 with tab_ai:
