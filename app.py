@@ -733,7 +733,7 @@ def render_value_analyzer():
                     # 3. Call Gemini
                     import google.generativeai as genai
                     genai.configure(api_key=active_gemini_key)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    model = genai.GenerativeModel('gemini-3.5-flash')
                     
                     prompt = f"""
                     Compare these two fantasy football assets side-by-side:
