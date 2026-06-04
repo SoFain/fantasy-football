@@ -291,11 +291,20 @@ def render_ai_cohost():
     - `team_abbr` (STRING)
     - `team_name` (STRING)
 
+    - Table: `fantasy_football_brain.rookie_scouting_metrics`
+      Description: Advanced player tracking and profiling metrics for rookies (e.g. yards after contact, Yards Per Route Run, separation, success rates against coverage), imported from custom scouting imports.
+      Columns include: `season` (draft/rookie season), `player_name`, `position`, `college`, `yards_after_contact_per_attempt`, `yards_per_route_run`, `college_target_share`, `catch_radius_grade`, `success_rate_vs_man`, `success_rate_vs_zone`, `success_rate_vs_press`, `avg_separation_inches`, and `data_source`.
+      
+    - Table: `fantasy_football_brain.college_player_stats`
+      Description: Season-level statistics for college players (passing, rushing, receiving totals), imported from CollegeFootballData (CFBD) API.
+      Columns include: `season`, `player_name`, `position`, `team` (college team), `conference`, `games`, `passing_yards`, `passing_tds`, `rushing_yards`, `rushing_tds`, `receptions`, `receiving_yards`, and `receiving_tds`.
+
     ### The Analytical Filter Protocol ###
     You are mandated to follow a strict query protocol when analyzing players.
     You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
+    For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.
     For viewer team analysis, first query the latest `sleeper_viewer_team_snapshots` row for the requested `league_id`, `viewer_roster_id`, username, or team name. Then query `sleeper_roster_players` and `sleeper_lineups` with `is_viewer_team = TRUE`. Join to `analytics_player_weekly_truth` by `gsis_id` when available and fallback to player name plus team when needed.
     For viewer roster criticism, separate roster construction from weekly start/sit. Identify fragile starters, bench upside, bye/injury exposure, thin positions, duplicate archetypes, tradeable surplus, and waiver needs.
     For offseason or 2026 roster context, use `current_team` and `roster_status`; use `team` only when discussing historical stat weeks.
@@ -798,6 +807,21 @@ with tab_ingest:
 
         run_subprocess_live(cmd_args, custom_env=exec_env)
 
+    st.markdown("### Ingest Market Values")
+    st.caption("Fetch current player and draft pick trade values from the FantasyCalc API and load them into BigQuery.")
+    is_dynasty_ingest = st.checkbox("Dynasty Values", value=True, help="If checked, fetches dynasty values. Otherwise, fetches redraft values.")
+    
+    if st.button("📊 Ingest FantasyCalc Market Values", type="secondary"):
+        cmd_args = ["-m", "src.fetch_market_values"]
+        if not is_dynasty_ingest:
+            cmd_args.append("--redraft")
+            
+        exec_env = {}
+        if gcp_key_path:
+            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+        run_subprocess_live(cmd_args, custom_env=exec_env)
+
     st.markdown("### Sleeper Viewer Team Analysis")
     st.caption("Load one public Sleeper league/team snapshot into BigQuery so the AI can analyze the viewer's roster.")
     sleeper_league_id = st.text_input("Sleeper League ID", placeholder="e.g. 1130687436515831808")
@@ -874,6 +898,115 @@ with tab_ingest:
                 exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
 
             run_subprocess_live(cmd_args, custom_env=exec_env)
+
+    st.markdown("### Ingest College Stats (CFBD API)")
+    st.caption("Fetch baseline college player stats for a specific season from CollegeFootballData.com.")
+    col_cfbd1, col_cfbd2 = st.columns(2)
+    with col_cfbd1:
+        cfbd_season = st.number_input("CFBD Season", min_value=2010, max_value=2030, value=2024, step=1)
+    with col_cfbd2:
+        default_cfbd_key = os.environ.get("CFBD_API_KEY", "")
+        cfbd_key = st.text_input("CFBD API Key", type="password", value=default_cfbd_key, placeholder="e.g. mock or your_cfbd_key")
+        
+    if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
+        if not cfbd_key.strip():
+            st.error("A CFBD API Key (or 'mock') is required to run the ingestion.")
+        else:
+            cmd_args = ["-m", "src.ingest_college_data", "--season", str(cfbd_season), "--api-key", cfbd_key.strip()]
+            exec_env = {}
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+            run_subprocess_live(cmd_args, custom_env=exec_env)
+
+    st.markdown("### Upload Rookie Scouting CSV")
+    st.caption("Import advanced player profiling spreadsheets (PFF, Reception Perception, or custom charts) directly into the BigQuery database.")
+    scouting_file = st.file_uploader("Choose a CSV file", type=["csv"], key="scouting_csv_uploader")
+    
+    if scouting_file is not None:
+        import pandas as pd
+        try:
+            df_scout = pd.read_csv(scouting_file)
+            st.success(f"Successfully loaded '{scouting_file.name}' with {len(df_scout)} rows!")
+            
+            # Show a small preview
+            st.dataframe(df_scout.head(3))
+            
+            st.markdown("#### Map CSV Columns to Database Fields")
+            cols_options = ["None"] + list(df_scout.columns)
+            
+            def find_default_col(options, candidates):
+                for c in candidates:
+                    for opt in options:
+                        if c.lower() in str(opt).lower():
+                            return opt
+                return "None"
+            
+            col_map = {}
+            c_season = st.selectbox("Season / Draft Year (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["season", "year", "draft"])))
+            c_name = st.selectbox("Player Name (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["player", "name"])))
+            c_pos = st.selectbox("Position", cols_options, index=cols_options.index(find_default_col(cols_options, ["position", "pos"])))
+            c_college = st.selectbox("College / School", cols_options, index=cols_options.index(find_default_col(cols_options, ["college", "school"])))
+            c_yac = st.selectbox("Yards After Contact/Attempt", cols_options, index=cols_options.index(find_default_col(cols_options, ["contact", "yac_per", "yac/"])))
+            c_yprr = st.selectbox("Yards Per Route Run (YPRR)", cols_options, index=cols_options.index(find_default_col(cols_options, ["yprr", "route_run", "route"])))
+            c_target = st.selectbox("College Target Share", cols_options, index=cols_options.index(find_default_col(cols_options, ["target_share", "target%"])))
+            c_radius = st.selectbox("Catch Radius Grade", cols_options, index=cols_options.index(find_default_col(cols_options, ["radius", "catch_rad"])))
+            c_man = st.selectbox("Success vs Man Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["man", "vs_man"])))
+            c_zone = st.selectbox("Success vs Zone Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["zone", "vs_zone"])))
+            c_press = st.selectbox("Success vs Press Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["press", "vs_press"])))
+            c_sep = st.selectbox("Average Separation", cols_options, index=cols_options.index(find_default_col(cols_options, ["separation", "sep"])))
+            
+            scout_source = st.text_input("Data Source Name", value="Reception Perception")
+            
+            if st.button("📤 Upload and Import Scouting Metrics", type="primary"):
+                if c_season == "None" or c_name == "None":
+                    st.error("❌ 'Season / Draft Year' and 'Player Name' are required fields.")
+                else:
+                    with st.spinner("Uploading to BigQuery..."):
+                        try:
+                            # Map columns
+                            mapped_df = pd.DataFrame()
+                            mapped_df["season"] = df_scout[c_season].astype("int64")
+                            mapped_df["player_name"] = df_scout[c_name].astype(str)
+                            
+                            # Helper to map nullable float/string columns
+                            def map_col(target_name, selected_col, is_float=True):
+                                if selected_col != "None":
+                                    if is_float:
+                                        mapped_df[target_name] = pd.to_numeric(df_scout[selected_col], errors="coerce")
+                                    else:
+                                        mapped_df[target_name] = df_scout[selected_col].astype(str)
+                                else:
+                                    mapped_df[target_name] = None
+                                    
+                            map_col("position", c_pos, is_float=False)
+                            map_col("college", c_college, is_float=False)
+                            map_col("yards_after_contact_per_attempt", c_yac)
+                            map_col("yards_per_route_run", c_yprr)
+                            map_col("college_target_share", c_target)
+                            map_col("catch_radius_grade", c_radius)
+                            map_col("success_rate_vs_man", c_man)
+                            map_col("success_rate_vs_zone", c_zone)
+                            map_col("success_rate_vs_press", c_press)
+                            map_col("avg_separation_inches", c_sep)
+                            mapped_df["data_source"] = scout_source
+                            
+                            # Connect and load to BigQuery
+                            from google.cloud import bigquery
+                            bq_proj = BIGQUERY_PROJECT_ID
+                            client = bigquery.Client(project=bq_proj)
+                            table_ref = f"{bq_proj}.fantasy_football_brain.rookie_scouting_metrics"
+                            
+                            # Perform append load
+                            job_config = bigquery.LoadJobConfig(
+                                write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+                            )
+                            job = client.load_table_from_dataframe(mapped_df, table_ref, job_config=job_config)
+                            job.result()
+                            st.success(f"✔ Successfully loaded {len(mapped_df)} rows into '{table_ref}'!")
+                        except Exception as ex:
+                            st.error(f"❌ Failed to upload to BigQuery: {ex}")
+        except Exception as ex:
+            st.error(f"❌ Failed to parse CSV: {ex}")
 
 # --- TAB 2: VERIFICATION ---
 with tab_validate:
