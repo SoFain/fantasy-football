@@ -1,7 +1,25 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest', '--no-cache', '--build-arg', 'COMMIT_HASH=${_COMMIT_HASH}', '.']
+  args:
+  - 'build'
+  - '-t'
+  - 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:${_IMAGE_TAG}'
+  - '-t'
+  - 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest'
+  - '--no-cache'
+  - '--build-arg'
+  - 'COMMIT_HASH=${_COMMIT_HASH}'
+  - '--build-arg'
+  - 'VERSION_LABEL=${_VERSION_LABEL}'
+  - '.'
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:${_IMAGE_TAG}']
 - name: 'gcr.io/cloud-builders/docker'
   args: ['push', 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest']
 images:
+- 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:${_IMAGE_TAG}'
 - 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest'
+substitutions:
+  _COMMIT_HASH: unknown
+  _IMAGE_TAG: dev
+  _VERSION_LABEL: dev

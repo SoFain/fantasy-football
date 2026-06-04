@@ -824,7 +824,12 @@ st.sidebar.metric(label="Active Tables", value=f"{active_tables}")
 st.sidebar.metric(label="Total Data Size", value=f"{total_size_mb:.2f} MB")
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"Version: {os.environ.get('APP_VERSION', 'Unknown')}")
+app_version = os.environ.get("APP_VERSION", "dev")
+app_commit = os.environ.get("APP_COMMIT", "unknown")
+cloud_run_revision = os.environ.get("K_REVISION", "local")
+st.sidebar.caption(f"Version: {app_version}")
+st.sidebar.caption(f"Commit: {app_commit[:7] if app_commit != 'unknown' else app_commit}")
+st.sidebar.caption(f"Revision: {cloud_run_revision}")
 
 # --- MAIN PAGE HEADER ---
 st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsafe_allow_html=True)
