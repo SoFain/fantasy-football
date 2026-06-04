@@ -53,6 +53,12 @@ SLEEPER_TABLE_SCHEMAS = {
         ("position", "STRING"), ("team", "STRING"), ("gsis_id", "STRING"), ("is_starter", "BOOLEAN"),
         ("points", "FLOAT"),
     ],
+    "sleeper_available_players": [
+        ("snapshot_at", "TIMESTAMP"), ("league_id", "STRING"), ("season", "INTEGER"), ("week", "INTEGER"),
+        ("sleeper_player_id", "STRING"), ("player_name", "STRING"), ("position", "STRING"), ("team", "STRING"),
+        ("gsis_id", "STRING"), ("status", "STRING"), ("injury_status", "STRING"),
+        ("depth_chart_position", "STRING"), ("depth_chart_order", "INTEGER"), ("fantasy_positions_json", "STRING"),
+    ],
     "sleeper_viewer_team_snapshots": [
         ("snapshot_at", "TIMESTAMP"), ("league_id", "STRING"), ("season", "INTEGER"), ("week", "INTEGER"),
         ("viewer_roster_id", "INTEGER"), ("viewer_owner_id", "STRING"), ("viewer_username", "STRING"),
@@ -161,6 +167,7 @@ def build_records(league_id, week, league, users, rosters, matchups, players_map
 
     roster_rows = []
     roster_player_rows = []
+    rostered_player_ids = set()
     for roster in rosters:
         owner = users_lookup.get(roster.get("owner_id"), {})
         is_viewer_team = roster.get("roster_id") == viewer_roster_id
@@ -191,6 +198,7 @@ def build_records(league_id, week, league, users, rosters, matchups, players_map
         reserve = set(str(player_id) for player_id in roster.get("reserve") or [])
         for player_id in roster.get("players") or []:
             player_id = str(player_id)
+            rostered_player_ids.add(player_id)
             player = players_map.get(player_id, {})
             roster_player_rows.append({
                 "snapshot_at": snapshot_at,
@@ -257,6 +265,33 @@ def build_records(league_id, week, league, users, rosters, matchups, players_map
                 "points": player_points.get(player_id),
             })
 
+    fantasy_positions = {"QB", "RB", "WR", "TE", "K", "DEF"}
+    available_player_rows = []
+    for player_id, player in players_map.items():
+        player_id = str(player_id)
+        position = player.get("position")
+        if player_id in rostered_player_ids or position not in fantasy_positions:
+            continue
+        if player.get("active") is False and player.get("status") not in {"Active", "ACT", None}:
+            continue
+
+        available_player_rows.append({
+            "snapshot_at": snapshot_at,
+            "league_id": str(league_id),
+            "season": season,
+            "week": int(week),
+            "sleeper_player_id": player_id,
+            "player_name": player_name(player),
+            "position": position,
+            "team": player.get("team"),
+            "gsis_id": player.get("gsis_id"),
+            "status": player.get("status"),
+            "injury_status": player.get("injury_status"),
+            "depth_chart_position": player.get("depth_chart_position"),
+            "depth_chart_order": player.get("depth_chart_order"),
+            "fantasy_positions_json": json.dumps(player.get("fantasy_positions") or [], sort_keys=True),
+        })
+
     viewer_summary_rows = [{
         "snapshot_at": snapshot_at,
         "league_id": str(league_id),
@@ -280,6 +315,7 @@ def build_records(league_id, week, league, users, rosters, matchups, players_map
         "sleeper_roster_players": roster_player_rows,
         "sleeper_matchups": matchup_rows,
         "sleeper_lineups": lineup_rows,
+        "sleeper_available_players": available_player_rows,
         "sleeper_viewer_team_snapshots": viewer_summary_rows,
     }
 
