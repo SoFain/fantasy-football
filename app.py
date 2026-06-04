@@ -597,7 +597,12 @@ st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsa
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Layout Tabs
-tab_ai, tab_ingest, tab_validate = st.tabs(["💬 Pigskin", "🚀 Run Ingestion Pipeline", "🔍 Verification & Partition Testing"])
+tab_ai, tab_segments, tab_ingest, tab_validate = st.tabs([
+    "💬 Pigskin",
+    "📊 Segments",
+    "🚀 Run Ingestion Pipeline",
+    "🔍 Verification & Partition Testing",
+])
 
 # Subprocess Execution Logic with Live Streaming
 def run_subprocess_live(args, custom_env=None):
@@ -805,7 +810,12 @@ with tab_validate:
             
         run_subprocess_live(cmd_args, custom_env=exec_env)
 
-# --- TAB 3: AI DATA ASSISTANT ---
-with tab_ai:
+# --- TAB 3: SEGMENTS ---
+with tab_segments:
+    st.markdown("### Segment Charts")
+    st.markdown("Production-ready charts and data cuts for show segments. Keep the chat tab clean and use this space for visual prep.")
     render_fraud_watch_segment()
+
+# --- TAB 4: AI DATA ASSISTANT ---
+with tab_ai:
     render_ai_cohost()
