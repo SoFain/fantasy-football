@@ -548,6 +548,11 @@ def render_value_analyzer():
             return fallback
         return html.escape(str(value))
 
+    def numeric_value(value, fallback=0):
+        if pd.isna(value) or value is None:
+            return fallback
+        return value
+
     # Load market players from BQ
     @st.cache_data(ttl=600, show_spinner=False)
     def load_market_players():
@@ -595,17 +600,17 @@ def render_value_analyzer():
     st.markdown("#### ⚖️ Side-by-Side Comparison")
     col_card_A, col_card_B = st.columns(2)
     
-    val_A = asset_A['market_value'] or 0
-    val_B = asset_B['market_value'] or 0
+    val_A = numeric_value(asset_A['market_value'])
+    val_B = numeric_value(asset_B['market_value'])
     
     def calculate_3yr_score(row):
         pos = row['position']
-        val = row['market_value'] or 0
+        val = numeric_value(row['market_value'])
         
         if pd.isna(pos) or not pos:
             return min(95, max(40, int(val / 65)))
             
-        rank = row['overall_rank'] or 300
+        rank = numeric_value(row['overall_rank'], fallback=300)
         base_score = max(5, int(100 - (rank / 3)))
         
         if pos == 'QB':
