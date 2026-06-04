@@ -377,12 +377,21 @@ def render_ai_cohost():
     - `team_abbr` (STRING)
     - `team_name` (STRING)
 
+    - Table: `fantasy_football_brain.rookie_scouting_metrics`
+      Description: Advanced player tracking and profiling metrics for rookies (e.g. yards after contact, Yards Per Route Run, separation, success rates against coverage), imported from custom scouting imports.
+      Columns include: `season` (draft/rookie season), `player_name`, `position`, `college`, `yards_after_contact_per_attempt`, `yards_per_route_run`, `college_target_share`, `catch_radius_grade`, `success_rate_vs_man`, `success_rate_vs_zone`, `success_rate_vs_press`, `avg_separation_inches`, and `data_source`.
+      
+    - Table: `fantasy_football_brain.college_player_stats`
+      Description: Season-level statistics for college players (passing, rushing, receiving totals), imported from CollegeFootballData (CFBD) API.
+      Columns include: `season`, `player_name`, `position`, `team` (college team), `conference`, `games`, `passing_yards`, `passing_tds`, `rushing_yards`, `rushing_tds`, `receptions`, `receiving_yards`, and `receiving_tds`.
+
     ### The Analytical Filter Protocol ###
     You are mandated to follow a strict query protocol when analyzing players.
     You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
     For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
+    For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.
     For viewer team analysis, first query the latest `sleeper_viewer_team_snapshots` row for the requested `league_id`, `viewer_roster_id`, username, or team name. Then query `sleeper_roster_players` and `sleeper_lineups` with `is_viewer_team = TRUE`. Join to `analytics_player_weekly_truth` by `gsis_id` when available and fallback to player name plus team when needed.
     For viewer roster criticism, separate roster construction from weekly start/sit. Identify fragile starters, bench upside, bye/injury exposure, thin positions, duplicate archetypes, tradeable surplus, and waiver needs.
     For offseason or 2026 roster context, use `current_team` and `roster_status`; use `team` only when discussing historical stat weeks.
@@ -528,6 +537,231 @@ def render_ai_cohost():
                 except Exception as e:
                     st.error(f"Error communicating with AI Co-Host: {e}")
 
+def render_value_analyzer():
+    import html
+    import pandas as pd
+    st.markdown("### 📊 Trade & Value Analyzer")
+    st.markdown("Compare player and draft pick values side-by-side using crowdsourced market transactions and AI projections.")
+
+    def safe_display(value, fallback="N/A"):
+        if pd.isna(value) or value is None or value == "":
+            return fallback
+        return html.escape(str(value))
+
+    def numeric_value(value, fallback=0):
+        if pd.isna(value) or value is None:
+            return fallback
+        return value
+
+    # Load market players from BQ
+    @st.cache_data(ttl=600, show_spinner=False)
+    def load_market_players():
+        try:
+            query = f"""
+                SELECT player_display_name, position, team, market_value, overall_rank, position_rank, redraft_value, tier
+                FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.market_values`
+                ORDER BY market_value DESC
+            """
+            return execute_bq_cached(query)
+        except Exception as e:
+            st.error(f"Could not load market values: {e}")
+            return None
+
+    market_df = load_market_players()
+    if market_df is None or market_df.empty:
+        st.info("⚠️ No market value data found in BigQuery. Please run the ingestion pipeline or check the database.")
+        return
+
+    # Prepare selection list
+    player_options = []
+    player_map = {}
+    for idx, row in market_df.iterrows():
+        name = row['player_display_name']
+        pos = row['position']
+        team = row['team']
+        val = row['market_value']
+        
+        if pd.isna(pos) or not pos:
+            label = f"🎫 {name} (Value: {val})"
+        else:
+            label = f"🏃 {name} ({pos} - {team}) (Value: {val})"
+        player_options.append(label)
+        player_map[label] = row
+
+    col_sel_A, col_sel_B = st.columns(2)
+    with col_sel_A:
+        selected_A = st.selectbox("Select Asset A", player_options, index=0, key="sel_a")
+        asset_A = player_map[selected_A]
+    with col_sel_B:
+        selected_B = st.selectbox("Select Asset B", player_options, index=min(1, len(player_options)-1), key="sel_b")
+        asset_B = player_map[selected_B]
+
+    # Display Side-by-Side Cards
+    st.markdown("#### ⚖️ Side-by-Side Comparison")
+    col_card_A, col_card_B = st.columns(2)
+    
+    val_A = numeric_value(asset_A['market_value'])
+    val_B = numeric_value(asset_B['market_value'])
+    
+    def calculate_3yr_score(row):
+        pos = row['position']
+        val = numeric_value(row['market_value'])
+        
+        if pd.isna(pos) or not pos:
+            return min(95, max(40, int(val / 65)))
+            
+        rank = numeric_value(row['overall_rank'], fallback=300)
+        base_score = max(5, int(100 - (rank / 3)))
+        
+        if pos == 'QB':
+            longevity_bonus = 8
+        elif pos == 'WR':
+            longevity_bonus = 5
+        elif pos == 'TE':
+            longevity_bonus = 3
+        else:
+            longevity_bonus = -5
+            
+        return min(99, max(5, base_score + longevity_bonus))
+
+    score_A = calculate_3yr_score(asset_A)
+    score_B = calculate_3yr_score(asset_B)
+
+    with col_card_A:
+        asset_a_name = safe_display(asset_A['player_display_name'])
+        asset_a_position = safe_display(asset_A['position'], "Draft Pick")
+        asset_a_team = safe_display(asset_A['team'])
+        asset_a_tier = safe_display(asset_A['tier'])
+        st.markdown(f"""
+        <div class="metric-card" style="border-left: 5px solid #10B981; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
+            <h3 style="margin-top: 0; color: #065F46;">{asset_a_name}</h3>
+            <p><b>Position:</b> {asset_a_position}</p>
+            <p><b>Team:</b> {asset_a_team}</p>
+            <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #10B981;">{val_A}</span></p>
+            <p><b>Overall Rank:</b> #{asset_A['overall_rank'] or 'N/A'}</p>
+            <p><b>Position Rank:</b> #{asset_A['position_rank'] or 'N/A'}</p>
+            <p><b>Tier:</b> {asset_a_tier}</p>
+            <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
+            <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #065F46;">{score_A}/100</span></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_card_B:
+        asset_b_name = safe_display(asset_B['player_display_name'])
+        asset_b_position = safe_display(asset_B['position'], "Draft Pick")
+        asset_b_team = safe_display(asset_B['team'])
+        asset_b_tier = safe_display(asset_B['tier'])
+        st.markdown(f"""
+        <div class="metric-card" style="border-left: 5px solid #3B82F6; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
+            <h3 style="margin-top: 0; color: #1E40AF;">{asset_b_name}</h3>
+            <p><b>Position:</b> {asset_b_position}</p>
+            <p><b>Team:</b> {asset_b_team}</p>
+            <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #3B82F6;">{val_B}</span></p>
+            <p><b>Overall Rank:</b> #{asset_B['overall_rank'] or 'N/A'}</p>
+            <p><b>Position Rank:</b> #{asset_B['position_rank'] or 'N/A'}</p>
+            <p><b>Tier:</b> {asset_b_tier}</p>
+            <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
+            <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #1E40AF;">{score_B}/100</span></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Difference & recommendation
+    diff = abs(val_A - val_B)
+    st.markdown("#### ⚖️ Value Difference Analysis")
+    if val_A > val_B:
+        st.success(f"📈 **{asset_A['player_display_name']}** has a higher value than **{asset_B['player_display_name']}** by **{diff} points**.")
+    elif val_B > val_A:
+        st.info(f"📈 **{asset_B['player_display_name']}** has a higher value than **{asset_A['player_display_name']}** by **{diff} points**.")
+    else:
+        st.warning("⚖️ Both assets are valued equally by the market.")
+
+    # Deep AI 3-Year Outlook using Gemini
+    st.markdown("#### 🧠 AI 3-Year Outlook Analysis")
+    st.markdown("Use Gemini to analyze their metrics and crawl recent team news for 3-year outlook projections.")
+
+    active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not active_gemini_key:
+        st.info("⚠️ Enter your **Gemini API Key** in the sidebar to activate the AI Analysis option.")
+    else:
+        if st.button("🧠 Run AI 3-Year Outlook Analysis", type="primary"):
+            with st.spinner("AI is fetching stats, injury reports, and crawling web news for both players..."):
+                try:
+                    # 1. Fetch metrics from BQ
+                    from google.cloud import bigquery
+                    bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+                    
+                    def query_player_history(name):
+                        q = f"""
+                            SELECT season, week, rushing_yards, rushing_tds, receiving_yards, receiving_tds, receptions, targets, fantasy_points_ppr
+                            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.weekly_metrics`
+                            WHERE LOWER(player_display_name) = LOWER(@name)
+                            ORDER BY season DESC, week DESC LIMIT 10
+                        """
+                        jc = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)])
+                        return bq_client.query(q, job_config=jc).to_dataframe()
+
+                    hist_A = query_player_history(asset_A['player_display_name'])
+                    hist_B = query_player_history(asset_B['player_display_name'])
+
+                    # 2. Get stored external verification snippets without bypassing search cost controls.
+                    def get_stored_news(name):
+                        try:
+                            q = f"""
+                                SELECT title, snippet, source_name, searched_at
+                                FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_external_context_search_results`
+                                WHERE LOWER(player_name) = LOWER(@name)
+                                ORDER BY searched_at DESC, result_rank ASC
+                                LIMIT 3
+                            """
+                            jc = bigquery.QueryJobConfig(
+                                query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
+                            )
+                            news_df = bq_client.query(q, job_config=jc).to_dataframe()
+                            if news_df.empty:
+                                return "No stored external verification leads found. Run External Player Context Verification first if current news matters."
+                            return "\n".join(
+                                f"Title: {row.title}\nSource: {row.source_name}\nSnippet: {row.snippet}"
+                                for row in news_df.itertuples(index=False)
+                            )
+                        except Exception:
+                            return "No stored external verification leads found."
+
+                    news_A = get_stored_news(asset_A['player_display_name']) if not pd.isna(asset_A['position']) else ""
+                    news_B = get_stored_news(asset_B['player_display_name']) if not pd.isna(asset_B['position']) else ""
+
+                    # 3. Call Gemini
+                    import google.generativeai as genai
+                    genai.configure(api_key=active_gemini_key)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    prompt = f"""
+                    Compare these two fantasy football assets side-by-side:
+                    
+                    Asset A: {asset_A['player_display_name']} ({asset_A['position'] if not pd.isna(asset_A['position']) else 'Pick'})
+                    - Market Value: {val_A}
+                    - Overall Rank: {asset_A['overall_rank']}
+                    - Recent Stats:\n{hist_A.to_string(index=False) if not hist_A.empty else 'No stats available'}
+                    - Recent News:\n{news_A}
+                    
+                    Asset B: {asset_B['player_display_name']} ({asset_B['position'] if not pd.isna(asset_B['position']) else 'Pick'})
+                    - Market Value: {val_B}
+                    - Overall Rank: {asset_B['overall_rank']}
+                    - Recent Stats:\n{hist_B.to_string(index=False) if not hist_B.empty else 'No stats available'}
+                    - Recent News:\n{news_B}
+                    
+                    Provide a detailed 3-year outlook comparison. Ground your comparison in age, position value degradation, offensive environment, and current news/injury profiles.
+                    Conclude with:
+                    1. Who is the safer dynasty asset?
+                    2. Who has the higher ceiling?
+                    3. What are their respective AI 3-Year Outlook Scores (0-100)?
+                    """
+                    
+                    res = model.generate_content(prompt)
+                    st.markdown("### 🧠 AI Dynasty Comparison Report")
+                    st.write(res.text)
+                except Exception as ex:
+                    st.error(f"Failed to generate AI analysis: {ex}")
+
 view_mode = st.query_params.get("view", "default")
 if view_mode == "broadcast":
     st.markdown("""
@@ -597,11 +831,12 @@ st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsa
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Layout Tabs
-tab_ai, tab_segments, tab_ingest, tab_validate = st.tabs([
+tab_ai, tab_segments, tab_ingest, tab_validate, tab_analyzer = st.tabs([
     "💬 Pigskin",
     "📊 Segments",
     "🚀 Run Ingestion Pipeline",
     "🔍 Verification & Partition Testing",
+    "📊 Trade & Value Analyzer",
 ])
 
 # Subprocess Execution Logic with Live Streaming
@@ -718,6 +953,21 @@ with tab_ingest:
 
         run_subprocess_live(cmd_args, custom_env=exec_env)
 
+    st.markdown("### Ingest Market Values")
+    st.caption("Fetch current player and draft pick trade values from the FantasyCalc API and load them into BigQuery.")
+    is_dynasty_ingest = st.checkbox("Dynasty Values", value=True, help="If checked, fetches dynasty values. Otherwise, fetches redraft values.")
+    
+    if st.button("📊 Ingest FantasyCalc Market Values", type="secondary"):
+        cmd_args = ["-m", "src.fetch_market_values"]
+        if not is_dynasty_ingest:
+            cmd_args.append("--redraft")
+            
+        exec_env = {}
+        if gcp_key_path:
+            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+        run_subprocess_live(cmd_args, custom_env=exec_env)
+
     st.markdown("### Sleeper Viewer Team Analysis")
     st.caption("Load one public Sleeper league/team snapshot into BigQuery so the AI can analyze the viewer's roster.")
     sleeper_league_id = st.text_input("Sleeper League ID", placeholder="e.g. 1130687436515831808")
@@ -795,6 +1045,118 @@ with tab_ingest:
 
             run_subprocess_live(cmd_args, custom_env=exec_env)
 
+    st.markdown("### Ingest College Stats (CFBD API)")
+    st.caption("Fetch baseline college player stats for a specific season from CollegeFootballData.com.")
+    col_cfbd1, col_cfbd2 = st.columns(2)
+    with col_cfbd1:
+        cfbd_season = st.number_input("CFBD Season", min_value=2010, max_value=2030, value=2024, step=1)
+    with col_cfbd2:
+        cfbd_key = st.text_input("CFBD API Key", type="password", placeholder="e.g. mock or your_cfbd_key")
+        
+    if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
+        if not cfbd_key.strip():
+            st.error("A CFBD API Key (or 'mock') is required to run the ingestion.")
+        else:
+            cmd_args = ["-m", "src.ingest_college_data", "--season", str(cfbd_season)]
+            exec_env = {}
+            exec_env["CFBD_API_KEY"] = cfbd_key.strip()
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+            run_subprocess_live(cmd_args, custom_env=exec_env)
+
+    st.markdown("### Upload Rookie Scouting CSV")
+    st.caption("Import advanced player profiling spreadsheets (PFF, Reception Perception, or custom charts) directly into the BigQuery database.")
+    scouting_file = st.file_uploader("Choose a CSV file", type=["csv"], key="scouting_csv_uploader")
+    
+    if scouting_file is not None:
+        import pandas as pd
+        try:
+            df_scout = pd.read_csv(scouting_file)
+            st.success(f"Successfully loaded '{scouting_file.name}' with {len(df_scout)} rows!")
+            
+            # Show a small preview
+            st.dataframe(df_scout.head(3))
+            
+            st.markdown("#### Map CSV Columns to Database Fields")
+            cols_options = ["None"] + list(df_scout.columns)
+            
+            def find_default_col(options, candidates):
+                for c in candidates:
+                    for opt in options:
+                        if c.lower() in str(opt).lower():
+                            return opt
+                return "None"
+            
+            col_map = {}
+            c_season = st.selectbox("Season / Draft Year (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["season", "year", "draft"])))
+            c_name = st.selectbox("Player Name (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["player", "name"])))
+            c_pos = st.selectbox("Position", cols_options, index=cols_options.index(find_default_col(cols_options, ["position", "pos"])))
+            c_college = st.selectbox("College / School", cols_options, index=cols_options.index(find_default_col(cols_options, ["college", "school"])))
+            c_yac = st.selectbox("Yards After Contact/Attempt", cols_options, index=cols_options.index(find_default_col(cols_options, ["contact", "yac_per", "yac/"])))
+            c_yprr = st.selectbox("Yards Per Route Run (YPRR)", cols_options, index=cols_options.index(find_default_col(cols_options, ["yprr", "route_run", "route"])))
+            c_target = st.selectbox("College Target Share", cols_options, index=cols_options.index(find_default_col(cols_options, ["target_share", "target%"])))
+            c_radius = st.selectbox("Catch Radius Grade", cols_options, index=cols_options.index(find_default_col(cols_options, ["radius", "catch_rad"])))
+            c_man = st.selectbox("Success vs Man Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["man", "vs_man"])))
+            c_zone = st.selectbox("Success vs Zone Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["zone", "vs_zone"])))
+            c_press = st.selectbox("Success vs Press Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["press", "vs_press"])))
+            c_sep = st.selectbox("Average Separation", cols_options, index=cols_options.index(find_default_col(cols_options, ["separation", "sep"])))
+            
+            scout_source = st.text_input("Data Source Name", value="Reception Perception")
+            
+            if st.button("📤 Upload and Import Scouting Metrics", type="primary"):
+                if c_season == "None" or c_name == "None":
+                    st.error("❌ 'Season / Draft Year' and 'Player Name' are required fields.")
+                else:
+                    with st.spinner("Uploading to BigQuery..."):
+                        try:
+                            # Map columns
+                            mapped_df = pd.DataFrame()
+                            mapped_df["season"] = df_scout[c_season].astype("int64")
+                            mapped_df["player_name"] = df_scout[c_name].astype(str)
+                            
+                            # Helper to map nullable float/string columns
+                            def map_col(target_name, selected_col, is_float=True):
+                                if selected_col != "None":
+                                    if is_float:
+                                        mapped_df[target_name] = pd.to_numeric(df_scout[selected_col], errors="coerce")
+                                    else:
+                                        mapped_df[target_name] = df_scout[selected_col].astype(str)
+                                else:
+                                    mapped_df[target_name] = None
+                                    
+                            map_col("position", c_pos, is_float=False)
+                            map_col("college", c_college, is_float=False)
+                            map_col("yards_after_contact_per_attempt", c_yac)
+                            map_col("yards_per_route_run", c_yprr)
+                            map_col("college_target_share", c_target)
+                            map_col("catch_radius_grade", c_radius)
+                            map_col("success_rate_vs_man", c_man)
+                            map_col("success_rate_vs_zone", c_zone)
+                            map_col("success_rate_vs_press", c_press)
+                            map_col("avg_separation_inches", c_sep)
+                            mapped_df["data_source"] = scout_source
+                            
+                            # Connect and load to BigQuery
+                            from google.cloud import bigquery
+                            from src.setup_college_tables import create_college_tables
+
+                            create_college_tables()
+                            bq_proj = BIGQUERY_PROJECT_ID
+                            client = bigquery.Client(project=bq_proj)
+                            table_ref = f"{bq_proj}.fantasy_football_brain.rookie_scouting_metrics"
+                            
+                            # Perform append load
+                            job_config = bigquery.LoadJobConfig(
+                                write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+                            )
+                            job = client.load_table_from_dataframe(mapped_df, table_ref, job_config=job_config)
+                            job.result()
+                            st.success(f"✔ Successfully loaded {len(mapped_df)} rows into '{table_ref}'!")
+                        except Exception as ex:
+                            st.error(f"❌ Failed to upload to BigQuery: {ex}")
+        except Exception as ex:
+            st.error(f"❌ Failed to parse CSV: {ex}")
+
 # --- TAB 2: VERIFICATION ---
 with tab_validate:
     st.markdown("### Range Partition Verification")
@@ -819,3 +1181,7 @@ with tab_segments:
 # --- TAB 4: AI DATA ASSISTANT ---
 with tab_ai:
     render_ai_cohost()
+
+# --- TAB 4: TRADE & VALUE ANALYZER ---
+with tab_analyzer:
+    render_value_analyzer()

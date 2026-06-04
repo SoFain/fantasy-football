@@ -1,7 +1,7 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/fantasy-football-498121/nfl-dashboard', '--no-cache', '--build-arg', 'COMMIT_HASH=${_COMMIT_HASH}', '.']
+  args: ['build', '-t', 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest', '--no-cache', '--build-arg', 'COMMIT_HASH=${_COMMIT_HASH}', '.']
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['push', 'gcr.io/fantasy-football-498121/nfl-dashboard']
+  args: ['push', 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest']
 images:
-- 'gcr.io/fantasy-football-498121/nfl-dashboard'
+- 'us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest'
