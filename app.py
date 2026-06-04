@@ -217,6 +217,15 @@ def render_ai_cohost():
         # Initialize session state for messages and chat session
         if "messages" not in st.session_state:
             st.session_state.messages = []
+
+        script_mode = st.toggle(
+            "Script mode",
+            key="pigskin_script_mode",
+            help="Format answers as a voice-ready script with bracketed performance cues instead of bullets.",
+        )
+        if st.session_state.get("chat_session_script_mode") != script_mode:
+            st.session_state.pop("chat_session", None)
+            st.session_state.chat_session_script_mode = script_mode
         
         import google.generativeai as genai
         genai.configure(api_key=active_gemini_key)
@@ -234,6 +243,19 @@ def render_ai_cohost():
             pass # We will execute this manually
             
         active_project_id = BIGQUERY_PROJECT_ID
+        script_mode_instruction = """
+
+    ### Script Mode Output Contract ###
+    Script Mode is ON. Format the final answer as a voice actor or advanced TTS script.
+    Do not use bullet points, numbered lists, markdown tables, or report-style section headers.
+    Write in spoken paragraphs with natural pacing, short beats, and bracketed voice cues.
+    Use bracketed cues such as [sigh], [laughs], [disappointed], [sarcastic], [deadpan], [annoyed], [pause], [leans in], [mocking], [matter-of-fact], and [smirks].
+    Keep Pigskin arrogant, snarky, and evidence-driven. The tone should sound like a ruthless co-host delivering a segment, not a polite analyst writing notes.
+    Keep the data intact. Mention important metrics in plain spoken language instead of table format.
+    Example style:
+    [sigh] Here is the problem. The box score is trying to sell you a miracle, and the role is standing in the back looking embarrassed.
+    [sarcastic] Great, he scored twice. Very cute. Now look at the target share before your roster starts paying vibes tax.
+    """ if script_mode else ""
 
         # Define Co-Host System Prompt
         system_prompt = f"""
@@ -259,6 +281,7 @@ def render_ai_cohost():
     - "I like the player. I hate the price. Paying WR2 tax for WR3 usage is how leagues collect donations."
     - "Respectfully, no. That narrative is vibes in a lab coat."
     - "This roster is not dead, but it is walking around with a questionable tag."
+    {script_mode_instruction}
 
     The active BigQuery project ID is '{active_project_id}' and the dataset is 'fantasy_football_brain'.
     Prefer dataset-qualified table names such as `fantasy_football_brain.analytics_player_weekly_truth` unless an explicit project ID is provided.
@@ -410,7 +433,8 @@ def render_ai_cohost():
                     st.markdown(msg["content"])
                 
         # Chat input
-        if prompt := st.chat_input("Ask your co-host a question..."):
+        placeholder = "Ask for a voice-ready script..." if script_mode else "Ask your co-host a question..."
+        if prompt := st.chat_input(placeholder):
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
@@ -457,7 +481,7 @@ def render_ai_cohost():
                                         "error": error_text,
                                     })
                                     failure_text = (
-                                        "Pigskin tried to query BigQuery, but the warehouse query failed. "
+                                        "I've got a problem: Pigskin tried to query BigQuery, but the warehouse query failed. "
                                         "I am stopping here instead of giving you a fake data-backed take. "
                                         "The failed SQL and error are shown above."
                                     )
