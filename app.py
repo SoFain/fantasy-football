@@ -267,7 +267,7 @@ def render_ai_cohost():
       Description: Weekly receiver-by-QB split table. Use this to test before/after QB changes, injury effects, and whether a receiver's role changed or only target quality changed.
       Columns include: `season`, `week`, `posteam`, `defteam`, `player_id`, `player_name`, `qb_id`, `qb_name`, `targets`, `receptions`, `catch_rate`, `receiving_yards`, `yards_per_target`, `adot`, `touchdowns`, `red_zone_targets`, `total_epa`, `epa_per_target`, `target_share_from_qb`, and `team_target_share`.
     - Table: `fantasy_football_brain.analytics_context_events`
-      Description: Curated event ledger for causal context such as QB injuries, QB changes, offensive line injuries, coaching/play-caller changes, weather, and other fantasy-relevant situational events.
+      Description: Curated event ledger for causal context such as QB injuries, QB changes, offensive line injuries, coaching/play-caller changes, training camp reports/reps, offseason/preseason usage split trends, weather, and other fantasy-relevant situational events.
       Columns include: `event_id`, `season`, `start_week`, `end_week`, `team`, `event_type`, `subject_player_id`, `subject_name`, `subject_position`, `affected_player_id`, `affected_player_name`, `affected_unit`, `causal_status`, `confidence_score`, `source_type`, `source_label`, `source_url`, `summary`, `analysis_instruction`, and `active`.
     - Table: `fantasy_football_brain.analytics_external_context_search_results`
       Description: On-demand external verification search results for player-specific outside verification. Use these results as leads, not as confirmed facts, unless the linked source clearly supports the claim.
@@ -311,7 +311,7 @@ def render_ai_cohost():
     For receiver analysis, check `analytics_player_qb_splits` or `analytics_player_qb_weekly` before blaming the player. Separate player role from QB environment.
     For game-specific or matchup-specific projections, check `analytics_game_environment`. Indoor or closed-roof games should not get weather downgrades. Outdoor high-wind, freezing, snow, or storm games can materially change passing, kicking, and efficiency assumptions.
     Do not pretend long-range weather is known. For future games outside a reliable forecast window, use stadium/roof/surface as stable context and label weather as unknown until game week.
-    For any causal claim involving injuries, coaching, play-calling, offensive line, weather, benching, or transaction intent, query `analytics_context_events` first.
+    For any causal claim involving injuries, coaching, play-calling, offensive line, weather, benching, training camp reports, usage splits, or transaction intent, query `analytics_context_events` first.
     If context events are missing or user asks for outside verification, query `analytics_external_context_search_results` for stored external verification leads before making a claim.
 
     ### Causal Claim Protocol ###
