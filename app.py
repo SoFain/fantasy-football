@@ -1021,11 +1021,83 @@ def get_sleeper_viewer_team_context(console_context):
     ])
     roster_df = client.query(roster_sql, job_config=roster_config).to_dataframe()
 
+    waiver_context = "Sleeper available-player pool was not loaded for this snapshot."
+    waiver_sql = f"""
+        WITH latest AS (
+            SELECT MAX(snapshot_at) AS snapshot_at
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_available_players`
+            WHERE league_id = @league_id
+              AND week = @week
+        ),
+        truth AS (
+            SELECT
+                player_name,
+                position,
+                ANY_VALUE(current_team) AS current_team,
+                ANY_VALUE(roster_status) AS roster_status,
+                AVG(role_quality_score) AS avg_role_quality_score,
+                AVG(points_over_role_score) AS avg_points_over_role_score,
+                AVG(role_fragility_score) AS avg_role_fragility_score,
+                AVG(fantasy_points_ppr) AS avg_ppr,
+                AVG(target_share) AS avg_target_share,
+                AVG(wopr) AS avg_wopr,
+                AVG(offense_pct) AS avg_offense_pct,
+                MAX(analytical_verdict) AS sample_verdict
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
+            WHERE season >= 2024
+            GROUP BY player_name, position
+        )
+        SELECT
+            ap.player_name,
+            ap.position,
+            ap.team AS sleeper_team,
+            ap.status,
+            ap.injury_status,
+            ap.depth_chart_position,
+            ap.depth_chart_order,
+            truth.current_team,
+            truth.roster_status,
+            truth.avg_role_quality_score,
+            truth.avg_points_over_role_score,
+            truth.avg_role_fragility_score,
+            truth.avg_ppr,
+            truth.avg_target_share,
+            truth.avg_wopr,
+            truth.avg_offense_pct,
+            truth.sample_verdict
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_available_players` ap
+        JOIN latest ON ap.snapshot_at = latest.snapshot_at
+        LEFT JOIN truth
+          ON LOWER(truth.player_name) = LOWER(ap.player_name)
+         AND truth.position = ap.position
+        WHERE ap.league_id = @league_id
+          AND ap.week = @week
+          AND ap.position IN ('QB', 'RB', 'WR', 'TE')
+        ORDER BY
+            COALESCE(truth.avg_role_quality_score, 0) DESC,
+            COALESCE(truth.avg_wopr, 0) DESC,
+            COALESCE(truth.avg_ppr, 0) DESC,
+            ap.position,
+            ap.player_name
+        LIMIT 45
+    """
+    try:
+        waiver_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("league_id", "STRING", league_id),
+            bigquery.ScalarQueryParameter("week", "INT64", week),
+        ])
+        waiver_df = client.query(waiver_sql, job_config=waiver_config).to_dataframe()
+        waiver_context = waiver_df.to_csv(index=False) if not waiver_df.empty else "No fantasy-relevant available players found for this loaded Sleeper snapshot."
+    except Exception as ex:
+        waiver_context = f"Sleeper available-player pool unavailable: {ex}"
+
     return (
         "Latest Sleeper viewer-team snapshot:\n"
         f"{snapshot_df.to_csv(index=False)}\n"
         "Viewer roster joined to AI vs Vibes role context:\n"
-        f"{roster_df.to_csv(index=False)}"
+        f"{roster_df.to_csv(index=False)}\n"
+        "Best available waiver/free agents joined to AI vs Vibes role context:\n"
+        f"{waiver_context}"
     )
 
 def render_terminal_messages(messages):
@@ -1110,6 +1182,7 @@ def render_sleeper_viewer_console():
 You are Pigskin, the AI vs Vibes co-host. This is a terminal-style Sleeper viewer-team review console.
 Be ruthless, funny, and useful. Criticize weak fantasy process, fragile roster construction, stale name value, and box-score traps.
 Do not invent facts. Use only the BigQuery context below and the conversation history. If the context is insufficient, say what is missing.
+When the user asks about waivers, free agents, upgrades, drops, or bench clutter, use the "Best available waiver/free agents" context. If that section says it is unavailable, say the waiver pool is missing instead of naming made-up pickups.
 Keep the answer concise enough for an interactive console.
 
 BigQuery context:
