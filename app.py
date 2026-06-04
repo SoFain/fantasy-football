@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import html
 import streamlit as st
 
 DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
@@ -899,9 +900,231 @@ def run_subprocess_live(args, custom_env=None):
             status_area.success("✔ Subprocess completed successfully. Review the final log lines above before refreshing.")
         else:
             status_area.error(f"❌ Subprocess failed with exit code: {return_code}")
+        return return_code
             
     except Exception as e:
         status_area.error(f"❌ Critical exception during subprocess execution: {e}")
+        return None
+
+def get_sleeper_viewer_team_context(console_context):
+    from google.cloud import bigquery
+
+    client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+    filters = ["league_id = @league_id", "week = @week"]
+    query_parameters = [
+        bigquery.ScalarQueryParameter("league_id", "STRING", console_context["league_id"]),
+        bigquery.ScalarQueryParameter("week", "INT64", int(console_context["week"])),
+    ]
+    viewer_filters = []
+
+    if console_context.get("roster_id"):
+        viewer_filters.append("viewer_roster_id = @roster_id")
+        query_parameters.append(bigquery.ScalarQueryParameter("roster_id", "INT64", int(console_context["roster_id"])))
+    if console_context.get("username"):
+        viewer_filters.append("LOWER(viewer_username) = LOWER(@username)")
+        query_parameters.append(bigquery.ScalarQueryParameter("username", "STRING", console_context["username"]))
+    if console_context.get("team_name"):
+        viewer_filters.append("LOWER(viewer_team_name) = LOWER(@team_name)")
+        query_parameters.append(bigquery.ScalarQueryParameter("team_name", "STRING", console_context["team_name"]))
+    if console_context.get("display_name"):
+        viewer_filters.append("LOWER(viewer_display_name) = LOWER(@display_name)")
+        query_parameters.append(bigquery.ScalarQueryParameter("display_name", "STRING", console_context["display_name"]))
+
+    if viewer_filters:
+        filters.append("(" + " OR ".join(viewer_filters) + ")")
+
+    snapshot_sql = f"""
+        SELECT snapshot_at, league_id, season, week, viewer_roster_id, viewer_username,
+               viewer_display_name, viewer_team_name, matchup_id, points
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_viewer_team_snapshots`
+        WHERE {" AND ".join(filters)}
+        ORDER BY snapshot_at DESC
+        LIMIT 1
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=query_parameters)
+    snapshot_df = client.query(snapshot_sql, job_config=job_config).to_dataframe()
+    if snapshot_df.empty:
+        return "No loaded Sleeper viewer-team snapshot matched this console context."
+
+    snapshot = snapshot_df.iloc[0]
+    roster_id = int(snapshot["viewer_roster_id"])
+    league_id = str(snapshot["league_id"])
+    week = int(snapshot["week"])
+
+    roster_sql = f"""
+        WITH latest AS (
+            SELECT MAX(snapshot_at) AS snapshot_at
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_roster_players`
+            WHERE league_id = @league_id
+              AND week = @week
+              AND roster_id = @roster_id
+        ),
+        truth AS (
+            SELECT
+                player_name,
+                position,
+                ANY_VALUE(current_team) AS current_team,
+                ANY_VALUE(roster_status) AS roster_status,
+                AVG(role_quality_score) AS avg_role_quality_score,
+                AVG(points_over_role_score) AS avg_points_over_role_score,
+                AVG(role_fragility_score) AS avg_role_fragility_score,
+                AVG(fantasy_points_ppr) AS avg_ppr,
+                AVG(target_share) AS avg_target_share,
+                AVG(wopr) AS avg_wopr,
+                AVG(offense_pct) AS avg_offense_pct,
+                MAX(analytical_verdict) AS sample_verdict
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
+            WHERE season >= 2024
+            GROUP BY player_name, position
+        )
+        SELECT
+            rp.player_name,
+            rp.position,
+            rp.team AS sleeper_team,
+            rp.status,
+            rp.injury_status,
+            rp.is_starter,
+            rp.is_taxi,
+            rp.is_reserve,
+            lp.points AS week_points,
+            truth.current_team,
+            truth.roster_status,
+            truth.avg_role_quality_score,
+            truth.avg_points_over_role_score,
+            truth.avg_role_fragility_score,
+            truth.avg_ppr,
+            truth.avg_target_share,
+            truth.avg_wopr,
+            truth.avg_offense_pct,
+            truth.sample_verdict
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_roster_players` rp
+        JOIN latest ON rp.snapshot_at = latest.snapshot_at
+        LEFT JOIN `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_lineups` lp
+          ON lp.league_id = rp.league_id
+         AND lp.week = rp.week
+         AND lp.roster_id = rp.roster_id
+         AND lp.sleeper_player_id = rp.sleeper_player_id
+         AND lp.snapshot_at = rp.snapshot_at
+        LEFT JOIN truth
+          ON LOWER(truth.player_name) = LOWER(rp.player_name)
+         AND truth.position = rp.position
+        WHERE rp.league_id = @league_id
+          AND rp.week = @week
+          AND rp.roster_id = @roster_id
+        ORDER BY rp.is_starter DESC, rp.position, rp.player_name
+        LIMIT 70
+    """
+    roster_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("league_id", "STRING", league_id),
+        bigquery.ScalarQueryParameter("week", "INT64", week),
+        bigquery.ScalarQueryParameter("roster_id", "INT64", roster_id),
+    ])
+    roster_df = client.query(roster_sql, job_config=roster_config).to_dataframe()
+
+    return (
+        "Latest Sleeper viewer-team snapshot:\n"
+        f"{snapshot_df.to_csv(index=False)}\n"
+        "Viewer roster joined to AI vs Vibes role context:\n"
+        f"{roster_df.to_csv(index=False)}"
+    )
+
+def render_terminal_messages(messages):
+    rows = []
+    for message in messages:
+        prompt = "you" if message["role"] == "user" else "pigskin"
+        content = html.escape(message["content"]).replace("\n", "<br>")
+        rows.append(f"<div><span class='terminal-prompt'>{prompt}$</span> {content}</div>")
+    terminal_body = "".join(rows)
+    st.markdown(
+        f"""
+        <style>
+            .sleeper-terminal {{
+                background: #080c12;
+                border: 1px solid #263241;
+                border-radius: 8px;
+                padding: 16px;
+                min-height: 220px;
+                max-height: 520px;
+                overflow-y: auto;
+                color: #d7f7df;
+                font-family: Consolas, Monaco, 'Courier New', monospace;
+                font-size: 0.92rem;
+                line-height: 1.55;
+                white-space: normal;
+            }}
+            .terminal-prompt {{
+                color: #35ff7a;
+                font-weight: 700;
+            }}
+        </style>
+        <div class="sleeper-terminal">{terminal_body}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def render_sleeper_viewer_console():
+    console_context = st.session_state.get("sleeper_viewer_console_context")
+    if not console_context:
+        st.info("Load a Sleeper viewer team above to start the team-review console.")
+        return
+
+    st.markdown("#### Team Review Console")
+    st.caption(
+        f"Context: league `{console_context['league_id']}`, week `{console_context['week']}`"
+    )
+
+    messages = st.session_state.setdefault("sleeper_viewer_console_messages", [
+        {
+            "role": "assistant",
+            "content": "Viewer-team console online. Ask for a roster audit, starter check, trade bait, waiver priorities, or a show-ready roast.",
+        }
+    ])
+    render_terminal_messages(messages)
+
+    with st.form("sleeper_viewer_console_form", clear_on_submit=True):
+        prompt = st.text_input(
+            "Terminal prompt",
+            placeholder="e.g. audit this team and tell me where it is fragile",
+            label_visibility="collapsed",
+        )
+        submitted = st.form_submit_button("Send to Pigskin")
+
+    if submitted and prompt.strip():
+        messages.append({"role": "user", "content": prompt.strip()})
+        active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        if not active_gemini_key:
+            messages.append({"role": "assistant", "content": "I've got a problem: Gemini is not configured, so this console cannot talk yet."})
+            st.rerun()
+
+        try:
+            viewer_context = get_sleeper_viewer_team_context(console_context)
+            import google.generativeai as genai
+
+            genai.configure(api_key=active_gemini_key)
+            model = genai.GenerativeModel("gemini-3.5-flash")
+            recent_history = "\n".join(
+                f"{message['role']}: {message['content']}"
+                for message in messages[-8:]
+            )
+            response = model.generate_content(f"""
+You are Pigskin, the AI vs Vibes co-host. This is a terminal-style Sleeper viewer-team review console.
+Be ruthless, funny, and useful. Criticize weak fantasy process, fragile roster construction, stale name value, and box-score traps.
+Do not invent facts. Use only the BigQuery context below and the conversation history. If the context is insufficient, say what is missing.
+Keep the answer concise enough for an interactive console.
+
+BigQuery context:
+{viewer_context}
+
+Conversation:
+{recent_history}
+""")
+            messages.append({"role": "assistant", "content": response.text})
+        except Exception as ex:
+            messages.append({
+                "role": "assistant",
+                "content": f"I've got a problem: the Sleeper viewer-team BigQuery context failed, so I am not going to fake a roster take. Error: {ex}",
+            })
+        st.rerun()
 
 def render_sleeper_viewer_team_analysis():
     st.markdown("### Sleeper Viewer Team Analysis")
@@ -944,7 +1167,24 @@ def render_sleeper_viewer_team_analysis():
             if gcp_key_path:
                 exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
 
-            run_subprocess_live(cmd_args, custom_env=exec_env)
+            return_code = run_subprocess_live(cmd_args, custom_env=exec_env)
+            if return_code == 0:
+                st.session_state.sleeper_viewer_console_context = {
+                    "league_id": sleeper_league_id.strip(),
+                    "week": int(sleeper_week),
+                    "roster_id": sleeper_roster_id.strip(),
+                    "username": sleeper_username.strip(),
+                    "team_name": sleeper_team_name.strip(),
+                    "display_name": sleeper_display_name.strip(),
+                }
+                st.session_state.sleeper_viewer_console_messages = [
+                    {
+                        "role": "assistant",
+                        "content": "Snapshot loaded. Viewer-team console online. Ask me what is cooked, what is real, and what needs to be fixed before this roster starts paying vibes tax.",
+                    }
+                ]
+
+    render_sleeper_viewer_console()
 
 # --- TAB 1: INGESTION PIPELINE ---
 with tab_ingest:
