@@ -149,6 +149,63 @@ def execute_bq_cached(sql_query: str):
     df = query_job.result().to_dataframe()
     return df
 
+def render_fraud_watch_segment():
+    st.markdown("### Fraud Watch")
+    st.markdown("Weekly box-score spikes ranked against role quality, usage stability, touchdown dependence, and snap trust.")
+
+    sql_query = f"""
+    WITH latest AS (
+        SELECT season, MAX(week) AS week
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_fraud_watch`
+        WHERE season = (
+            SELECT MAX(season)
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_fraud_watch`
+        )
+        GROUP BY season
+    )
+    SELECT
+        f.player_name,
+        f.position,
+        f.team,
+        f.current_team,
+        f.season,
+        f.week,
+        ROUND(f.fantasy_points_ppr, 2) AS ppr,
+        f.skill_player_opportunities AS opps,
+        ROUND(f.target_share, 3) AS target_share,
+        ROUND(f.wopr, 3) AS wopr,
+        f.touchdowns,
+        ROUND(f.touchdown_dependency_rate, 2) AS td_points_share,
+        ROUND(f.role_quality_score, 2) AS role_quality,
+        ROUND(f.role_fragility_score, 2) AS fragility,
+        ROUND(f.fraud_score, 2) AS fraud_score,
+        f.fraud_label,
+        f.fraud_case
+    FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_fraud_watch` f
+    JOIN latest
+        ON f.season = latest.season
+        AND f.week = latest.week
+    ORDER BY f.fraud_score DESC, f.fantasy_points_ppr DESC
+    LIMIT 20
+    """
+
+    try:
+        df = execute_bq_cached(sql_query)
+    except Exception as e:
+        st.info(f"Fraud Watch is not materialized yet: {e}")
+        return
+
+    if df.empty:
+        st.info("Fraud Watch has no candidates for the latest loaded week.")
+        return
+
+    top = df.iloc[0]
+    cols = st.columns(3)
+    cols[0].metric("Top Candidate", top["player_name"])
+    cols[1].metric("Fraud Score", f'{top["fraud_score"]:.1f}')
+    cols[2].metric("Label", top["fraud_label"])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
 def render_ai_cohost():
     st.markdown("### 💬 Pigskin")
     st.markdown("Chat with Pigskin, the AI vs Vibes co-host built to roast bad process and back it up with data.")
@@ -160,6 +217,15 @@ def render_ai_cohost():
         # Initialize session state for messages and chat session
         if "messages" not in st.session_state:
             st.session_state.messages = []
+
+        script_mode = st.toggle(
+            "Script mode",
+            key="pigskin_script_mode",
+            help="Format answers as a voice-ready script with bracketed performance cues instead of bullets.",
+        )
+        if st.session_state.get("chat_session_script_mode") != script_mode:
+            st.session_state.pop("chat_session", None)
+            st.session_state.chat_session_script_mode = script_mode
         
         import google.generativeai as genai
         genai.configure(api_key=active_gemini_key)
@@ -172,10 +238,25 @@ def render_ai_cohost():
             1. You must use a `LIMIT 50` on every query.
             2. Do NOT use `SELECT *`. You must explicitly select the columns you need.
             3. You must filter by partitioning keys (`season` and `week`) whenever possible.
+            4. For player analysis, select `current_team`, `team_changed_since_stats`, and `roster_status` when available.
             """
             pass # We will execute this manually
             
         active_project_id = BIGQUERY_PROJECT_ID
+        script_mode_instruction = """
+
+    ### Script Mode Output Contract ###
+    Script Mode is ON. Format the final answer as a voice actor or advanced TTS script.
+    Do not use bullet points, numbered lists, markdown tables, or report-style section headers.
+    Write in spoken paragraphs with natural pacing, short beats, and bracketed voice cues.
+    Use bracketed cues such as [sigh], [laughs], [disappointed], [sarcastic], [deadpan], [annoyed], [pause], [interested], [mocking], [matter-of-fact], and [conspiratorial].
+    Only use cues that affect vocal delivery. Do not use physical acting, facial expression, camera, or stage-direction cues.
+    Keep Pigskin arrogant, snarky, and evidence-driven. The tone should sound like a ruthless co-host delivering a segment, not a polite analyst writing notes.
+    Keep the data intact. Mention important metrics in plain spoken language instead of table format.
+    Example style:
+    [sigh] Here is the problem. The box score is trying to sell you a miracle, and the role is standing in the back looking embarrassed.
+    [sarcastic] Great, he scored twice. Very cute. Now look at the target share before your roster starts paying vibes tax.
+    """ if script_mode else ""
 
         # Define Co-Host System Prompt
         system_prompt = f"""
@@ -201,6 +282,7 @@ def render_ai_cohost():
     - "I like the player. I hate the price. Paying WR2 tax for WR3 usage is how leagues collect donations."
     - "Respectfully, no. That narrative is vibes in a lab coat."
     - "This roster is not dead, but it is walking around with a questionable tag."
+    {script_mode_instruction}
 
     The active BigQuery project ID is '{active_project_id}' and the dataset is 'fantasy_football_brain'.
     Prefer dataset-qualified table names such as `fantasy_football_brain.analytics_player_weekly_truth` unless an explicit project ID is provided.
@@ -209,9 +291,13 @@ def render_ai_cohost():
     
     - Table: `fantasy_football_brain.analytics_player_weekly_truth` (PRIMARY TABLE)
       Description: Derived AI vs Vibes player truth table with fantasy output, usage, red-zone role, EPA, recent trend, opportunity scoring, efficiency scoring, and criticism-ready flags.
-      Columns include: `season`, `week`, `player_id`, `player_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, and `analytical_verdict`.
+      Columns include: `season`, `week`, `player_id`, `player_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, `points_outran_role`, `thin_role_big_week`, `fragile_role`, `role_backed_production`, and `analytical_verdict`.
       `team` is the historical team for that stat week. `current_team` is the latest known roster team. If `team_changed_since_stats` is true, do not describe the player as currently on `team`.
       *PRIORITIZE THIS TABLE for almost all player analysis.*
+
+    - Table: `fantasy_football_brain.analytics_fraud_watch`
+      Description: First AI vs Vibes show segment table. Use it to identify fantasy box scores that outran the player's actual role quality.
+      Columns include: `season`, `week`, `player_name`, `position`, `team`, `current_team`, `fantasy_points_ppr`, `skill_player_opportunities`, `target_share`, `wopr`, `offense_pct`, `touchdowns`, `touchdown_dependency_rate`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `fraud_score`, `fraud_label`, `fraud_case`, and `what_would_change_mind`.
       
     - Table: `fantasy_football_brain.weekly_metrics` (also accessible as `historical_player_metrics`)
       Columns:
@@ -304,10 +390,14 @@ def render_ai_cohost():
     You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
+    For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
     For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.
     For viewer team analysis, first query the latest `sleeper_viewer_team_snapshots` row for the requested `league_id`, `viewer_roster_id`, username, or team name. Then query `sleeper_roster_players` and `sleeper_lineups` with `is_viewer_team = TRUE`. Join to `analytics_player_weekly_truth` by `gsis_id` when available and fallback to player name plus team when needed.
     For viewer roster criticism, separate roster construction from weekly start/sit. Identify fragile starters, bench upside, bye/injury exposure, thin positions, duplicate archetypes, tradeable surplus, and waiver needs.
     For offseason or 2026 roster context, use `current_team` and `roster_status`; use `team` only when discussing historical stat weeks.
+    For any player question about "this season", "right now", "current", "2026", rankings, draft price, or team fit, your first player query MUST select `current_team`, `team_changed_since_stats`, and `roster_status`. Never describe `team` as the player's current team.
+    If a query fails, do not answer from memory. Stop and say the warehouse query failed.
+    If a player query returns zero rows, try one alternate name query using `LOWER(player_name) LIKE` or `LOWER(player_display_name) LIKE` before giving up.
     For receiver analysis, check `analytics_player_qb_splits` or `analytics_player_qb_weekly` before blaming the player. Separate player role from QB environment.
     For game-specific or matchup-specific projections, check `analytics_game_environment`. Indoor or closed-roof games should not get weather downgrades. Outdoor high-wind, freezing, snow, or storm games can materially change passing, kicking, and efficiency assumptions.
     Do not pretend long-range weather is known. For future games outside a reliable forecast window, use stadium/roof/surface as stable context and label weather as unknown until game week.
@@ -340,14 +430,21 @@ def render_ai_cohost():
         # Display chat history
         for msg in st.session_state.messages:
             if msg["role"] == "tool_status":
-                with st.status(msg["status_msg"], state="complete"):
+                with st.status(
+                    msg["status_msg"],
+                    state=msg.get("state", "complete"),
+                    expanded=msg.get("expanded", False),
+                ):
                     st.code(msg["code"], language="sql")
+                    if msg.get("error"):
+                        st.error(msg["error"])
             else:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
                 
         # Chat input
-        if prompt := st.chat_input("Ask your co-host a question..."):
+        placeholder = "Ask for a voice-ready script..." if script_mode else "Ask your co-host a question..."
+        if prompt := st.chat_input(placeholder):
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
@@ -368,21 +465,45 @@ def render_ai_cohost():
                     while fc:
                         if fc.name == "execute_bigquery_sql":
                             sql_to_run = type(fc).to_dict(fc)["args"]["sql_query"]
-                            
-                            st.session_state.messages.append({
+
+                            tool_message = {
                                 "role": "tool_status",
                                 "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
-                                "code": sql_to_run
-                            })
-                            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=False) as status:
+                                "code": sql_to_run,
+                                "state": "running",
+                                "expanded": True,
+                            }
+                            st.session_state.messages.append(tool_message)
+                            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=True) as status:
                                 st.code(sql_to_run, language="sql")
                                 try:
                                     df = execute_bq_cached(sql_to_run)
                                     status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
                                     result_str = df.to_csv(index=False) if not df.empty else "0 rows returned."
                                 except Exception as e:
-                                    status.update(label="❌ Query failed", state="error")
-                                    result_str = f"Error: {str(e)}"
+                                    error_text = str(e)
+                                    status.update(label="❌ Query failed", state="error", expanded=True)
+                                    st.error(error_text)
+                                    tool_message.update({
+                                        "status_msg": "❌ Query failed",
+                                        "state": "error",
+                                        "expanded": True,
+                                        "error": error_text,
+                                    })
+                                    failure_text = (
+                                        "I've got a problem: Pigskin tried to query BigQuery, but the warehouse query failed. "
+                                        "I am stopping here instead of giving you a fake data-backed take. "
+                                        "The failed SQL and error are shown above."
+                                    )
+                                    st.error(failure_text)
+                                    st.session_state.messages.append({"role": "assistant", "content": failure_text})
+                                    return
+
+                            tool_message.update({
+                                "status_msg": f"🤖 Analysis complete! ({len(df)} rows retrieved)",
+                                "state": "complete",
+                                "expanded": False,
+                            })
                             
                             import google.ai.generativelanguage as glm
                             tool_response = glm.Part(
@@ -417,9 +538,15 @@ def render_ai_cohost():
                     st.error(f"Error communicating with AI Co-Host: {e}")
 
 def render_value_analyzer():
+    import html
     import pandas as pd
     st.markdown("### 📊 Trade & Value Analyzer")
     st.markdown("Compare player and draft pick values side-by-side using crowdsourced market transactions and AI projections.")
+
+    def safe_display(value, fallback="N/A"):
+        if pd.isna(value) or value is None or value == "":
+            return fallback
+        return html.escape(str(value))
 
     # Load market players from BQ
     @st.cache_data(ttl=600, show_spinner=False)
@@ -496,30 +623,38 @@ def render_value_analyzer():
     score_B = calculate_3yr_score(asset_B)
 
     with col_card_A:
+        asset_a_name = safe_display(asset_A['player_display_name'])
+        asset_a_position = safe_display(asset_A['position'], "Draft Pick")
+        asset_a_team = safe_display(asset_A['team'])
+        asset_a_tier = safe_display(asset_A['tier'])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #10B981; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
-            <h3 style="margin-top: 0; color: #065F46;">{asset_A['player_display_name']}</h3>
-            <p><b>Position:</b> {asset_A['position'] if not pd.isna(asset_A['position']) else 'Draft Pick'}</p>
-            <p><b>Team:</b> {asset_A['team'] if not pd.isna(asset_A['team']) else 'N/A'}</p>
+            <h3 style="margin-top: 0; color: #065F46;">{asset_a_name}</h3>
+            <p><b>Position:</b> {asset_a_position}</p>
+            <p><b>Team:</b> {asset_a_team}</p>
             <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #10B981;">{val_A}</span></p>
             <p><b>Overall Rank:</b> #{asset_A['overall_rank'] or 'N/A'}</p>
             <p><b>Position Rank:</b> #{asset_A['position_rank'] or 'N/A'}</p>
-            <p><b>Tier:</b> {asset_A['tier'] or 'N/A'}</p>
+            <p><b>Tier:</b> {asset_a_tier}</p>
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
             <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #065F46;">{score_A}/100</span></p>
         </div>
         """, unsafe_allow_html=True)
 
     with col_card_B:
+        asset_b_name = safe_display(asset_B['player_display_name'])
+        asset_b_position = safe_display(asset_B['position'], "Draft Pick")
+        asset_b_team = safe_display(asset_B['team'])
+        asset_b_tier = safe_display(asset_B['tier'])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #3B82F6; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
-            <h3 style="margin-top: 0; color: #1E40AF;">{asset_B['player_display_name']}</h3>
-            <p><b>Position:</b> {asset_B['position'] if not pd.isna(asset_B['position']) else 'Draft Pick'}</p>
-            <p><b>Team:</b> {asset_B['team'] if not pd.isna(asset_B['team']) else 'N/A'}</p>
+            <h3 style="margin-top: 0; color: #1E40AF;">{asset_b_name}</h3>
+            <p><b>Position:</b> {asset_b_position}</p>
+            <p><b>Team:</b> {asset_b_team}</p>
             <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #3B82F6;">{val_B}</span></p>
             <p><b>Overall Rank:</b> #{asset_B['overall_rank'] or 'N/A'}</p>
             <p><b>Position Rank:</b> #{asset_B['position_rank'] or 'N/A'}</p>
-            <p><b>Tier:</b> {asset_B['tier'] or 'N/A'}</p>
+            <p><b>Tier:</b> {asset_b_tier}</p>
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
             <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #1E40AF;">{score_B}/100</span></p>
         </div>
@@ -531,7 +666,7 @@ def render_value_analyzer():
     if val_A > val_B:
         st.success(f"📈 **{asset_A['player_display_name']}** has a higher value than **{asset_B['player_display_name']}** by **{diff} points**.")
     elif val_B > val_A:
-        st.info(f"📈 **{asset_B['player_display_name']}** has a higher value than **{asset_B['player_display_name']}** by **{diff} points**.")
+        st.info(f"📈 **{asset_B['player_display_name']}** has a higher value than **{asset_A['player_display_name']}** by **{diff} points**.")
     else:
         st.warning("⚖️ Both assets are valued equally by the market.")
 
@@ -563,31 +698,31 @@ def render_value_analyzer():
                     hist_A = query_player_history(asset_A['player_display_name'])
                     hist_B = query_player_history(asset_B['player_display_name'])
 
-                    # 2. Get search snippets from Discovery Engine (Search App)
-                    def get_search_news(name):
+                    # 2. Get stored external verification snippets without bypassing search cost controls.
+                    def get_stored_news(name):
                         try:
-                            from google.cloud import discoveryengine_v1 as discoveryengine
-                            client = discoveryengine.SearchServiceClient()
-                            serving_config = f"projects/{BIGQUERY_PROJECT_ID}/locations/global/collections/default_collection/engines/fantasy-football-search-engine/servingConfigs/default_config"
-                            request = discoveryengine.SearchRequest(
-                                serving_config=serving_config,
-                                query=f"{name} fantasy news injury update",
-                                page_size=3,
+                            q = f"""
+                                SELECT title, snippet, source_name, searched_at
+                                FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_external_context_search_results`
+                                WHERE LOWER(player_name) = LOWER(@name)
+                                ORDER BY searched_at DESC, result_rank ASC
+                                LIMIT 3
+                            """
+                            jc = bigquery.QueryJobConfig(
+                                query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
                             )
-                            resp = client.search(request)
-                            results = []
-                            for r in resp.results:
-                                title = r.document.derived_struct_data.get('title', '')
-                                snip = ""
-                                if 'snippets' in r.document.derived_struct_data and len(r.document.derived_struct_data['snippets']) > 0:
-                                    snip = r.document.derived_struct_data['snippets'][0].get('htmlSnippet', '')
-                                results.append(f"Title: {title}\nSnippet: {snip}")
-                            return "\n".join(results)
+                            news_df = bq_client.query(q, job_config=jc).to_dataframe()
+                            if news_df.empty:
+                                return "No stored external verification leads found. Run External Player Context Verification first if current news matters."
+                            return "\n".join(
+                                f"Title: {row.title}\nSource: {row.source_name}\nSnippet: {row.snippet}"
+                                for row in news_df.itertuples(index=False)
+                            )
                         except Exception:
-                            return "No web matches found."
+                            return "No stored external verification leads found."
 
-                    news_A = get_search_news(asset_A['player_display_name']) if not pd.isna(asset_A['position']) else ""
-                    news_B = get_search_news(asset_B['player_display_name']) if not pd.isna(asset_B['position']) else ""
+                    news_A = get_stored_news(asset_A['player_display_name']) if not pd.isna(asset_A['position']) else ""
+                    news_B = get_stored_news(asset_B['player_display_name']) if not pd.isna(asset_B['position']) else ""
 
                     # 3. Call Gemini
                     import google.generativeai as genai
@@ -691,7 +826,13 @@ st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsa
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Layout Tabs
-tab_ai, tab_ingest, tab_validate, tab_analyzer = st.tabs(["💬 Pigskin", "🚀 Run Ingestion Pipeline", "🔍 Verification & Partition Testing", "📊 Trade & Value Analyzer"])
+tab_ai, tab_segments, tab_ingest, tab_validate, tab_analyzer = st.tabs([
+    "💬 Pigskin",
+    "📊 Segments",
+    "🚀 Run Ingestion Pipeline",
+    "🔍 Verification & Partition Testing",
+    "📊 Trade & Value Analyzer",
+])
 
 # Subprocess Execution Logic with Live Streaming
 def run_subprocess_live(args, custom_env=None):
@@ -905,15 +1046,15 @@ with tab_ingest:
     with col_cfbd1:
         cfbd_season = st.number_input("CFBD Season", min_value=2010, max_value=2030, value=2024, step=1)
     with col_cfbd2:
-        default_cfbd_key = os.environ.get("CFBD_API_KEY", "")
-        cfbd_key = st.text_input("CFBD API Key", type="password", value=default_cfbd_key, placeholder="e.g. mock or your_cfbd_key")
+        cfbd_key = st.text_input("CFBD API Key", type="password", placeholder="e.g. mock or your_cfbd_key")
         
     if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
         if not cfbd_key.strip():
             st.error("A CFBD API Key (or 'mock') is required to run the ingestion.")
         else:
-            cmd_args = ["-m", "src.ingest_college_data", "--season", str(cfbd_season), "--api-key", cfbd_key.strip()]
+            cmd_args = ["-m", "src.ingest_college_data", "--season", str(cfbd_season)]
             exec_env = {}
+            exec_env["CFBD_API_KEY"] = cfbd_key.strip()
             if gcp_key_path:
                 exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
             run_subprocess_live(cmd_args, custom_env=exec_env)
@@ -992,6 +1133,9 @@ with tab_ingest:
                             
                             # Connect and load to BigQuery
                             from google.cloud import bigquery
+                            from src.setup_college_tables import create_college_tables
+
+                            create_college_tables()
                             bq_proj = BIGQUERY_PROJECT_ID
                             client = bigquery.Client(project=bq_proj)
                             table_ref = f"{bq_proj}.fantasy_football_brain.rookie_scouting_metrics"
@@ -1023,7 +1167,13 @@ with tab_validate:
             
         run_subprocess_live(cmd_args, custom_env=exec_env)
 
-# --- TAB 3: AI DATA ASSISTANT ---
+# --- TAB 3: SEGMENTS ---
+with tab_segments:
+    st.markdown("### Segment Charts")
+    st.markdown("Production-ready charts and data cuts for show segments. Keep the chat tab clean and use this space for visual prep.")
+    render_fraud_watch_segment()
+
+# --- TAB 4: AI DATA ASSISTANT ---
 with tab_ai:
     render_ai_cohost()
 
