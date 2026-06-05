@@ -2,6 +2,8 @@ import os
 import sys
 import subprocess
 import html
+import logging
+import base64
 import streamlit as st
 
 DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
@@ -15,7 +17,7 @@ os.environ.setdefault("BQ_PROJECT", BIGQUERY_PROJECT_ID)
 
 # Set Streamlit Page Configuration
 st.set_page_config(
-    page_title="NFL Data Studio",
+    page_title="AI vs Meatbags",
     page_icon="🏈",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -86,11 +88,164 @@ st.markdown("""
         color: #4B5563;
         margin-bottom: 2rem;
     }
+    .show-logo-frame {
+        margin: 0.25rem 0 0.75rem;
+    }
+    .show-logo {
+        display: block;
+        width: min(100%, 1280px);
+        height: auto;
+    }
     .metric-card {
         background-color: #F3F4F6;
         border-radius: 8px;
         padding: 15px;
         border-left: 5px solid #1E3A8A;
+    }
+    div[data-testid="stElementContainer"]:has(.tab-action-bar) {
+        position: sticky !important;
+        top: 0.45rem;
+        z-index: 10;
+    }
+    .tab-action-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0.45rem 0 1.55rem;
+        padding: 0.55rem 0.65rem;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 8px;
+        background: rgba(8, 12, 18, 0.92);
+        backdrop-filter: blur(10px);
+    }
+    .tab-action-label {
+        color: rgba(226, 232, 240, 0.72);
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+    .bookmark-menu {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin: 0;
+    }
+    .bookmark-menu a {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        border-radius: 999px;
+        padding: 0.28rem 0.65rem;
+        color: #dbeafe;
+        font-size: 0.82rem;
+        line-height: 1.1;
+        text-decoration: none;
+        background: rgba(148, 163, 184, 0.08);
+    }
+    .bookmark-menu a:hover {
+        border-color: rgba(255, 75, 75, 0.7);
+        color: #ff4b4b;
+    }
+    .section-rule {
+        margin: 2rem 0 1.05rem;
+        border: 0;
+        border-top: 1px solid rgba(148, 163, 184, 0.24);
+    }
+    .section-anchor {
+        display: block;
+        height: 5.5rem;
+        margin-top: -5.5rem;
+        visibility: hidden;
+    }
+    .section-subtitle {
+        margin: -0.35rem 0 0.85rem;
+        color: var(--text-color, #0f172a);
+        opacity: 0.72;
+        font-size: 0.92rem;
+        line-height: 1.45;
+    }
+    .risk-band {
+        margin: 1rem 0 1.25rem;
+        padding: 0.95rem;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 8px;
+        background: rgba(148, 163, 184, 0.055);
+    }
+    .risk-band-title {
+        margin-bottom: 0.18rem;
+        font-size: 0.95rem;
+        font-weight: 800;
+    }
+    .risk-band-copy {
+        margin-bottom: 0.85rem;
+        color: var(--text-color, #0f172a);
+        opacity: 0.68;
+        font-size: 0.84rem;
+        line-height: 1.45;
+    }
+    .risk-band.safe {
+        border-left: 4px solid #22c55e;
+    }
+    .risk-band.external {
+        border-left: 4px solid #38bdf8;
+    }
+    .risk-band.destructive {
+        border-left: 4px solid #ef4444;
+    }
+    .last-run {
+        margin: 0.35rem 0 0.85rem;
+        color: var(--text-color, #0f172a);
+        opacity: 0.66;
+        font-size: 0.8rem;
+    }
+    .runtime-status-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        gap: 0.85rem;
+        margin: 0.5rem 0 0.65rem;
+    }
+    .runtime-status-card {
+        min-width: 0;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 8px;
+        padding: 0.78rem 0.85rem;
+        background: rgba(148, 163, 184, 0.06);
+    }
+    .runtime-status-label {
+        margin-bottom: 0.42rem;
+        color: var(--text-color, #0f172a);
+        opacity: 0.72;
+        font-size: clamp(0.66rem, 0.72vw, 0.78rem);
+        font-weight: 700;
+        line-height: 1.1;
+    }
+    .runtime-status-value {
+        color: var(--text-color, #0f172a);
+        font-size: clamp(1rem, 1.5vw, 1.45rem);
+        font-weight: 700;
+        line-height: 1.16;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    .runtime-status-caption {
+        margin-top: 0.4rem;
+        color: var(--text-color, #0f172a);
+        opacity: 0.66;
+        font-size: 0.8rem;
+    }
+    @media (max-width: 760px) {
+        .runtime-status-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .main-title {
+            font-size: 1.75rem;
+            line-height: 1.1;
+        }
+        .show-logo-frame {
+            margin-top: 0;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -104,6 +259,27 @@ else:
     PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 CACHE_DIR = os.path.join(PROJECT_ROOT, "cache")
+SHOW_LOGO_PATHS = {
+    "desktop": os.path.join(PROJECT_ROOT, "assets", "ai-v-meatbags-dashboard-01.png"),
+    "tablet": os.path.join(PROJECT_ROOT, "assets", "ai-v-meatbags-dashboard-1800x450.png"),
+    "mobile": os.path.join(PROJECT_ROOT, "assets", "ai-v-meatbags-dashboard-1200x600.png"),
+}
+
+@st.cache_data(show_spinner=False)
+def get_image_data_uri(image_path):
+    if not os.path.exists(image_path):
+        return None
+
+    with open(image_path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+@st.cache_data(show_spinner=False)
+def get_show_logo_data_uris(logo_paths):
+    return {
+        name: get_image_data_uri(path)
+        for name, path in logo_paths.items()
+    }
 
 def get_python_executable():
     """
@@ -141,6 +317,120 @@ def get_warehouse_metrics():
         import logging
         logging.getLogger("app.metrics").warning(f"Could not fetch warehouse metrics: {e}")
     return 0, 0.0
+
+def render_tab_bookmarks(sections):
+    links = "".join(
+        f"<a href='#{html.escape(anchor)}'>{html.escape(label)}</a>"
+        for label, anchor in sections
+    )
+    st.markdown(
+        f"""
+        <div class='tab-action-bar'>
+            <span class='tab-action-label'>Jump to</span>
+            <nav class='bookmark-menu'>{links}</nav>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def render_section_header(title, anchor=None, subtitle=None, first=False):
+    if not first:
+        st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
+    if anchor:
+        st.markdown(f"<span id='{html.escape(anchor)}' class='section-anchor'></span>", unsafe_allow_html=True)
+    st.markdown(f"### {title}")
+    if subtitle:
+        st.markdown(f"<div class='section-subtitle'>{html.escape(subtitle)}</div>", unsafe_allow_html=True)
+
+def mark_successful_run(run_key):
+    from datetime import datetime, timezone
+
+    timestamp = datetime.now(timezone.utc)
+    display_timestamp = timestamp.astimezone().strftime("%Y-%m-%d %I:%M:%S %p")
+    st.session_state.setdefault("last_successful_runs", {})[run_key] = display_timestamp
+
+    try:
+        from google.api_core.exceptions import NotFound
+        from google.cloud import bigquery
+
+        client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+        table_id = f"{BIGQUERY_PROJECT_ID}.fantasy_football_brain.dashboard_job_runs"
+        try:
+            client.get_table(table_id)
+        except NotFound:
+            schema = [
+                bigquery.SchemaField("run_key", "STRING", mode="REQUIRED"),
+                bigquery.SchemaField("succeeded_at", "TIMESTAMP", mode="REQUIRED"),
+                bigquery.SchemaField("app_version", "STRING"),
+                bigquery.SchemaField("app_commit", "STRING"),
+            ]
+            table = bigquery.Table(table_id, schema=schema)
+            client.create_table(table)
+
+        errors = client.insert_rows_json(table_id, [{
+            "run_key": run_key,
+            "succeeded_at": timestamp.isoformat(),
+            "app_version": os.environ.get("APP_VERSION", "dev"),
+            "app_commit": os.environ.get("APP_COMMIT", "unknown"),
+        }])
+        if errors:
+            logging.getLogger("app.metrics").warning(f"Could not persist dashboard run status: {errors}")
+        else:
+            get_persisted_last_success.clear()
+    except Exception as ex:
+        logging.getLogger("app.metrics").warning(f"Could not persist dashboard run status: {ex}")
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_persisted_last_success(run_key):
+    try:
+        from google.cloud import bigquery
+
+        client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+        query = f"""
+            SELECT succeeded_at
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.dashboard_job_runs`
+            WHERE run_key = @run_key
+            ORDER BY succeeded_at DESC
+            LIMIT 1
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("run_key", "STRING", run_key)
+        ])
+        df = client.query(query, job_config=job_config).to_dataframe()
+        if df.empty:
+            return None
+        return df.iloc[0]["succeeded_at"].strftime("%Y-%m-%d %I:%M:%S %p")
+    except Exception as ex:
+        logging.getLogger("app.metrics").warning(f"Could not read dashboard run status: {ex}")
+    return None
+
+def render_last_success(run_key):
+    last_runs = st.session_state.get("last_successful_runs", {})
+    value = last_runs.get(run_key) or get_persisted_last_success(run_key) or "No successful run recorded yet."
+    st.markdown(f"<div class='last-run'>Last successful run: {html.escape(value)}</div>", unsafe_allow_html=True)
+
+def render_runtime_status(active_tables, total_size_mb, app_version, cloud_run_revision, app_commit):
+    safe_items = [
+        ("Active Tables", f"{active_tables}"),
+        ("Total Data Size", f"{total_size_mb:.2f} MB"),
+        ("Version", app_version),
+        ("Revision", cloud_run_revision),
+    ]
+    cards = "".join(
+        "<div class='runtime-status-card'>"
+        f"<div class='runtime-status-label'>{html.escape(label)}</div>"
+        f"<div class='runtime-status-value'>{html.escape(str(value))}</div>"
+        "</div>"
+        for label, value in safe_items
+    )
+    safe_commit = app_commit[:7] if app_commit != "unknown" else app_commit
+    st.markdown(
+        f"""
+        <div class='runtime-status-grid'>{cards}</div>
+        <div class='runtime-status-caption'>Commit: {html.escape(safe_commit)}</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def execute_bq_cached(sql_query: str):
@@ -199,9 +489,6 @@ def repair_generated_sql(sql_query: str) -> str:
 
 
 def render_fraud_watch_segment():
-    st.markdown("### Fraud Watch")
-    st.markdown("Weekly box-score spikes ranked against role quality, usage stability, touchdown dependence, and snap trust.")
-
     sql_query = f"""
     WITH latest AS (
         SELECT season, MAX(week) AS week
@@ -384,9 +671,6 @@ def cluster_reddit_topics(posts):
     return sorted(topic_rows, key=lambda item: item["popularity"], reverse=True)
 
 def render_reddit_topic_scout():
-    st.markdown("### Reddit Topic Scout")
-    st.markdown("Find the loudest fantasy football conversation clusters from weekly top Reddit posts.")
-
     col_subs, col_limit = st.columns([3, 1])
     with col_subs:
         subreddit_input = st.text_input(
@@ -435,9 +719,6 @@ def render_reddit_topic_scout():
                     )
 
 def render_ai_cohost():
-    st.markdown("### 💬 Pigskin")
-    st.markdown("Chat with Pigskin, the AI vs Vibes co-host built to roast bad process and back it up with data.")
-
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not active_gemini_key:
         st.info("⚠️ Please enter a **Gemini API Key** in the sidebar to activate the AI Co-Host.")
@@ -771,8 +1052,6 @@ def render_ai_cohost():
 def render_value_analyzer():
     import html
     import pandas as pd
-    st.markdown("### 📊 Trade & Value Analyzer")
-    st.markdown("Compare multiple players and draft pick values side-by-side using crowdsourced market transactions and AI projections.")
 
     def safe_display(value, fallback="N/A"):
         if pd.isna(value) or value is None or value == "":
@@ -1203,7 +1482,35 @@ app_commit = os.environ.get("APP_COMMIT", "unknown")
 cloud_run_revision = os.environ.get("K_REVISION", "local")
 
 # --- MAIN PAGE HEADER ---
-st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsafe_allow_html=True)
+show_logo_data_uris = get_show_logo_data_uris(SHOW_LOGO_PATHS)
+desktop_logo_data_uri = show_logo_data_uris.get("desktop")
+tablet_logo_data_uri = show_logo_data_uris.get("tablet")
+mobile_logo_data_uri = show_logo_data_uris.get("mobile")
+if desktop_logo_data_uri:
+    mobile_source = (
+        f"<source media='(max-width: 640px)' srcset='{mobile_logo_data_uri}'>"
+        if mobile_logo_data_uri
+        else ""
+    )
+    tablet_source = (
+        f"<source media='(max-width: 1024px)' srcset='{tablet_logo_data_uri}'>"
+        if tablet_logo_data_uri
+        else ""
+    )
+    st.markdown(
+        f"""
+        <div class='show-logo-frame'>
+            <picture>
+                {mobile_source}
+                {tablet_source}
+                <img class='show-logo' src='{desktop_logo_data_uri}' alt='AI vs Meatbags'>
+            </picture>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown("<div class='main-title'>AI vs Meatbags</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Workflow Tabs
@@ -1510,7 +1817,6 @@ def render_sleeper_viewer_console():
         st.info("Load a Sleeper viewer team above to start the team-review console.")
         return
 
-    st.markdown("#### Team Review Console")
     st.caption(
         f"Context: league `{console_context['league_id']}`, week `{console_context['week']}`"
     )
@@ -1570,8 +1876,6 @@ Conversation:
         st.rerun()
 
 def render_sleeper_viewer_team_analysis():
-    st.markdown("### Sleeper Viewer Team Analysis")
-    st.caption("Load one public Sleeper league/team snapshot into BigQuery so the AI can analyze the viewer's roster.")
     sleeper_league_id = st.text_input("Sleeper League ID", placeholder="e.g. 1130687436515831808")
     sleeper_week = st.number_input("Sleeper Week", min_value=1, max_value=18, value=1, step=1)
     col_roster_id, col_username, col_team_name = st.columns(3)
@@ -1627,267 +1931,348 @@ def render_sleeper_viewer_team_analysis():
                     }
                 ]
 
+    render_section_header(
+        "Team Review Console",
+        "team-console",
+        "Ask Pigskin for roster audits, starter checks, trade bait, waiver priorities, and show-ready roasts.",
+    )
     render_sleeper_viewer_console()
 
 # --- DATA OPS: INGESTION PIPELINE ---
 with tab_data_ops:
-    st.markdown("### Runtime Status")
-    status_cols = st.columns(4)
-    status_cols[0].metric("Active Tables", f"{active_tables}")
-    status_cols[1].metric("Total Data Size", f"{total_size_mb:.2f} MB")
-    status_cols[2].metric("Version", app_version)
-    status_cols[3].metric("Revision", cloud_run_revision)
-    st.caption(f"Commit: {app_commit[:7] if app_commit != 'unknown' else app_commit}")
-    st.divider()
+    render_tab_bookmarks([
+        ("Runtime", "runtime-status"),
+        ("Safe Checks", "safe-checks"),
+        ("External API", "external-api"),
+        ("Warehouse Writes", "warehouse-writes"),
+    ])
 
-    st.markdown("### Run Statistics Ingestion")
-    st.markdown("Trigger historical ingestion by downloading from APIs and loading directly into partitioned BigQuery tables.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        seasons_input = st.text_input(
-            "Target Seasons",
-            value="2024,2025,2026",
-            help="Specify comma-separated years to extract and load. Note that cached seasons will bypass APIs entirely."
-        )
-    with col2:
-        write_disp = st.selectbox(
-            "BigQuery Write Disposition",
-            options=["WRITE_TRUNCATE", "WRITE_APPEND"],
-            index=0,
-            help="WRITE_TRUNCATE completely overwrites existing tables. WRITE_APPEND appends records to the tables."
-        )
-
-    # Validate inputs
-    seasons_clean = seasons_input.strip()
-    
-    if st.button("🚀 Run Ingestion Pipeline", type="primary"):
-        if not seasons_clean:
-            st.error("Please provide at least one target season.")
-        else:
-            # Build CLI args for pipeline script
-            cmd_args = ["-m", "src.pipeline", "--seasons", seasons_clean, "--write-disposition", write_disp]
-            
-            # Setup dynamic env
-            exec_env = {}
-            if gcp_key_path:
-                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-
-            run_subprocess_live(cmd_args, custom_env=exec_env)
-
-    if st.button("🚀 Ingest Realtime Player News", type="secondary"):
-        cmd_args = ["-m", "src.ingest_news"]
-        
-        exec_env = {}
-        if gcp_key_path:
-            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-
-        run_subprocess_live(cmd_args, custom_env=exec_env)
-
-    if st.button("🧠 Load Context Event Ledger", type="secondary"):
-        cmd_args = ["-m", "src.ingest_context_events"]
-
-        exec_env = {}
-        if gcp_key_path:
-            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-
-        run_subprocess_live(cmd_args, custom_env=exec_env)
-
-    st.markdown("### Ingest Market Values")
-    st.caption("Fetch current player and draft pick trade values from the FantasyCalc API and load them into BigQuery.")
-    is_dynasty_ingest = st.checkbox("Dynasty Values", value=True, help="If checked, fetches dynasty values. Otherwise, fetches redraft values.")
-    
-    if st.button("📊 Ingest FantasyCalc Market Values", type="secondary"):
-        cmd_args = ["-m", "src.fetch_market_values"]
-        if not is_dynasty_ingest:
-            cmd_args.append("--redraft")
-            
-        exec_env = {}
-        if gcp_key_path:
-            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-        run_subprocess_live(cmd_args, custom_env=exec_env)
-
-    st.markdown("### Player Context Verification")
-    verify_player = st.text_input(
-        "Player to verify",
-        placeholder="e.g. Michael Pittman",
-        help="Runs one cost-capped external verification search and stores returned results in BigQuery."
+    render_section_header(
+        "Runtime Status",
+        "runtime-status",
+        "Current warehouse size, build identity, and Cloud Run revision.",
+        first=True,
     )
-    col_team, col_season = st.columns(2)
-    with col_team:
-        verify_team = st.text_input("Context team", placeholder="e.g. IND or PIT")
-    with col_season:
-        verify_season = st.text_input("Context season", placeholder="e.g. 2025")
-    verify_query = st.text_input(
-        "Optional exact search query",
-        placeholder='"Michael Pittman" "Daniel Jones" injury Colts'
+    render_runtime_status(active_tables, total_size_mb, app_version, cloud_run_revision, app_commit)
+
+    render_section_header(
+        "Safe Checks",
+        "safe-checks",
+        "Read-only diagnostics and metadata checks. These should not mutate warehouse data.",
     )
-
-    if st.button("🔎 Verify Player Context", type="secondary"):
-        if not verify_player.strip():
-            st.error("Enter a player name before running outside verification.")
-        else:
-            cmd_args = ["-m", "src.verify_player_context", "--player", verify_player.strip()]
-            if verify_team.strip():
-                cmd_args.extend(["--team", verify_team.strip()])
-            if verify_season.strip():
-                cmd_args.extend(["--season", verify_season.strip()])
-            if verify_query.strip():
-                cmd_args.extend(["--query", verify_query.strip()])
-            cmd_args.extend(["--max-results", os.environ.get("EXTERNAL_SEARCH_MAX_RESULTS", "3")])
+    with st.container(border=True):
+        st.markdown("#### Range Partition Verification")
+        st.caption("Inspect table metadata and partition health without running `SELECT *`.")
+        render_last_success("validation_sweep")
+        if st.button("🔍 Run Validation Sweep", type="secondary"):
+            cmd_args = ["validate.py"]
 
             exec_env = {}
             if gcp_key_path:
                 exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
 
-            run_subprocess_live(cmd_args, custom_env=exec_env)
+            if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                mark_successful_run("validation_sweep")
 
-    st.markdown("### Ingest College Stats (CFBD API)")
-    st.caption("Fetch baseline college player stats for a specific season from CollegeFootballData.com.")
-    col_cfbd1, col_cfbd2 = st.columns(2)
-    with col_cfbd1:
-        cfbd_season = st.number_input("CFBD Season", min_value=2010, max_value=2030, value=2024, step=1)
-    with col_cfbd2:
-        default_cfbd_key = os.environ.get("CFBD_API_KEY", "")
-        cfbd_key = st.text_input("CFBD API Key", type="password", value=default_cfbd_key, placeholder="e.g. mock or your_cfbd_key")
-        
-    if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
-        if not cfbd_key.strip():
-            st.error("A CFBD API Key (or 'mock') is required to run the ingestion.")
-        else:
-            cmd_args = ["-m", "src.ingest_college_data", "--season", str(cfbd_season)]
+    render_section_header(
+        "External API Refreshes",
+        "external-api",
+        "Network-backed refreshes that write narrow context tables or append fresh market/news signals.",
+    )
+    with st.container(border=True):
+        st.markdown("#### Sleeper News and Trending")
+        st.caption("Refresh real-time player news and trending add/drop vectors.")
+        render_last_success("realtime_news")
+        if st.button("🚀 Ingest Realtime Player News", type="secondary"):
+            cmd_args = ["-m", "src.ingest_news"]
+
             exec_env = {}
-            exec_env["CFBD_API_KEY"] = cfbd_key.strip()
             if gcp_key_path:
                 exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-            run_subprocess_live(cmd_args, custom_env=exec_env)
 
-    st.markdown("### Upload Rookie Scouting CSV")
-    st.caption("Import advanced player profiling spreadsheets (PFF, Reception Perception, or custom charts) directly into the BigQuery database.")
-    scouting_file = st.file_uploader("Choose a CSV file", type=["csv"], key="scouting_csv_uploader")
-    
-    if scouting_file is not None:
-        import pandas as pd
-        try:
-            df_scout = pd.read_csv(scouting_file)
-            st.success(f"Successfully loaded '{scouting_file.name}' with {len(df_scout)} rows!")
-            
-            # Show a small preview
-            st.dataframe(df_scout.head(3))
-            
-            st.markdown("#### Map CSV Columns to Database Fields")
-            cols_options = ["None"] + list(df_scout.columns)
-            
-            def find_default_col(options, candidates):
-                for c in candidates:
-                    for opt in options:
-                        if c.lower() in str(opt).lower():
-                            return opt
-                return "None"
-            
-            col_map = {}
-            c_season = st.selectbox("Season / Draft Year (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["season", "year", "draft"])))
-            c_name = st.selectbox("Player Name (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["player", "name"])))
-            c_pos = st.selectbox("Position", cols_options, index=cols_options.index(find_default_col(cols_options, ["position", "pos"])))
-            c_college = st.selectbox("College / School", cols_options, index=cols_options.index(find_default_col(cols_options, ["college", "school"])))
-            c_yac = st.selectbox("Yards After Contact/Attempt", cols_options, index=cols_options.index(find_default_col(cols_options, ["contact", "yac_per", "yac/"])))
-            c_yprr = st.selectbox("Yards Per Route Run (YPRR)", cols_options, index=cols_options.index(find_default_col(cols_options, ["yprr", "route_run", "route"])))
-            c_target = st.selectbox("College Target Share", cols_options, index=cols_options.index(find_default_col(cols_options, ["target_share", "target%"])))
-            c_radius = st.selectbox("Catch Radius Grade", cols_options, index=cols_options.index(find_default_col(cols_options, ["radius", "catch_rad"])))
-            c_man = st.selectbox("Success vs Man Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["man", "vs_man"])))
-            c_zone = st.selectbox("Success vs Zone Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["zone", "vs_zone"])))
-            c_press = st.selectbox("Success vs Press Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["press", "vs_press"])))
-            c_sep = st.selectbox("Average Separation", cols_options, index=cols_options.index(find_default_col(cols_options, ["separation", "sep"])))
-            
-            scout_source = st.text_input("Data Source Name", value="Reception Perception")
-            
-            if st.button("📤 Upload and Import Scouting Metrics", type="primary"):
-                if c_season == "None" or c_name == "None":
-                    st.error("❌ 'Season / Draft Year' and 'Player Name' are required fields.")
-                else:
-                    with st.spinner("Uploading to BigQuery..."):
-                        try:
-                            # Map columns
-                            mapped_df = pd.DataFrame()
-                            mapped_df["season"] = df_scout[c_season].astype("int64")
-                            mapped_df["player_name"] = df_scout[c_name].astype(str)
-                            
-                            # Helper to map nullable float/string columns
-                            def map_col(target_name, selected_col, is_float=True):
-                                if selected_col != "None":
-                                    if is_float:
-                                        mapped_df[target_name] = pd.to_numeric(df_scout[selected_col], errors="coerce")
+            if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                mark_successful_run("realtime_news")
+
+        st.markdown("#### Context Event Ledger")
+        st.caption("Load or refresh curated context events used by Pigskin before narrative claims.")
+        render_last_success("context_event_ledger")
+        if st.button("🧠 Load Context Event Ledger", type="secondary"):
+            cmd_args = ["-m", "src.ingest_context_events"]
+
+            exec_env = {}
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+            if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                mark_successful_run("context_event_ledger")
+
+        st.markdown("#### FantasyCalc Market Values")
+        st.caption("Fetch current player and draft pick trade values from the FantasyCalc API.")
+        render_last_success("market_values")
+        is_dynasty_ingest = st.checkbox("Dynasty Values", value=True, help="If checked, fetches dynasty values. Otherwise, fetches redraft values.")
+
+        if st.button("📊 Ingest FantasyCalc Market Values", type="secondary"):
+            cmd_args = ["-m", "src.fetch_market_values"]
+            if not is_dynasty_ingest:
+                cmd_args.append("--redraft")
+
+            exec_env = {}
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+            if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                mark_successful_run("market_values")
+
+        st.markdown("#### Player Context Verification")
+        st.caption("Run one cost-capped external verification search and store the result context.")
+        render_last_success("player_context_verification")
+        verify_player = st.text_input(
+            "Player to verify",
+            placeholder="e.g. Michael Pittman",
+            help="Runs one cost-capped external verification search and stores returned results in BigQuery."
+        )
+        col_team, col_season = st.columns(2)
+        with col_team:
+            verify_team = st.text_input("Context team", placeholder="e.g. IND or PIT")
+        with col_season:
+            verify_season = st.text_input("Context season", placeholder="e.g. 2025")
+        verify_query = st.text_input(
+            "Optional exact search query",
+            placeholder='"Michael Pittman" "Daniel Jones" injury Colts'
+        )
+
+        if st.button("🔎 Verify Player Context", type="secondary"):
+            if not verify_player.strip():
+                st.error("Enter a player name before running outside verification.")
+            else:
+                cmd_args = ["-m", "src.verify_player_context", "--player", verify_player.strip()]
+                if verify_team.strip():
+                    cmd_args.extend(["--team", verify_team.strip()])
+                if verify_season.strip():
+                    cmd_args.extend(["--season", verify_season.strip()])
+                if verify_query.strip():
+                    cmd_args.extend(["--query", verify_query.strip()])
+                cmd_args.extend(["--max-results", os.environ.get("EXTERNAL_SEARCH_MAX_RESULTS", "3")])
+
+                exec_env = {}
+                if gcp_key_path:
+                    exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+                if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                    mark_successful_run("player_context_verification")
+
+        st.markdown("#### College Stats (CFBD API)")
+        st.caption("Fetch baseline college player stats for a specific season from CollegeFootballData.com.")
+        render_last_success("college_stats")
+        col_cfbd1, col_cfbd2 = st.columns(2)
+        with col_cfbd1:
+            cfbd_season = st.number_input("CFBD Season", min_value=2010, max_value=2030, value=2024, step=1)
+        with col_cfbd2:
+            default_cfbd_key = os.environ.get("CFBD_API_KEY", "")
+            cfbd_key = st.text_input("CFBD API Key", type="password", value=default_cfbd_key, placeholder="e.g. mock or your_cfbd_key")
+
+        if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
+            if not cfbd_key.strip():
+                st.error("A CFBD API Key (or 'mock') is required to run the ingestion.")
+            else:
+                cmd_args = ["-m", "src.ingest_college_data", "--season", str(cfbd_season)]
+                exec_env = {}
+                exec_env["CFBD_API_KEY"] = cfbd_key.strip()
+                if gcp_key_path:
+                    exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+                if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                    mark_successful_run("college_stats")
+
+    render_section_header(
+        "Warehouse Writes",
+        "warehouse-writes",
+        "High-impact table loads. Review write disposition and source file mappings before running.",
+    )
+    with st.container(border=True):
+        st.markdown("#### Run Statistics Ingestion")
+        st.caption("Download from APIs and load directly into partitioned BigQuery tables.")
+        render_last_success("statistics_ingestion")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            seasons_input = st.text_input(
+                "Target Seasons",
+                value="2024,2025,2026",
+                help="Specify comma-separated years to extract and load. Note that cached seasons will bypass APIs entirely."
+            )
+        with col2:
+            write_disp = st.selectbox(
+                "BigQuery Write Disposition",
+                options=["WRITE_TRUNCATE", "WRITE_APPEND"],
+                index=0,
+                help="WRITE_TRUNCATE completely overwrites existing tables. WRITE_APPEND appends records to the tables."
+            )
+
+        seasons_clean = seasons_input.strip()
+        if write_disp == "WRITE_TRUNCATE":
+            st.warning("WRITE_TRUNCATE overwrites the target warehouse tables for the selected seasons.")
+
+        if st.button("🚀 Run Ingestion Pipeline", type="primary"):
+            if not seasons_clean:
+                st.error("Please provide at least one target season.")
+            else:
+                cmd_args = ["-m", "src.pipeline", "--seasons", seasons_clean, "--write-disposition", write_disp]
+
+                exec_env = {}
+                if gcp_key_path:
+                    exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+                if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                    mark_successful_run("statistics_ingestion")
+
+        st.markdown("#### Upload Rookie Scouting CSV")
+        st.caption("Import advanced player profiling spreadsheets into BigQuery.")
+        render_last_success("rookie_scouting_csv")
+        scouting_file = st.file_uploader("Choose a CSV file", type=["csv"], key="scouting_csv_uploader")
+
+        if scouting_file is not None:
+            import pandas as pd
+            try:
+                df_scout = pd.read_csv(scouting_file)
+                st.success(f"Successfully loaded '{scouting_file.name}' with {len(df_scout)} rows!")
+
+                st.dataframe(df_scout.head(3))
+
+                st.markdown("#### Map CSV Columns to Database Fields")
+                cols_options = ["None"] + list(df_scout.columns)
+
+                def find_default_col(options, candidates):
+                    for c in candidates:
+                        for opt in options:
+                            if c.lower() in str(opt).lower():
+                                return opt
+                    return "None"
+
+                c_season = st.selectbox("Season / Draft Year (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["season", "year", "draft"])))
+                c_name = st.selectbox("Player Name (Required)", cols_options, index=cols_options.index(find_default_col(cols_options, ["player", "name"])))
+                c_pos = st.selectbox("Position", cols_options, index=cols_options.index(find_default_col(cols_options, ["position", "pos"])))
+                c_college = st.selectbox("College / School", cols_options, index=cols_options.index(find_default_col(cols_options, ["college", "school"])))
+                c_yac = st.selectbox("Yards After Contact/Attempt", cols_options, index=cols_options.index(find_default_col(cols_options, ["contact", "yac_per", "yac/"])))
+                c_yprr = st.selectbox("Yards Per Route Run (YPRR)", cols_options, index=cols_options.index(find_default_col(cols_options, ["yprr", "route_run", "route"])))
+                c_target = st.selectbox("College Target Share", cols_options, index=cols_options.index(find_default_col(cols_options, ["target_share", "target%"])))
+                c_radius = st.selectbox("Catch Radius Grade", cols_options, index=cols_options.index(find_default_col(cols_options, ["radius", "catch_rad"])))
+                c_man = st.selectbox("Success vs Man Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["man", "vs_man"])))
+                c_zone = st.selectbox("Success vs Zone Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["zone", "vs_zone"])))
+                c_press = st.selectbox("Success vs Press Coverage", cols_options, index=cols_options.index(find_default_col(cols_options, ["press", "vs_press"])))
+                c_sep = st.selectbox("Average Separation", cols_options, index=cols_options.index(find_default_col(cols_options, ["separation", "sep"])))
+
+                scout_source = st.text_input("Data Source Name", value="Reception Perception")
+
+                if st.button("📤 Upload and Import Scouting Metrics", type="primary"):
+                    if c_season == "None" or c_name == "None":
+                        st.error("❌ 'Season / Draft Year' and 'Player Name' are required fields.")
+                    else:
+                        with st.spinner("Uploading to BigQuery..."):
+                            try:
+                                from google.cloud import bigquery
+                                from src.setup_college_tables import create_college_tables
+
+                                mapped_df = pd.DataFrame()
+                                mapped_df["season"] = df_scout[c_season].astype("int64")
+                                mapped_df["player_name"] = df_scout[c_name].astype(str)
+
+                                def map_col(target_name, selected_col, is_float=True):
+                                    if selected_col != "None":
+                                        if is_float:
+                                            mapped_df[target_name] = pd.to_numeric(df_scout[selected_col], errors="coerce")
+                                        else:
+                                            mapped_df[target_name] = df_scout[selected_col].astype(str)
                                     else:
-                                        mapped_df[target_name] = df_scout[selected_col].astype(str)
-                                else:
-                                    mapped_df[target_name] = None
-                                    
-                            map_col("position", c_pos, is_float=False)
-                            map_col("college", c_college, is_float=False)
-                            map_col("yards_after_contact_per_attempt", c_yac)
-                            map_col("yards_per_route_run", c_yprr)
-                            map_col("college_target_share", c_target)
-                            map_col("catch_radius_grade", c_radius)
-                            map_col("success_rate_vs_man", c_man)
-                            map_col("success_rate_vs_zone", c_zone)
-                            map_col("success_rate_vs_press", c_press)
-                            map_col("avg_separation_inches", c_sep)
-                            mapped_df["data_source"] = scout_source
-                            
-                            # Connect and load to BigQuery
-                            from src.setup_college_tables import create_college_tables
+                                        mapped_df[target_name] = None
 
-                            create_college_tables()
-                            bq_proj = BIGQUERY_PROJECT_ID
-                            client = bigquery.Client(project=bq_proj)
-                            table_ref = f"{bq_proj}.fantasy_football_brain.rookie_scouting_metrics"
-                            
-                            # Perform append load
-                            job_config = bigquery.LoadJobConfig(
-                                write_disposition=bigquery.WriteDisposition.WRITE_APPEND
-                            )
-                            job = client.load_table_from_dataframe(mapped_df, table_ref, job_config=job_config)
-                            job.result()
-                            st.success(f"✔ Successfully loaded {len(mapped_df)} rows into '{table_ref}'!")
-                        except Exception as ex:
-                            st.error(f"❌ Failed to upload to BigQuery: {ex}")
-        except Exception as ex:
-            st.error(f"❌ Failed to parse CSV: {ex}")
+                                map_col("position", c_pos, is_float=False)
+                                map_col("college", c_college, is_float=False)
+                                map_col("yards_after_contact_per_attempt", c_yac)
+                                map_col("yards_per_route_run", c_yprr)
+                                map_col("college_target_share", c_target)
+                                map_col("catch_radius_grade", c_radius)
+                                map_col("success_rate_vs_man", c_man)
+                                map_col("success_rate_vs_zone", c_zone)
+                                map_col("success_rate_vs_press", c_press)
+                                map_col("avg_separation_inches", c_sep)
+                                mapped_df["data_source"] = scout_source
 
-# --- DATA OPS: VERIFICATION ---
-with tab_data_ops:
-    st.divider()
-    st.markdown("### Range Partition Verification")
-    st.markdown("Check if BigQuery datasets are successfully generated and inspect physical table metadata range partitions (no `SELECT *` executed).")
-    
-    if st.button("🔍 Run Validation Sweep", type="secondary"):
-        cmd_args = ["validate.py"]
-        
-        # Setup dynamic env
-        exec_env = {}
-        if gcp_key_path:
-            exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-            
-        run_subprocess_live(cmd_args, custom_env=exec_env)
+                                create_college_tables()
+                                bq_proj = BIGQUERY_PROJECT_ID
+                                client = bigquery.Client(project=bq_proj)
+                                table_ref = f"{bq_proj}.fantasy_football_brain.rookie_scouting_metrics"
+
+                                job_config = bigquery.LoadJobConfig(
+                                    write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+                                )
+                                job = client.load_table_from_dataframe(mapped_df, table_ref, job_config=job_config)
+                                job.result()
+                                mark_successful_run("rookie_scouting_csv")
+                                st.success(f"✔ Successfully loaded {len(mapped_df)} rows into '{table_ref}'!")
+                            except Exception as ex:
+                                st.error(f"❌ Failed to upload to BigQuery: {ex}")
+            except Exception as ex:
+                st.error(f"❌ Failed to parse CSV: {ex}")
 
 # --- SHOW PREP ---
 with tab_show_prep:
     st.markdown("### Show Prep")
-    st.markdown("Find episode topics, build segment angles, and pull production-ready cuts without cluttering the Pigskin chat.")
+    st.caption("Find episode topics, build segment angles, and pull production-ready cuts without cluttering the Pigskin chat.")
+    render_tab_bookmarks([
+        ("Reddit Topics", "reddit-topics"),
+        ("Fraud Watch", "fraud-watch"),
+    ])
+    render_section_header(
+        "Reddit Topic Scout",
+        "reddit-topics",
+        "Scan weekly top fantasy football Reddit posts for show-topic clusters.",
+        first=True,
+    )
     render_reddit_topic_scout()
-    st.divider()
+    render_section_header(
+        "Fraud Watch",
+        "fraud-watch",
+        "Rank weekly box-score spikes against role quality, usage stability, touchdown dependence, and snap trust.",
+    )
     render_fraud_watch_segment()
 
 # --- VIEWER TEAM LAB ---
 with tab_viewer_lab:
     st.markdown("### Viewer Team Lab")
-    st.markdown("Load public Sleeper teams, audit roster fragility, and turn viewer submissions into show segments.")
+    st.caption("Load public Sleeper teams, audit roster fragility, and turn viewer submissions into show segments.")
+    render_tab_bookmarks([
+        ("Sleeper Loader", "sleeper-loader"),
+        ("Team Console", "team-console"),
+    ])
+    render_section_header(
+        "Sleeper Viewer Team Analysis",
+        "sleeper-loader",
+        "Load one public Sleeper league/team snapshot into BigQuery for roster analysis.",
+        first=True,
+    )
     render_sleeper_viewer_team_analysis()
 
 # --- PIGSKIN STUDIO ---
 with tab_pigskin:
+    render_tab_bookmarks([
+        ("Pigskin Chat", "pigskin-chat"),
+    ])
+    render_section_header(
+        "💬 Pigskin",
+        "pigskin-chat",
+        "Chat with the AI vs Vibes co-host built to roast bad process and back it up with data.",
+        first=True,
+    )
     render_ai_cohost()
 
 # --- TRADE LAB ---
 with tab_trade_lab:
+    render_tab_bookmarks([
+        ("Trade Analyzer", "trade-analyzer"),
+    ])
+    render_section_header(
+        "📊 Trade & Value Analyzer",
+        "trade-analyzer",
+        "Compare multiple players and draft pick values side-by-side using market data and AI projections.",
+        first=True,
+    )
     render_value_analyzer()
