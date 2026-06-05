@@ -42,6 +42,14 @@ def upload_to_bigquery(values_data, project_id, dataset_id):
         if not player_name:
             continue
             
+        # Get age
+        age = player_info.get("maybeAge")
+        if age is not None:
+            try:
+                age = float(age)
+            except ValueError:
+                age = None
+
         rows_to_insert.append({
             "player_display_name": player_name,
             "position": position,
@@ -51,6 +59,7 @@ def upload_to_bigquery(values_data, project_id, dataset_id):
             "position_rank": item.get("positionRank"),
             "redraft_value": item.get("redraftValue"),
             "tier": item.get("maybeTier"),
+            "age": age,
         })
         
     logger.info(f"Loaded {len(rows_to_insert)} players. Connecting to BigQuery...")
@@ -67,6 +76,7 @@ def upload_to_bigquery(values_data, project_id, dataset_id):
         bigquery.SchemaField("position_rank", "INTEGER", mode="NULLABLE"),
         bigquery.SchemaField("redraft_value", "INTEGER", mode="NULLABLE"),
         bigquery.SchemaField("tier", "INTEGER", mode="NULLABLE"),
+        bigquery.SchemaField("age", "FLOAT", mode="NULLABLE"),
     ]
     
     # Create table if it doesn't exist
