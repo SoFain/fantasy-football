@@ -354,7 +354,7 @@ def render_ai_cohost():
       Description: Weekly receiver-by-QB split table. Use this to test before/after QB changes, injury effects, and whether a receiver's role changed or only target quality changed.
       Columns include: `season`, `week`, `posteam`, `defteam`, `player_id`, `player_name`, `qb_id`, `qb_name`, `targets`, `receptions`, `catch_rate`, `receiving_yards`, `yards_per_target`, `adot`, `touchdowns`, `red_zone_targets`, `total_epa`, `epa_per_target`, `target_share_from_qb`, and `team_target_share`.
     - Table: `fantasy_football_brain.analytics_context_events`
-      Description: Curated event ledger for causal context such as QB injuries, QB changes, offensive line injuries, coaching/play-caller changes, weather, and other fantasy-relevant situational events.
+      Description: Curated event ledger for causal context such as QB injuries, QB changes, offensive line injuries, coaching/play-caller changes, training camp reports/reps, offseason/preseason usage split trends, weather, and other fantasy-relevant situational events.
       Columns include: `event_id`, `season`, `start_week`, `end_week`, `team`, `event_type`, `subject_player_id`, `subject_name`, `subject_position`, `affected_player_id`, `affected_player_name`, `affected_unit`, `causal_status`, `confidence_score`, `source_type`, `source_label`, `source_url`, `summary`, `analysis_instruction`, and `active`.
     - Table: `fantasy_football_brain.analytics_external_context_search_results`
       Description: On-demand external verification search results for player-specific outside verification. Use these results as leads, not as confirmed facts, unless the linked source clearly supports the claim.
@@ -402,7 +402,7 @@ def render_ai_cohost():
     For receiver analysis, check `analytics_player_qb_splits` or `analytics_player_qb_weekly` before blaming the player. Separate player role from QB environment.
     For game-specific or matchup-specific projections, check `analytics_game_environment`. Indoor or closed-roof games should not get weather downgrades. Outdoor high-wind, freezing, snow, or storm games can materially change passing, kicking, and efficiency assumptions.
     Do not pretend long-range weather is known. For future games outside a reliable forecast window, use stadium/roof/surface as stable context and label weather as unknown until game week.
-    For any causal claim involving injuries, coaching, play-calling, offensive line, weather, benching, or transaction intent, query `analytics_context_events` first.
+    For any causal claim involving injuries, coaching, play-calling, offensive line, weather, benching, training camp reports, usage splits, or transaction intent, query `analytics_context_events` first.
     If context events are missing or user asks for outside verification, query `analytics_external_context_search_results` for stored external verification leads before making a claim.
 
     ### Causal Claim Protocol ###
@@ -542,7 +542,7 @@ def render_value_analyzer():
     import html
     import pandas as pd
     st.markdown("### 📊 Trade & Value Analyzer")
-    st.markdown("Compare player and draft pick values side-by-side using crowdsourced market transactions and AI projections.")
+    st.markdown("Compare multiple players and draft pick values side-by-side using crowdsourced market transactions and AI projections.")
 
     def safe_display(value, fallback="N/A"):
         if pd.isna(value) or value is None or value == "":
@@ -559,7 +559,7 @@ def render_value_analyzer():
     def load_market_players():
         try:
             query = f"""
-                SELECT player_display_name, position, team, market_value, overall_rank, position_rank, redraft_value, tier
+                SELECT player_display_name, position, team, market_value, overall_rank, position_rank, redraft_value, tier, age
                 FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.market_values`
                 ORDER BY market_value DESC
             """
@@ -589,105 +589,229 @@ def render_value_analyzer():
         player_options.append(label)
         player_map[label] = row
 
+    # Projection Horizon Selector
+    projection_years = st.selectbox(
+        "📅 Projection Horizon (Years)",
+        [1, 2, 3, 4, 5],
+        index=2, # Default to 3 years
+        help="Select the number of years into the future to project player values based on age and positional decline curves."
+    )
+
+    # Initialize dynamic selectbox counts
+    if "num_a" not in st.session_state:
+        st.session_state.num_a = 1
+    if "num_b" not in st.session_state:
+        st.session_state.num_b = 1
+
+    # Clean up empty inputs at the end to keep exactly one blank input at the bottom of each side
+    while st.session_state.num_a > 1:
+        last_val = st.session_state.get(f"sel_a_{st.session_state.num_a - 1}", "— Select Player / Pick —")
+        prev_val = st.session_state.get(f"sel_a_{st.session_state.num_a - 2}", "— Select Player / Pick —")
+        if last_val == "— Select Player / Pick —" and prev_val == "— Select Player / Pick —":
+            st.session_state.num_a -= 1
+        else:
+            break
+
+    while st.session_state.num_b > 1:
+        last_val = st.session_state.get(f"sel_b_{st.session_state.num_b - 1}", "— Select Player / Pick —")
+        prev_val = st.session_state.get(f"sel_b_{st.session_state.num_b - 2}", "— Select Player / Pick —")
+        if last_val == "— Select Player / Pick —" and prev_val == "— Select Player / Pick —":
+            st.session_state.num_b -= 1
+        else:
+            break
+
+    # Age-based value projection logic
+    def get_retention_score(pos, age):
+        if pd.isna(age) or age is None:
+            # Fallback average peak age
+            return 1.0
+
+        if pos == 'RB':
+            if age <= 24: return 1.0
+            elif age == 25: return 0.90
+            elif age == 26: return 0.80
+            elif age == 27: return 0.60
+            elif age == 28: return 0.40
+            elif age == 29: return 0.20
+            else: return 0.10
+        elif pos == 'WR':
+            if age <= 26: return 1.0
+            elif age == 27: return 0.95
+            elif age == 28: return 0.90
+            elif age == 29: return 0.80
+            elif age == 30: return 0.65
+            elif age == 31: return 0.50
+            elif age == 32: return 0.35
+            else: return 0.15
+        elif pos == 'TE':
+            if age <= 27: return 1.0
+            elif age == 28: return 0.95
+            elif age == 29: return 0.90
+            elif age == 30: return 0.80
+            elif age == 31: return 0.70
+            elif age == 32: return 0.55
+            elif age == 33: return 0.40
+            else: return 0.20
+        elif pos == 'QB':
+            if age <= 30: return 1.0
+            elif age in (31, 32): return 0.95
+            elif age in (33, 34): return 0.90
+            elif age in (35, 36): return 0.80
+            elif age in (37, 38): return 0.60
+            else: return 0.30
+        else:
+            return 1.0
+
+    def interpolate_retention(pos, age):
+        a_low = int(age)
+        a_high = a_low + 1
+        r_low = get_retention_score(pos, a_low)
+        r_high = get_retention_score(pos, a_high)
+        return r_low + (r_high - r_low) * (age - a_low)
+
+    def project_asset_value(row, years):
+        pos = row.get('position')
+        val = numeric_value(row.get('market_value'), 0)
+        age = row.get('age')
+        
+        if pd.isna(pos) or not pos:
+            # Draft pick or other: slight discount per year
+            return int(val * (0.95 ** years))
+            
+        current_age = float(age) if (age is not None and not pd.isna(age)) else None
+        
+        if current_age is not None:
+            curr_ret = interpolate_retention(pos, current_age)
+            proj_ret = interpolate_retention(pos, current_age + years)
+            factor = proj_ret / curr_ret if curr_ret > 0 else 0
+            return int(val * factor)
+        else:
+            # Fallback if age is completely missing
+            start_age = 27 if pos == 'QB' else (24 if pos == 'RB' else (25 if pos == 'WR' else 26))
+            curr_ret = interpolate_retention(pos, start_age)
+            proj_ret = interpolate_retention(pos, start_age + years)
+            factor = proj_ret / curr_ret if curr_ret > 0 else 0
+            return int(val * factor)
+
+    # Render columns for Side A and Side B
     col_sel_A, col_sel_B = st.columns(2)
+    
     with col_sel_A:
-        selected_A = st.selectbox("Select Asset A", player_options, index=0, key="sel_a")
-        asset_A = player_map[selected_A]
+        st.markdown("#### 🟥 Side A (Assets)")
+        assets_A = []
+        for i in range(st.session_state.num_a):
+            selected = st.selectbox(
+                f"Select Asset A {i+1}",
+                ["— Select Player / Pick —"] + player_options,
+                key=f"sel_a_{i}"
+            )
+            if selected != "— Select Player / Pick —":
+                assets_A.append(player_map[selected])
+        
+        if len(assets_A) == st.session_state.num_a:
+            st.session_state.num_a += 1
+            st.rerun()
+
     with col_sel_B:
-        selected_B = st.selectbox("Select Asset B", player_options, index=min(1, len(player_options)-1), key="sel_b")
-        asset_B = player_map[selected_B]
+        st.markdown("#### 🟦 Side B (Assets)")
+        assets_B = []
+        for i in range(st.session_state.num_b):
+            selected = st.selectbox(
+                f"Select Asset B {i+1}",
+                ["— Select Player / Pick —"] + player_options,
+                key=f"sel_b_{i}"
+            )
+            if selected != "— Select Player / Pick —":
+                assets_B.append(player_map[selected])
+        
+        if len(assets_B) == st.session_state.num_b:
+            st.session_state.num_b += 1
+            st.rerun()
 
     # Display Side-by-Side Cards
     st.markdown("#### ⚖️ Side-by-Side Comparison")
     col_card_A, col_card_B = st.columns(2)
     
-    val_A = numeric_value(asset_A['market_value'])
-    val_B = numeric_value(asset_B['market_value'])
+    total_val_A = sum(numeric_value(a['market_value']) for a in assets_A)
+    total_proj_A = sum(project_asset_value(a, projection_years) for a in assets_A)
     
-    def calculate_3yr_score(row):
-        pos = row['position']
-        val = numeric_value(row['market_value'])
-        
-        if pd.isna(pos) or not pos:
-            return min(95, max(40, int(val / 65)))
-            
-        rank = numeric_value(row['overall_rank'], fallback=300)
-        base_score = max(5, int(100 - (rank / 3)))
-        
-        if pos == 'QB':
-            longevity_bonus = 8
-        elif pos == 'WR':
-            longevity_bonus = 5
-        elif pos == 'TE':
-            longevity_bonus = 3
-        else:
-            longevity_bonus = -5
-            
-        return min(99, max(5, base_score + longevity_bonus))
-
-    score_A = calculate_3yr_score(asset_A)
-    score_B = calculate_3yr_score(asset_B)
+    total_val_B = sum(numeric_value(b['market_value']) for b in assets_B)
+    total_proj_B = sum(project_asset_value(b, projection_years) for b in assets_B)
 
     with col_card_A:
-        asset_a_name = safe_display(asset_A['player_display_name'])
-        asset_a_position = safe_display(asset_A['position'], "Draft Pick")
-        asset_a_team = safe_display(asset_A['team'])
-        asset_a_tier = safe_display(asset_A['tier'])
+        asset_list_html = "".join([
+            f"<li><b>{safe_display(a['player_display_name'])}</b> ({safe_display(a['position'], 'Pick')})<br>"
+            f"Age: {safe_display(a['age'], 'N/A')} | "
+            f"Val: {numeric_value(a['market_value'])} &rarr; Projected: {project_asset_value(a, projection_years)}</li>"
+            for a in assets_A
+        ])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #10B981; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
-            <h3 style="margin-top: 0; color: #065F46;">{asset_a_name}</h3>
-            <p><b>Position:</b> {asset_a_position}</p>
-            <p><b>Team:</b> {asset_a_team}</p>
-            <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #10B981;">{val_A}</span></p>
-            <p><b>Overall Rank:</b> #{asset_A['overall_rank'] or 'N/A'}</p>
-            <p><b>Position Rank:</b> #{asset_A['position_rank'] or 'N/A'}</p>
-            <p><b>Tier:</b> {asset_a_tier}</p>
+            <h3 style="margin-top: 0; color: #065F46;">Side A Summary</h3>
+            <p><b>Current Total Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #10B981;">{total_val_A}</span></p>
+            <p><b>Projected {projection_years}-Year Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #065F46;">{total_proj_A}</span></p>
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
-            <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #065F46;">{score_A}/100</span></p>
+            <h5 style="margin-bottom: 5px;">Selected Assets:</h5>
+            <ul style="padding-left: 20px; margin-top: 0;">
+                {asset_list_html if assets_A else "<li>No assets selected</li>"}
+            </ul>
         </div>
         """, unsafe_allow_html=True)
 
     with col_card_B:
-        asset_b_name = safe_display(asset_B['player_display_name'])
-        asset_b_position = safe_display(asset_B['position'], "Draft Pick")
-        asset_b_team = safe_display(asset_B['team'])
-        asset_b_tier = safe_display(asset_B['tier'])
+        asset_list_html_B = "".join([
+            f"<li><b>{safe_display(b['player_display_name'])}</b> ({safe_display(b['position'], 'Pick')})<br>"
+            f"Age: {safe_display(b['age'], 'N/A')} | "
+            f"Val: {numeric_value(b['market_value'])} &rarr; Projected: {project_asset_value(b, projection_years)}</li>"
+            for b in assets_B
+        ])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #3B82F6; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
-            <h3 style="margin-top: 0; color: #1E40AF;">{asset_b_name}</h3>
-            <p><b>Position:</b> {asset_b_position}</p>
-            <p><b>Team:</b> {asset_b_team}</p>
-            <p><b>Market Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #3B82F6;">{val_B}</span></p>
-            <p><b>Overall Rank:</b> #{asset_B['overall_rank'] or 'N/A'}</p>
-            <p><b>Position Rank:</b> #{asset_B['position_rank'] or 'N/A'}</p>
-            <p><b>Tier:</b> {asset_b_tier}</p>
+            <h3 style="margin-top: 0; color: #1E40AF;">Side B Summary</h3>
+            <p><b>Current Total Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #3B82F6;">{total_val_B}</span></p>
+            <p><b>Projected {projection_years}-Year Value:</b> <span style="font-size: 1.6rem; font-weight: 800; color: #1E40AF;">{total_proj_B}</span></p>
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
-            <p style="margin-bottom: 0;"><b>🛡️ 3-Year Dynasty Score:</b> <span style="font-size: 1.3rem; font-weight: 700; color: #1E40AF;">{score_B}/100</span></p>
+            <h5 style="margin-bottom: 5px;">Selected Assets:</h5>
+            <ul style="padding-left: 20px; margin-top: 0;">
+                {asset_list_html_B if assets_B else "<li>No assets selected</li>"}
+            </ul>
         </div>
         """, unsafe_allow_html=True)
 
     # Difference & recommendation
-    diff = abs(val_A - val_B)
+    diff_current = abs(total_val_A - total_val_B)
+    diff_projected = abs(total_proj_A - total_proj_B)
+    
     st.markdown("#### ⚖️ Value Difference Analysis")
-    if val_A > val_B:
-        st.success(f"📈 **{asset_A['player_display_name']}** has a higher value than **{asset_B['player_display_name']}** by **{diff} points**.")
-    elif val_B > val_A:
-        st.info(f"📈 **{asset_B['player_display_name']}** has a higher value than **{asset_A['player_display_name']}** by **{diff} points**.")
+    
+    if total_val_A > total_val_B:
+        st.success(f"📈 **Side A** has a higher current value than **Side B** by **{diff_current} points**.")
+    elif total_val_B > total_val_A:
+        st.info(f"📈 **Side B** has a higher current value than **Side A** by **{diff_current} points**.")
     else:
-        st.warning("⚖️ Both assets are valued equally by the market.")
+        st.warning("⚖️ Both sides are valued equally by the market today.")
 
-    # Deep AI 3-Year Outlook using Gemini
-    st.markdown("#### 🧠 AI 3-Year Outlook Analysis")
-    st.markdown("Use Gemini to analyze their metrics and crawl recent team news for 3-year outlook projections.")
+    if total_proj_A > total_proj_B:
+        st.success(f"⏳ In **{projection_years} years**, **Side A** is projected to lead **Side B** by **{diff_projected} points**.")
+    elif total_proj_B > total_proj_A:
+        st.info(f"⏳ In **{projection_years} years**, **Side B** is projected to lead **Side A** by **{diff_projected} points**.")
+    else:
+        st.warning(f"⚖️ In **{projection_years} years**, both sides are projected to be equal in value.")
+
+    # Deep AI Outlook using Gemini
+    st.markdown(f"#### 🧠 AI {projection_years}-Year Outlook Analysis")
+    st.markdown(f"Use Gemini to analyze their metrics and crawl recent team news for {projection_years}-year outlook projections.")
 
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not active_gemini_key:
         st.info("⚠️ Enter your **Gemini API Key** in the sidebar to activate the AI Analysis option.")
     else:
-        if st.button("🧠 Run AI 3-Year Outlook Analysis", type="primary"):
-            with st.spinner("AI is fetching stats, injury reports, and crawling web news for both players..."):
+        if st.button(f"🧠 Run AI {projection_years}-Year Outlook Analysis", type="primary"):
+            if not assets_A and not assets_B:
+                st.error("Select assets on Side A or Side B first.")
+                return
+            with st.spinner("AI is fetching stats, injury reports, and crawling web news for all players..."):
                 try:
-                    # 1. Fetch metrics from BQ
                     from google.cloud import bigquery
                     bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
                     
@@ -701,10 +825,6 @@ def render_value_analyzer():
                         jc = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)])
                         return bq_client.query(q, job_config=jc).to_dataframe()
 
-                    hist_A = query_player_history(asset_A['player_display_name'])
-                    hist_B = query_player_history(asset_B['player_display_name'])
-
-                    # 2. Get stored external verification snippets without bypassing search cost controls.
                     def get_stored_news(name):
                         try:
                             q = f"""
@@ -714,47 +834,66 @@ def render_value_analyzer():
                                 ORDER BY searched_at DESC, result_rank ASC
                                 LIMIT 3
                             """
-                            jc = bigquery.QueryJobConfig(
-                                query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
-                            )
+                            jc = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)])
                             news_df = bq_client.query(q, job_config=jc).to_dataframe()
                             if news_df.empty:
-                                return "No stored external verification leads found. Run External Player Context Verification first if current news matters."
+                                return "No stored external news."
                             return "\n".join(
                                 f"Title: {row.title}\nSource: {row.source_name}\nSnippet: {row.snippet}"
                                 for row in news_df.itertuples(index=False)
                             )
                         except Exception:
-                            return "No stored external verification leads found."
+                            return "No stored news."
 
-                    news_A = get_stored_news(asset_A['player_display_name']) if not pd.isna(asset_A['position']) else ""
-                    news_B = get_stored_news(asset_B['player_display_name']) if not pd.isna(asset_B['position']) else ""
+                    # Gather info for all assets
+                    assets_a_details = []
+                    for a in assets_A:
+                        name = a['player_display_name']
+                        hist = query_player_history(name) if not pd.isna(a['position']) else pd.DataFrame()
+                        news = get_stored_news(name) if not pd.isna(a['position']) else ""
+                        assets_a_details.append(
+                            f"- **{name}** ({a['position'] if not pd.isna(a['position']) else 'Pick'})\n"
+                            f"  Age: {a.get('age') or 'N/A'}, Current Value: {numeric_value(a['market_value'])}, "
+                            f"Projected {projection_years}-Year Value: {project_asset_value(a, projection_years)}\n"
+                            f"  Recent Stats:\n{hist.to_string(index=False) if not hist.empty else 'No stats available'}\n"
+                            f"  Recent News:\n{news}\n"
+                        )
 
-                    # 3. Call Gemini
+                    assets_b_details = []
+                    for b in assets_B:
+                        name = b['player_display_name']
+                        hist = query_player_history(name) if not pd.isna(b['position']) else pd.DataFrame()
+                        news = get_stored_news(name) if not pd.isna(b['position']) else ""
+                        assets_b_details.append(
+                            f"- **{name}** ({b['position'] if not pd.isna(b['position']) else 'Pick'})\n"
+                            f"  Age: {b.get('age') or 'N/A'}, Current Value: {numeric_value(b['market_value'])}, "
+                            f"Projected {projection_years}-Year Value: {project_asset_value(b, projection_years)}\n"
+                            f"  Recent Stats:\n{hist.to_string(index=False) if not hist.empty else 'No stats available'}\n"
+                            f"  Recent News:\n{news}\n"
+                        )
+
                     import google.generativeai as genai
                     genai.configure(api_key=active_gemini_key)
                     model = genai.GenerativeModel('gemini-3.5-flash')
                     
                     prompt = f"""
-                    Compare these two fantasy football assets side-by-side:
+                    Evaluate this dynasty fantasy football trade side-by-side:
                     
-                    Asset A: {asset_A['player_display_name']} ({asset_A['position'] if not pd.isna(asset_A['position']) else 'Pick'})
-                    - Market Value: {val_A}
-                    - Overall Rank: {asset_A['overall_rank']}
-                    - Recent Stats:\n{hist_A.to_string(index=False) if not hist_A.empty else 'No stats available'}
-                    - Recent News:\n{news_A}
+                    ### Side A Assets:
+                    {"".join(assets_a_details) if assets_a_details else "None"}
+                    Total Current Value: {total_val_A}
+                    Total Projected {projection_years}-Year Value: {total_proj_A}
                     
-                    Asset B: {asset_B['player_display_name']} ({asset_B['position'] if not pd.isna(asset_B['position']) else 'Pick'})
-                    - Market Value: {val_B}
-                    - Overall Rank: {asset_B['overall_rank']}
-                    - Recent Stats:\n{hist_B.to_string(index=False) if not hist_B.empty else 'No stats available'}
-                    - Recent News:\n{news_B}
+                    ### Side B Assets:
+                    {"".join(assets_b_details) if assets_b_details else "None"}
+                    Total Current Value: {total_val_B}
+                    Total Projected {projection_years}-Year Value: {total_proj_B}
                     
-                    Provide a detailed 3-year outlook comparison. Ground your comparison in age, position value degradation, offensive environment, and current news/injury profiles.
+                    Provide a detailed {projection_years}-year outlook comparison. Ground your comparison in age, positional longevity, team/offensive environment, and current news/injury profiles.
                     Conclude with:
-                    1. Who is the safer dynasty asset?
-                    2. Who has the higher ceiling?
-                    3. What are their respective AI 3-Year Outlook Scores (0-100)?
+                    1. Which side is the safer long-term investment?
+                    2. Which side has the higher immediate ceiling?
+                    3. Respective AI Outlook Scores (0-100) and recommendations.
                     """
                     
                     res = model.generate_content(prompt)
@@ -762,6 +901,8 @@ def render_value_analyzer():
                     st.write(res.text)
                 except Exception as ex:
                     st.error(f"Failed to generate AI analysis: {ex}")
+
+view_mode = st.query_params.get("view", "default")"Failed to generate AI analysis: {ex}")
 
 view_mode = st.query_params.get("view", "default")
 if view_mode == "broadcast":
@@ -1326,7 +1467,6 @@ with tab_ingest:
         exec_env = {}
         if gcp_key_path:
             exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
-
         run_subprocess_live(cmd_args, custom_env=exec_env)
 
     st.markdown("### Player Context Verification")
@@ -1370,7 +1510,8 @@ with tab_ingest:
     with col_cfbd1:
         cfbd_season = st.number_input("CFBD Season", min_value=2010, max_value=2030, value=2024, step=1)
     with col_cfbd2:
-        cfbd_key = st.text_input("CFBD API Key", type="password", placeholder="e.g. mock or your_cfbd_key")
+        default_cfbd_key = os.environ.get("CFBD_API_KEY", "")
+        cfbd_key = st.text_input("CFBD API Key", type="password", value=default_cfbd_key, placeholder="e.g. mock or your_cfbd_key")
         
     if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
         if not cfbd_key.strip():
@@ -1456,7 +1597,6 @@ with tab_ingest:
                             mapped_df["data_source"] = scout_source
                             
                             # Connect and load to BigQuery
-                            from google.cloud import bigquery
                             from src.setup_college_tables import create_college_tables
 
                             create_college_tables()
