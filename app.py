@@ -3,7 +3,6 @@ import sys
 import subprocess
 import html
 import logging
-import base64
 import streamlit as st
 
 DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
@@ -259,27 +258,11 @@ else:
     PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 CACHE_DIR = os.path.join(PROJECT_ROOT, "cache")
-SHOW_LOGO_PATHS = {
-    "desktop": os.path.join(PROJECT_ROOT, "assets", "ai-v-meatbags-dashboard-01.png"),
-    "tablet": os.path.join(PROJECT_ROOT, "assets", "ai-v-meatbags-dashboard-1800x450.png"),
-    "mobile": os.path.join(PROJECT_ROOT, "assets", "ai-v-meatbags-dashboard-1200x600.png"),
+SHOW_LOGO_URLS = {
+    "desktop": "https://www.heavylifthelicopters.us/ai-v-meatbags/ai-v-meatbags-dashboard-01.png",
+    "tablet": "https://www.heavylifthelicopters.us/ai-v-meatbags/ai-v-meatbags-dashboard-1800x450.png",
+    "mobile": "https://www.heavylifthelicopters.us/ai-v-meatbags/ai-v-meatbags-dashboard-1200x600.png",
 }
-
-@st.cache_data(show_spinner=False)
-def get_image_data_uri(image_path):
-    if not os.path.exists(image_path):
-        return None
-
-    with open(image_path, "rb") as image_file:
-        encoded = base64.b64encode(image_file.read()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
-
-@st.cache_data(show_spinner=False)
-def get_show_logo_data_uris(logo_paths):
-    return {
-        name: get_image_data_uri(path)
-        for name, path in logo_paths.items()
-    }
 
 def get_python_executable():
     """
@@ -1482,35 +1465,18 @@ app_commit = os.environ.get("APP_COMMIT", "unknown")
 cloud_run_revision = os.environ.get("K_REVISION", "local")
 
 # --- MAIN PAGE HEADER ---
-show_logo_data_uris = get_show_logo_data_uris(SHOW_LOGO_PATHS)
-desktop_logo_data_uri = show_logo_data_uris.get("desktop")
-tablet_logo_data_uri = show_logo_data_uris.get("tablet")
-mobile_logo_data_uri = show_logo_data_uris.get("mobile")
-if desktop_logo_data_uri:
-    mobile_source = (
-        f"<source media='(max-width: 640px)' srcset='{mobile_logo_data_uri}'>"
-        if mobile_logo_data_uri
-        else ""
-    )
-    tablet_source = (
-        f"<source media='(max-width: 1024px)' srcset='{tablet_logo_data_uri}'>"
-        if tablet_logo_data_uri
-        else ""
-    )
-    st.markdown(
-        f"""
-        <div class='show-logo-frame'>
-            <picture>
-                {mobile_source}
-                {tablet_source}
-                <img class='show-logo' src='{desktop_logo_data_uri}' alt='AI vs Meatbags'>
-            </picture>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown("<div class='main-title'>AI vs Meatbags</div>", unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class='show-logo-frame'>
+        <picture>
+            <source media='(max-width: 640px)' srcset='{SHOW_LOGO_URLS["mobile"]}'>
+            <source media='(max-width: 1024px)' srcset='{SHOW_LOGO_URLS["tablet"]}'>
+            <img class='show-logo' src='{SHOW_LOGO_URLS["desktop"]}' alt='AI vs Meatbags'>
+        </picture>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Workflow Tabs
