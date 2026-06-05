@@ -150,6 +150,21 @@ def execute_bq_cached(sql_query: str):
     df = query_job.result().to_dataframe()
     return df
 
+def repair_generated_sql(sql_query: str) -> str:
+    import re
+
+    if not re.search(r"\bepa_per_play\b", sql_query, flags=re.IGNORECASE):
+        return sql_query
+
+    if re.search(r"\banalytics_player_weekly_truth\b", sql_query, flags=re.IGNORECASE):
+        return re.sub(r"\bepa_per_play\b", "total_epa", sql_query, flags=re.IGNORECASE)
+
+    if re.search(r"\bweekly_metrics\b", sql_query, flags=re.IGNORECASE):
+        weekly_total_epa = "(COALESCE(passing_epa, 0) + COALESCE(rushing_epa, 0) + COALESCE(receiving_epa, 0))"
+        return re.sub(r"\bepa_per_play\b", weekly_total_epa, sql_query, flags=re.IGNORECASE)
+
+    return sql_query
+
 def render_fraud_watch_segment():
     st.markdown("### Fraud Watch")
     st.markdown("Weekly box-score spikes ranked against role quality, usage stability, touchdown dependence, and snap trust.")
@@ -487,7 +502,9 @@ def render_ai_cohost():
     - `position` (STRING) - Player's position (e.g. 'QB', 'RB', 'WR', 'TE').
     - `team` (STRING) - Team abbreviation (e.g. 'KC', 'BUF').
     - `target_share` (FLOAT64) - Share of team targets.
-    - `epa_per_play` (FLOAT64) - Expected Points Added per play.
+    - `passing_epa` (FLOAT64) - Passing Expected Points Added.
+    - `rushing_epa` (FLOAT64) - Rushing Expected Points Added.
+    - `receiving_epa` (FLOAT64) - Receiving Expected Points Added.
     - `rushing_yards` (FLOAT64) - Rushing yards gained.
     - `targets` (FLOAT64) - Number of pass targets.
     - `receptions` (FLOAT64) - Number of pass catches.
@@ -569,6 +586,7 @@ def render_ai_cohost():
     You are mandated to follow a strict query protocol when analyzing players.
     You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
+    Never query `epa_per_play`; that column does not exist. Use `analytics_player_weekly_truth.total_epa` for player analysis, or calculate total weekly EPA from `weekly_metrics.passing_epa + weekly_metrics.rushing_epa + weekly_metrics.receiving_epa`.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
     For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
     For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.
@@ -644,7 +662,7 @@ def render_ai_cohost():
                     fc = get_fc(response)
                     while fc:
                         if fc.name == "execute_bigquery_sql":
-                            sql_to_run = type(fc).to_dict(fc)["args"]["sql_query"]
+                            sql_to_run = repair_generated_sql(type(fc).to_dict(fc)["args"]["sql_query"])
 
                             tool_message = {
                                 "role": "tool_status",
