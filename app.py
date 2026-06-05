@@ -527,7 +527,7 @@ def render_ai_cohost():
     - `epa` (FLOAT64)
 
     - Table: `fantasy_football_brain.ngs_passing`
-      Columns: Includes NGS tracking passing metrics like avg_time_to_throw, avg_completed_air_yards, aggressiveness.
+      Columns: Includes `player_display_name` (the player's name column, NOT `player_name`), `player_gsis_id`, and metrics like `avg_time_to_throw`, `avg_completed_air_yards`, `aggressiveness`.
       
     - Table: `fantasy_football_brain.realtime_player_news`
       Columns: `player_id` (STRING), `gsis_id` (STRING), `player_name` (STRING), `position` (STRING), `team` (STRING), `trend_type` (STRING, 'ADD' or 'DROP'), `trend_count` (INT64).
@@ -559,9 +559,9 @@ def render_ai_cohost():
       Description: One row per regular-season game with stadium, roof, surface, temperature, wind, weather text, and fantasy-relevant environment flags.
       Columns include: `season`, `week`, `game_id`, `game_date`, `home_team`, `away_team`, `stadium`, `historical_stadium_name`, `stadium_id`, `roof`, `surface`, `temp_f`, `wind_mph`, `weather_text`, `is_indoor_or_closed`, `roof_category`, `surface_category`, `precipitation_or_storm_flag`, `snow_or_freezing_flag`, `temperature_bucket`, `wind_bucket`, `environment_risk_level`, and `fantasy_environment_note`.
     - Table: `fantasy_football_brain.ngs_rushing`
-      Columns: Includes NGS tracking rushing metrics like efficiency, percent_attempts_gte_eight_defenders, avg_time_to_los.
+      Columns: Includes `player_display_name` (the player's name column, NOT `player_name`), `player_gsis_id`, and metrics like `efficiency`, `percent_attempts_gte_eight_defenders`, `avg_time_to_los`.
     - Table: `fantasy_football_brain.ngs_receiving`
-      Columns: Includes NGS tracking receiving metrics like avg_cushion, avg_separation, avg_yac_above_expectation.
+      Columns: Includes `player_display_name` (the player's name column, NOT `player_name`), `player_gsis_id`, and metrics like `avg_cushion`, `avg_separation`, `avg_yac_above_expectation`.
     - Table: `fantasy_football_brain.ftn_charting`
       Columns: Includes FTN premium charting play-by-play data like is_no_huddle, is_play_action, is_screen_pass, is_interception_worthy.
     - Table: `fantasy_football_brain.weekly_snap_counts`
