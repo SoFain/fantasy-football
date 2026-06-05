@@ -150,6 +150,21 @@ def execute_bq_cached(sql_query: str):
     df = query_job.result().to_dataframe()
     return df
 
+def repair_generated_sql(sql_query: str) -> str:
+    import re
+
+    if not re.search(r"\bepa_per_play\b", sql_query, flags=re.IGNORECASE):
+        return sql_query
+
+    if re.search(r"\banalytics_player_weekly_truth\b", sql_query, flags=re.IGNORECASE):
+        return re.sub(r"\bepa_per_play\b", "total_epa", sql_query, flags=re.IGNORECASE)
+
+    if re.search(r"\bweekly_metrics\b", sql_query, flags=re.IGNORECASE):
+        weekly_total_epa = "(COALESCE(passing_epa, 0) + COALESCE(rushing_epa, 0) + COALESCE(receiving_epa, 0))"
+        return re.sub(r"\bepa_per_play\b", weekly_total_epa, sql_query, flags=re.IGNORECASE)
+
+    return sql_query
+
 def render_fraud_watch_segment():
     st.markdown("### Fraud Watch")
     st.markdown("Weekly box-score spikes ranked against role quality, usage stability, touchdown dependence, and snap trust.")
@@ -206,6 +221,185 @@ def render_fraud_watch_segment():
     cols[1].metric("Fraud Score", f'{top["fraud_score"]:.1f}')
     cols[2].metric("Label", top["fraud_label"])
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_reddit_weekly_topic_posts(subreddits, per_subreddit_limit):
+    import requests
+    import xml.etree.ElementTree as ET
+
+    headers = {
+        "User-Agent": "AIvsVibesFantasyTopicScout/0.1 by SoFain",
+    }
+    posts = []
+    errors = []
+
+    for subreddit in subreddits:
+        subreddit = subreddit.strip().strip("/").removeprefix("r/")
+        if not subreddit:
+            continue
+
+        url = f"https://www.reddit.com/r/{subreddit}/top/.rss"
+        try:
+            response = requests.get(
+                url,
+                params={"t": "week"},
+                headers=headers,
+                timeout=20,
+            )
+            if response.status_code != 200:
+                errors.append(f"r/{subreddit}: HTTP {response.status_code}")
+                continue
+
+            root = ET.fromstring(response.content)
+            namespace = {"atom": "http://www.w3.org/2005/Atom"}
+            entries = root.findall("atom:entry", namespace)[:per_subreddit_limit]
+            for rank, entry in enumerate(entries, start=1):
+                title = entry.findtext("atom:title", default="", namespaces=namespace)
+                link = entry.find("atom:link", namespace)
+                summary = entry.findtext("atom:content", default="", namespaces=namespace)
+                updated = entry.findtext("atom:updated", default="", namespaces=namespace)
+                if not title:
+                    continue
+                rank_signal = max(per_subreddit_limit - rank + 1, 1)
+                posts.append({
+                    "subreddit": f"r/{subreddit}",
+                    "title": title,
+                    "score": rank_signal,
+                    "comments": 0,
+                    "weekly_rank": rank,
+                    "created_utc": updated,
+                    "permalink": link.attrib.get("href", "") if link is not None else "",
+                    "flair": "",
+                    "selftext": summary[:500],
+                })
+        except Exception as ex:
+            errors.append(f"r/{subreddit}: {ex}")
+
+    return posts, errors
+
+def reddit_topic_tokens(title):
+    import re
+
+    stopwords = {
+        "about", "after", "again", "against", "before", "being", "best", "better", "between",
+        "comment", "comments", "could", "discussion", "does", "drop", "fantasy", "football",
+        "from", "have", "help", "into", "just", "league", "need", "news", "over", "player",
+        "players", "post", "question", "should", "start", "team", "than", "that", "this",
+        "thread", "trade", "week", "what", "when", "which", "with", "would", "your",
+    }
+    tokens = re.findall(r"[a-z0-9']+", title.lower())
+    return {token for token in tokens if len(token) > 2 and token not in stopwords}
+
+def cluster_reddit_topics(posts):
+    from collections import Counter
+
+    scored_posts = []
+    for post in posts:
+        tokens = reddit_topic_tokens(post["title"])
+        if not tokens:
+            continue
+        scored_posts.append({
+            **post,
+            "tokens": tokens,
+            "popularity": int(post["score"]) + int(post["comments"]) * 2,
+        })
+
+    scored_posts.sort(key=lambda item: item["popularity"], reverse=True)
+    clusters = []
+    for post in scored_posts:
+        selected_cluster = None
+        for cluster in clusters:
+            overlap = post["tokens"] & cluster["tokens"]
+            union = post["tokens"] | cluster["tokens"]
+            if len(overlap) >= 2 and len(overlap) / max(len(union), 1) >= 0.16:
+                selected_cluster = cluster
+                break
+
+        if selected_cluster is None:
+            clusters.append({
+                "tokens": set(post["tokens"]),
+                "posts": [post],
+                "popularity": post["popularity"],
+            })
+        else:
+            selected_cluster["tokens"].update(post["tokens"])
+            selected_cluster["posts"].append(post)
+            selected_cluster["popularity"] += post["popularity"]
+
+    topic_rows = []
+    for cluster in clusters:
+        token_counts = Counter()
+        subreddits = set()
+        for post in cluster["posts"]:
+            token_counts.update(post["tokens"])
+            subreddits.add(post["subreddit"])
+
+        lead_post = max(cluster["posts"], key=lambda item: item["popularity"])
+        topic_words = [word for word, _count in token_counts.most_common(4)]
+        topic_rows.append({
+            "topic": " ".join(word.title() for word in topic_words) or lead_post["title"],
+            "show_angle": lead_post["title"],
+            "popularity": cluster["popularity"],
+            "posts": len(cluster["posts"]),
+            "subreddits": ", ".join(sorted(subreddits)),
+            "top_score": lead_post["score"],
+            "top_weekly_rank": lead_post.get("weekly_rank"),
+            "top_link": lead_post["permalink"],
+            "examples": cluster["posts"][:3],
+        })
+
+    return sorted(topic_rows, key=lambda item: item["popularity"], reverse=True)
+
+def render_reddit_topic_scout():
+    st.markdown("### Reddit Topic Scout")
+    st.markdown("Find the loudest fantasy football conversation clusters from weekly top Reddit posts.")
+
+    col_subs, col_limit = st.columns([3, 1])
+    with col_subs:
+        subreddit_input = st.text_input(
+            "Subreddits",
+            value="fantasyfootball,DynastyFF,fantasy_football,FantasyFootballers,fantasyfootballadvice",
+            help="Comma-separated subreddit names. The scout reads each subreddit's weekly top posts.",
+        )
+    with col_limit:
+        per_subreddit_limit = st.number_input("Posts per board", min_value=5, max_value=50, value=25, step=5)
+
+    subreddits = [item.strip() for item in subreddit_input.split(",") if item.strip()]
+    if st.button("Scan Reddit Weekly Topics", type="secondary"):
+        posts, errors = fetch_reddit_weekly_topic_posts(tuple(subreddits), int(per_subreddit_limit))
+        if errors:
+            st.warning("Some boards could not be read: " + "; ".join(errors))
+        if not posts:
+            st.info("No Reddit posts were returned. Reddit may be rate-limiting the public RSS endpoint.")
+            return
+
+        topics = cluster_reddit_topics(posts)[:5]
+        if not topics:
+            st.info("Reddit returned posts, but there were no usable topic clusters.")
+            return
+
+        import pandas as pd
+        topic_df = pd.DataFrame([{
+            "Rank": index + 1,
+            "Topic": topic["topic"],
+            "Show Angle": topic["show_angle"],
+            "Popularity": topic["popularity"],
+            "Posts": topic["posts"],
+            "Boards": topic["subreddits"],
+            "Best Board Rank": topic["top_weekly_rank"],
+            "Top Link": topic["top_link"],
+        } for index, topic in enumerate(topics)])
+        st.dataframe(topic_df, use_container_width=True, hide_index=True)
+
+        for index, topic in enumerate(topics, start=1):
+            with st.expander(f"{index}. {topic['topic']}"):
+                st.markdown(f"**Show angle:** {topic['show_angle']}")
+                st.markdown(f"**Signal:** {topic['popularity']} weekly-rank points from {topic['posts']} related post(s).")
+                for post in topic["examples"]:
+                    st.markdown(
+                        f"- [{post['title']}]({post['permalink']}) "
+                        f"({post['subreddit']}, weekly rank {post.get('weekly_rank', 'n/a')})"
+                    )
 
 def render_ai_cohost():
     st.markdown("### 💬 Pigskin")
@@ -308,7 +502,9 @@ def render_ai_cohost():
     - `position` (STRING) - Player's position (e.g. 'QB', 'RB', 'WR', 'TE').
     - `team` (STRING) - Team abbreviation (e.g. 'KC', 'BUF').
     - `target_share` (FLOAT64) - Share of team targets.
-    - `epa_per_play` (FLOAT64) - Expected Points Added per play.
+    - `passing_epa` (FLOAT64) - Passing Expected Points Added.
+    - `rushing_epa` (FLOAT64) - Rushing Expected Points Added.
+    - `receiving_epa` (FLOAT64) - Receiving Expected Points Added.
     - `rushing_yards` (FLOAT64) - Rushing yards gained.
     - `targets` (FLOAT64) - Number of pass targets.
     - `receptions` (FLOAT64) - Number of pass catches.
@@ -390,6 +586,7 @@ def render_ai_cohost():
     You are mandated to follow a strict query protocol when analyzing players.
     You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
+    Never query `epa_per_play`; that column does not exist. Use `analytics_player_weekly_truth.total_epa` for player analysis, or calculate total weekly EPA from `weekly_metrics.passing_epa + weekly_metrics.rushing_epa + weekly_metrics.receiving_epa`.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
     For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
     For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.
@@ -465,7 +662,7 @@ def render_ai_cohost():
                     fc = get_fc(response)
                     while fc:
                         if fc.name == "execute_bigquery_sql":
-                            sql_to_run = type(fc).to_dict(fc)["args"]["sql_query"]
+                            sql_to_run = repair_generated_sql(type(fc).to_dict(fc)["args"]["sql_query"])
 
                             tool_message = {
                                 "role": "tool_status",
@@ -1633,6 +1830,8 @@ with tab_validate:
 with tab_segments:
     st.markdown("### Segment Charts")
     st.markdown("Production-ready charts and data cuts for show segments. Keep the chat tab clean and use this space for visual prep.")
+    render_reddit_topic_scout()
+    st.divider()
     render_fraud_watch_segment()
     st.divider()
     render_sleeper_viewer_team_analysis()
