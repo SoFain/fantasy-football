@@ -153,17 +153,50 @@ def execute_bq_cached(sql_query: str):
 def repair_generated_sql(sql_query: str) -> str:
     import re
 
-    if not re.search(r"\bepa_per_play\b", sql_query, flags=re.IGNORECASE):
-        return sql_query
+    # 1. First, repair epa_per_play
+    if re.search(r"\bepa_per_play\b", sql_query, flags=re.IGNORECASE):
+        if re.search(r"\banalytics_player_weekly_truth\b", sql_query, flags=re.IGNORECASE):
+            sql_query = re.sub(r"\bepa_per_play\b", "total_epa", sql_query, flags=re.IGNORECASE)
+        elif re.search(r"\bweekly_metrics\b", sql_query, flags=re.IGNORECASE):
+            weekly_total_epa = "(COALESCE(passing_epa, 0) + COALESCE(rushing_epa, 0) + COALESCE(receiving_epa, 0))"
+            sql_query = re.sub(r"\bepa_per_play\b", weekly_total_epa, sql_query, flags=re.IGNORECASE)
 
-    if re.search(r"\banalytics_player_weekly_truth\b", sql_query, flags=re.IGNORECASE):
-        return re.sub(r"\bepa_per_play\b", "total_epa", sql_query, flags=re.IGNORECASE)
-
-    if re.search(r"\bweekly_metrics\b", sql_query, flags=re.IGNORECASE):
-        weekly_total_epa = "(COALESCE(passing_epa, 0) + COALESCE(rushing_epa, 0) + COALESCE(receiving_epa, 0))"
-        return re.sub(r"\bepa_per_play\b", weekly_total_epa, sql_query, flags=re.IGNORECASE)
+    # 2. Repair player_name in NGS tables and market_values
+    target_tables = ["ngs_passing", "ngs_rushing", "ngs_receiving", "market_values"]
+    
+    # Check if any of the target tables are referenced in the query
+    has_target_table = False
+    for table in target_tables:
+        if re.search(rf"\b{table}\b", sql_query, flags=re.IGNORECASE):
+            has_target_table = True
+            break
+            
+    if has_target_table:
+        # We need to replace player_name with player_display_name when it refers to one of these tables.
+        # Let's find aliases for the target tables.
+        aliases = set()
+        for table in target_tables:
+            # Match table name followed by optional AS and then the alias name
+            pattern = rf"\b{table}\b`?\s+(?:as\s+)?`?([a-zA-Z0-9_]+)`?"
+            for match in re.finditer(pattern, sql_query, flags=re.IGNORECASE):
+                alias = match.group(1)
+                if alias.upper() not in ("WHERE", "JOIN", "ON", "AND", "OR", "GROUP", "ORDER", "LIMIT", "USING", "LEFT", "RIGHT", "INNER", "OUTER", "FROM"):
+                    aliases.add(alias.lower())
+        
+        # Replace qualified names like alias.player_name or table.player_name
+        for table in target_tables:
+            sql_query = re.sub(rf"\b{table}\b\.`?player_name`?", f"{table}.player_display_name", sql_query, flags=re.IGNORECASE)
+            sql_query = re.sub(rf"`{table}`\.`?player_name`?", f"`{table}`.player_display_name", sql_query, flags=re.IGNORECASE)
+            
+        for alias in aliases:
+            sql_query = re.sub(rf"\b{alias}\b\.`?player_name`?", f"{alias}.player_display_name", sql_query, flags=re.IGNORECASE)
+            sql_query = re.sub(rf"`{alias}`\.`?player_name`?", f"`{alias}`.player_display_name", sql_query, flags=re.IGNORECASE)
+            
+        # Replace unqualified player_name if it is not preceded by a dot
+        sql_query = re.sub(r"(?<!\.\s)(?<!\.)\bplayer_name\b", "player_display_name", sql_query, flags=re.IGNORECASE)
 
     return sql_query
+
 
 def render_fraud_watch_segment():
     st.markdown("### Fraud Watch")
