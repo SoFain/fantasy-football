@@ -902,8 +902,6 @@ def render_value_analyzer():
                 except Exception as ex:
                     st.error(f"Failed to generate AI analysis: {ex}")
 
-view_mode = st.query_params.get("view", "default")"Failed to generate AI analysis: {ex}")
-
 view_mode = st.query_params.get("view", "default")
 if view_mode == "broadcast":
     st.markdown("""
