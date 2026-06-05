@@ -795,8 +795,19 @@ def render_value_analyzer():
             """
             return execute_bq_cached(query)
         except Exception as e:
-            st.error(f"Could not load market values: {e}")
-            return None
+            query = f"""
+                SELECT player_display_name, position, team, market_value, overall_rank, position_rank, redraft_value, tier
+                FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.market_values`
+                ORDER BY market_value DESC
+            """
+            try:
+                fallback_df = execute_bq_cached(query)
+                fallback_df["age"] = pd.NA
+                st.warning("Market values loaded without age. Run market value ingestion to enable age-based projections.")
+                return fallback_df
+            except Exception:
+                st.error(f"Could not load market values: {e}")
+                return None
 
     market_df = load_market_players()
     if market_df is None or market_df.empty:
@@ -834,18 +845,19 @@ def render_value_analyzer():
         st.session_state.num_b = 1
 
     # Clean up empty inputs at the end to keep exactly one blank input at the bottom of each side
+    empty_asset_label = "-- Select Player / Pick --"
     while st.session_state.num_a > 1:
-        last_val = st.session_state.get(f"sel_a_{st.session_state.num_a - 1}", "— Select Player / Pick —")
-        prev_val = st.session_state.get(f"sel_a_{st.session_state.num_a - 2}", "— Select Player / Pick —")
-        if last_val == "— Select Player / Pick —" and prev_val == "— Select Player / Pick —":
+        last_val = st.session_state.get(f"sel_a_{st.session_state.num_a - 1}", empty_asset_label)
+        prev_val = st.session_state.get(f"sel_a_{st.session_state.num_a - 2}", empty_asset_label)
+        if last_val == empty_asset_label and prev_val == empty_asset_label:
             st.session_state.num_a -= 1
         else:
             break
 
     while st.session_state.num_b > 1:
-        last_val = st.session_state.get(f"sel_b_{st.session_state.num_b - 1}", "— Select Player / Pick —")
-        prev_val = st.session_state.get(f"sel_b_{st.session_state.num_b - 2}", "— Select Player / Pick —")
-        if last_val == "— Select Player / Pick —" and prev_val == "— Select Player / Pick —":
+        last_val = st.session_state.get(f"sel_b_{st.session_state.num_b - 1}", empty_asset_label)
+        prev_val = st.session_state.get(f"sel_b_{st.session_state.num_b - 2}", empty_asset_label)
+        if last_val == empty_asset_label and prev_val == empty_asset_label:
             st.session_state.num_b -= 1
         else:
             break
@@ -932,10 +944,10 @@ def render_value_analyzer():
         for i in range(st.session_state.num_a):
             selected = st.selectbox(
                 f"Select Asset A {i+1}",
-                ["— Select Player / Pick —"] + player_options,
+                [empty_asset_label] + player_options,
                 key=f"sel_a_{i}"
             )
-            if selected != "— Select Player / Pick —":
+            if selected != empty_asset_label:
                 assets_A.append(player_map[selected])
         
         if len(assets_A) == st.session_state.num_a:
@@ -948,10 +960,10 @@ def render_value_analyzer():
         for i in range(st.session_state.num_b):
             selected = st.selectbox(
                 f"Select Asset B {i+1}",
-                ["— Select Player / Pick —"] + player_options,
+                [empty_asset_label] + player_options,
                 key=f"sel_b_{i}"
             )
-            if selected != "— Select Player / Pick —":
+            if selected != empty_asset_label:
                 assets_B.append(player_map[selected])
         
         if len(assets_B) == st.session_state.num_b:
