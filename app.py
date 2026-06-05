@@ -18,7 +18,7 @@ st.set_page_config(
     page_title="NFL Data Studio",
     page_icon="🏈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 def check_password():
@@ -1156,16 +1156,15 @@ if view_mode == "broadcast":
     render_ai_cohost()
     st.stop()
 
-# --- SIDEBAR CONFIGURATION ---
-st.sidebar.image("https://img.icons8.com/color/96/american-football.png", width=80)
-st.sidebar.title("NFL Studio Setup")
+# --- COLLAPSED SETTINGS DRAWER ---
+st.sidebar.title("Settings")
 
 # Low-profile Logout Button
 if st.sidebar.button("🔒 Logout", key="logout_btn", use_container_width=True):
     st.session_state.clear()
     st.rerun()
 
-st.sidebar.markdown("Configure credentials and execution paths below.")
+st.sidebar.caption("Credential overrides for local development and emergency runtime changes.")
 
 # Google Cloud service account JSON path
 gcp_key_path = st.sidebar.text_input(
@@ -1198,32 +1197,22 @@ else:
     if gemini_key_input:
         os.environ["GEMINI_API_KEY"] = gemini_key_input
 
-# Warehouse Metrics in Sidebar
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Data Warehouse Status")
 active_tables, total_size_mb = get_warehouse_metrics()
-st.sidebar.metric(label="Active Tables", value=f"{active_tables}")
-st.sidebar.metric(label="Total Data Size", value=f"{total_size_mb:.2f} MB")
-
-st.sidebar.markdown("---")
 app_version = os.environ.get("APP_VERSION", "dev")
 app_commit = os.environ.get("APP_COMMIT", "unknown")
 cloud_run_revision = os.environ.get("K_REVISION", "local")
-st.sidebar.caption(f"Version: {app_version}")
-st.sidebar.caption(f"Commit: {app_commit[:7] if app_commit != 'unknown' else app_commit}")
-st.sidebar.caption(f"Revision: {cloud_run_revision}")
 
 # --- MAIN PAGE HEADER ---
 st.markdown("<div class='main-title'>🏈 NFL Data Studio Dashboard</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
-# Layout Tabs
-tab_ai, tab_segments, tab_ingest, tab_validate, tab_analyzer = st.tabs([
-    "💬 Pigskin",
-    "📊 Segments",
-    "🚀 Run Ingestion Pipeline",
-    "🔍 Verification & Partition Testing",
-    "📊 Trade & Value Analyzer",
+# Workflow Tabs
+tab_pigskin, tab_show_prep, tab_viewer_lab, tab_trade_lab, tab_data_ops = st.tabs([
+    "💬 Pigskin Studio",
+    "🎙️ Show Prep",
+    "🏈 Viewer Team Lab",
+    "📊 Trade Lab",
+    "🛠️ Data Ops",
 ])
 
 # Subprocess Execution Logic with Live Streaming
@@ -1640,8 +1629,17 @@ def render_sleeper_viewer_team_analysis():
 
     render_sleeper_viewer_console()
 
-# --- TAB 1: INGESTION PIPELINE ---
-with tab_ingest:
+# --- DATA OPS: INGESTION PIPELINE ---
+with tab_data_ops:
+    st.markdown("### Runtime Status")
+    status_cols = st.columns(4)
+    status_cols[0].metric("Active Tables", f"{active_tables}")
+    status_cols[1].metric("Total Data Size", f"{total_size_mb:.2f} MB")
+    status_cols[2].metric("Version", app_version)
+    status_cols[3].metric("Revision", cloud_run_revision)
+    st.caption(f"Commit: {app_commit[:7] if app_commit != 'unknown' else app_commit}")
+    st.divider()
+
     st.markdown("### Run Statistics Ingestion")
     st.markdown("Trigger historical ingestion by downloading from APIs and loading directly into partitioned BigQuery tables.")
     
@@ -1856,8 +1854,9 @@ with tab_ingest:
         except Exception as ex:
             st.error(f"❌ Failed to parse CSV: {ex}")
 
-# --- TAB 2: VERIFICATION ---
-with tab_validate:
+# --- DATA OPS: VERIFICATION ---
+with tab_data_ops:
+    st.divider()
     st.markdown("### Range Partition Verification")
     st.markdown("Check if BigQuery datasets are successfully generated and inspect physical table metadata range partitions (no `SELECT *` executed).")
     
@@ -1871,20 +1870,24 @@ with tab_validate:
             
         run_subprocess_live(cmd_args, custom_env=exec_env)
 
-# --- TAB 3: SEGMENTS ---
-with tab_segments:
-    st.markdown("### Segment Charts")
-    st.markdown("Production-ready charts and data cuts for show segments. Keep the chat tab clean and use this space for visual prep.")
+# --- SHOW PREP ---
+with tab_show_prep:
+    st.markdown("### Show Prep")
+    st.markdown("Find episode topics, build segment angles, and pull production-ready cuts without cluttering the Pigskin chat.")
     render_reddit_topic_scout()
     st.divider()
     render_fraud_watch_segment()
-    st.divider()
+
+# --- VIEWER TEAM LAB ---
+with tab_viewer_lab:
+    st.markdown("### Viewer Team Lab")
+    st.markdown("Load public Sleeper teams, audit roster fragility, and turn viewer submissions into show segments.")
     render_sleeper_viewer_team_analysis()
 
-# --- TAB 4: AI DATA ASSISTANT ---
-with tab_ai:
+# --- PIGSKIN STUDIO ---
+with tab_pigskin:
     render_ai_cohost()
 
-# --- TAB 4: TRADE & VALUE ANALYZER ---
-with tab_analyzer:
+# --- TRADE LAB ---
+with tab_trade_lab:
     render_value_analyzer()
