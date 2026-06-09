@@ -246,6 +246,167 @@ st.markdown("""
             margin-top: 0;
         }
     }
+    
+    /* Player Profiles Premium Layouts */
+    .profile-header {
+        background: linear-gradient(135deg, rgba(30, 58, 138, 0.95), rgba(15, 23, 42, 0.95));
+        color: #f8fafc;
+        border-radius: 12px;
+        padding: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        margin-bottom: 1.5rem;
+    }
+    .profile-avatar {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid #ff4b4b;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    .profile-names {
+        flex-grow: 1;
+    }
+    .profile-name-title {
+        font-family: 'Outfit', sans-serif;
+        font-size: 2.1rem;
+        font-weight: 800;
+        margin: 0;
+        line-height: 1.1;
+    }
+    .profile-meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.4rem;
+    }
+    .profile-meta-badge {
+        background: rgba(255, 255, 255, 0.12);
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .profile-spec-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+    .profile-spec-card {
+        background: rgba(148, 163, 184, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        border-radius: 8px;
+        padding: 0.7rem;
+        text-align: center;
+    }
+    .profile-spec-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: rgba(148, 163, 184, 0.82);
+        text-transform: uppercase;
+        margin-bottom: 0.25rem;
+        line-height: 1;
+    }
+    .profile-spec-value {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: var(--text-color, #0f172a);
+    }
+    .scouting-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .grade-badge-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, rgba(30, 58, 138, 0.05), rgba(30, 58, 138, 0.08));
+        border: 2px solid rgba(30, 58, 138, 0.25);
+        border-radius: 12px;
+        padding: 1.5rem;
+        text-align: center;
+    }
+    .grade-badge-title {
+        font-weight: 800;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        color: #1e3a8a;
+        margin-bottom: 0.5rem;
+    }
+    .grade-badge-circle {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        background: #1e3a8a;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Outfit', sans-serif;
+        font-size: 2.2rem;
+        font-weight: 800;
+        box-shadow: 0 4px 10px rgba(30, 58, 138, 0.25);
+        border: 3px solid rgba(255, 255, 255, 0.2);
+    }
+    .scouting-traits-container {
+        background: rgba(148, 163, 184, 0.04);
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        border-radius: 12px;
+        padding: 1.25rem;
+    }
+    .scouting-trait-row {
+        margin-bottom: 0.85rem;
+    }
+    .scouting-trait-row:last-child {
+        margin-bottom: 0;
+    }
+    .scouting-trait-header {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.8rem;
+        font-weight: 700;
+        margin-bottom: 0.2rem;
+    }
+    .scouting-trait-name {
+        color: var(--text-color, #0f172a);
+    }
+    .scouting-trait-score {
+        color: #1e3a8a;
+        font-weight: 800;
+    }
+    .trait-progress-bar {
+        background: rgba(148, 163, 184, 0.2);
+        border-radius: 999px;
+        height: 8px;
+        overflow: hidden;
+    }
+    .trait-progress-fill {
+        background: #1e3a8a;
+        height: 100%;
+        border-radius: 999px;
+    }
+    @media (max-width: 600px) {
+        .profile-header {
+            flex-direction: column;
+            text-align: center;
+            padding: 1.25rem;
+        }
+        .scouting-grid {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -524,6 +685,451 @@ def render_fraud_watch_segment():
     cols[1].metric("Fraud Score", f'{top["fraud_score"]:.1f}')
     cols[2].metric("Label", top["fraud_label"])
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading player profiles database...")
+def fetch_player_profiles_data():
+    from google.cloud import bigquery
+    sql_query = f"""
+    WITH latest_week AS (
+        SELECT MAX(season) AS max_season
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
+    ),
+    player_weekly_agg AS (
+        SELECT 
+            t.player_id,
+            t.player_name,
+            t.player_display_name,
+            t.position,
+            t.team,
+            AVG(t.fantasy_points_ppr) AS avg_ppr,
+            SUM(t.targets) AS total_targets,
+            SUM(t.receptions) AS total_receptions,
+            SUM(t.receiving_yards) AS total_receiving_yards,
+            SUM(t.receiving_tds) AS total_receiving_tds,
+            SUM(t.carries) AS total_carries,
+            SUM(t.rushing_yards) AS total_rushing_yards,
+            SUM(t.rushing_tds) AS total_rushing_tds,
+            SUM(t.pass_attempts) AS total_pass_attempts,
+            SUM(t.passing_yards) AS total_passing_yards,
+            SUM(t.passing_tds) AS total_passing_tds,
+            AVG(t.target_share) AS avg_target_share,
+            AVG(t.wopr) AS avg_wopr,
+            AVG(t.total_epa) AS avg_epa,
+            AVG(t.offense_pct) AS avg_snap_share,
+            AVG(t.opportunity_score) AS avg_opportunity,
+            AVG(t.efficiency_score) AS avg_efficiency,
+            AVG(t.role_quality_score) AS avg_role_quality,
+            AVG(t.role_fragility_score) AS avg_role_fragility,
+            AVG(t.analytical_grade) AS avg_grade
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth` t, latest_week lw
+        WHERE t.season = lw.max_season
+        GROUP BY t.player_id, t.player_name, t.player_display_name, t.position, t.team
+    ),
+    roster_meta AS (
+        SELECT 
+            r.gsis_id,
+            ANY_VALUE(r.birth_date) AS birth_date,
+            ANY_VALUE(r.height) AS height,
+            ANY_VALUE(r.weight) AS weight,
+            ANY_VALUE(r.headshot) AS headshot,
+            ANY_VALUE(r.college_name) AS college_name,
+            ANY_VALUE(r.jersey_number) AS jersey_number,
+            ANY_VALUE(r.rookie_season) AS rookie_season,
+            ANY_VALUE(r.years_of_experience) AS years_of_experience,
+            ANY_VALUE(r.draft_year) AS draft_year,
+            ANY_VALUE(r.draft_round) AS draft_round,
+            ANY_VALUE(r.draft_pick) AS draft_pick,
+            ANY_VALUE(r.draft_team) AS draft_team
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.player_rosters` r
+        GROUP BY r.gsis_id
+    ),
+    contract_meta AS (
+        SELECT 
+            c.gsis_id,
+            ANY_VALUE(c.value) AS contract_value,
+            ANY_VALUE(c.apy) AS contract_apy,
+            ANY_VALUE(c.guaranteed) AS contract_guaranteed,
+            ANY_VALUE(c.year_signed) AS contract_year_signed
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.player_contracts` c
+        WHERE c.is_active = TRUE
+        GROUP BY c.gsis_id
+    )
+    SELECT 
+        agg.*,
+        r.* EXCEPT(gsis_id),
+        c.* EXCEPT(gsis_id),
+        RANK() OVER(PARTITION BY agg.position ORDER BY COALESCE(agg.avg_grade, 0.0) DESC) AS pos_rank
+    FROM player_weekly_agg agg
+    LEFT JOIN roster_meta r ON agg.player_id = r.gsis_id
+    LEFT JOIN contract_meta c ON agg.player_id = c.gsis_id
+    """
+    client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+    df = client.query(sql_query).result().to_dataframe()
+    return df
+
+@st.cache_data(ttl=3600, show_spinner="Loading player weekly history...")
+def fetch_player_weekly_history(player_id: str):
+    from google.cloud import bigquery
+    sql_query = f"""
+    SELECT 
+        season,
+        week,
+        opponent_team,
+        fantasy_points_ppr,
+        offense_pct AS snap_share,
+        targets,
+        receptions,
+        receiving_yards,
+        receiving_tds,
+        carries,
+        rushing_yards,
+        rushing_tds,
+        passing_yards,
+        passing_tds,
+        total_epa
+    FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
+    WHERE player_id = @player_id
+    ORDER BY season DESC, week DESC
+    """
+    client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("player_id", "STRING", player_id)
+        ]
+    )
+    df = client.query(sql_query, job_config=job_config).result().to_dataframe()
+    return df
+
+def render_player_profiles_tab():
+    import pandas as pd
+    import os
+    
+    st.markdown("### 👤 Player Profiles Directory")
+    st.markdown(
+        "NFL Draft Buzz style directory and scouting profiles powered by advanced metrics, contracts, and Pigskin AI analysis."
+    )
+    
+    try:
+        df = fetch_player_profiles_data()
+    except Exception as e:
+        st.info(f"Player profiles database is not fully materialized or query failed: {e}")
+        return
+        
+    if df.empty:
+        st.warning("No player profile metrics found in the data warehouse.")
+        return
+        
+    # Helpers for rendering
+    def format_currency(val):
+        if not val or pd.isna(val):
+            return "N/A"
+        try:
+            num = float(val)
+            if num >= 1_000_000:
+                return f"${num / 1_000_000:.2f}M"
+            elif num >= 1_000:
+                return f"${num / 1_000:.1f}K"
+            else:
+                return f"${num:.0f}"
+        except Exception:
+            return str(val)
+            
+    def format_height(inches):
+        if not inches or pd.isna(inches):
+            return "N/A"
+        try:
+            val = int(float(inches))
+            feet = val // 12
+            rem_inches = val % 12
+            return f"{feet}'{rem_inches}\""
+        except Exception:
+            return str(inches)
+            
+    def calculate_age(birth_date_str):
+        if not birth_date_str or pd.isna(birth_date_str):
+            return "N/A"
+        try:
+            from datetime import datetime
+            birth_date = datetime.strptime(birth_date_str[:10], "%Y-%m-%d")
+            today = datetime(2026, 6, 9)
+            age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+            return f"{age} yrs"
+        except Exception:
+            return "N/A"
+            
+    if "selected_player_id" not in st.session_state:
+        st.session_state.selected_player_id = None
+        
+    # Autocomplete Search Bar at the top of the directory
+    all_player_names = df["player_display_name"].unique().tolist()
+    search_player = st.selectbox(
+        "🔍 Search Player Profile by Name (Autocomplete):",
+        options=[""] + sorted(all_player_names),
+        index=0,
+        format_func=lambda x: "Type to search a player..." if x == "" else x,
+        key="global_profile_search"
+    )
+    
+    if search_player:
+        matched = df[df["player_display_name"] == search_player]
+        if not matched.empty:
+            st.session_state.selected_player_id = matched.iloc[0]["player_id"]
+            
+    # Rendering Detailed Profile
+    if st.session_state.selected_player_id:
+        player_id = st.session_state.selected_player_id
+        player_rows = df[df["player_id"] == player_id]
+        if player_rows.empty:
+            st.warning("Could not locate the player profile record.")
+            if st.button("⬅ Back to Directory"):
+                st.session_state.selected_player_id = None
+                st.rerun()
+            return
+            
+        player_row = player_rows.iloc[0]
+        
+        # Back Button
+        if st.button("⬅ Back to Position Rankings Directory"):
+            st.session_state.selected_player_id = None
+            st.rerun()
+            
+        headshot_url = player_row["headshot"] if (player_row["headshot"] and not pd.isna(player_row["headshot"])) else "https://www.nfl.com/static/content/public/static/wildcat/assets/images/application-logos/share/nfl-share.png"
+        jersey_num = f"#{int(float(player_row['jersey_number']))}" if (player_row["jersey_number"] and not pd.isna(player_row["jersey_number"])) else ""
+        draft_str = f"Drafted Rd {int(float(player_row['draft_round']))}, Pick {int(float(player_row['draft_pick']))} by {player_row['draft_team']}" if (player_row["draft_pick"] and not pd.isna(player_row["draft_pick"])) else "Undrafted Free Agent"
+        
+        # Header banner
+        st.markdown(f"""
+        <div class="profile-header">
+            <img class="profile-avatar" src="{headshot_url}" alt="{player_row['player_display_name']}">
+            <div class="profile-names">
+                <div class="profile-name-title">{player_row['player_display_name']} {jersey_num}</div>
+                <div class="profile-meta-row">
+                    <span class="profile-meta-badge">{player_row['position']}</span>
+                    <span class="profile-meta-badge">{player_row['team']}</span>
+                    <span class="profile-meta-badge">{player_row['college_name'] if player_row['college_name'] else 'Unknown College'}</span>
+                    <span class="profile-meta-badge">{draft_str}</span>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Specs Grid
+        cols_specs = st.columns(6)
+        specs = [
+            ("Height", format_height(player_row["height"])),
+            ("Weight", f"{int(float(player_row['weight']))} lbs" if (player_row["weight"] and not pd.isna(player_row["weight"])) else "N/A"),
+            ("Age", calculate_age(player_row["birth_date"])),
+            ("Experience", f"{int(float(player_row['years_of_experience']))} yrs" if (player_row["years_of_experience"] and not pd.isna(player_row["years_of_experience"])) else "Rookie"),
+            ("Contract APY", format_currency(player_row["contract_apy"])),
+            ("Total Value", format_currency(player_row["contract_value"])),
+        ]
+        for idx, (label, val) in enumerate(specs):
+            cols_specs[idx].markdown(f"""
+            <div class="profile-spec-card">
+                <div class="profile-spec-label">{label}</div>
+                <div class="profile-spec-value">{val}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        st.write("")
+        
+        # Scouting Ratings Grid
+        st.markdown("### 📊 Player Grades & Metrics")
+        col_grade, col_traits = st.columns([1, 2])
+        
+        with col_grade:
+            grade_val = player_row["avg_grade"] if not pd.isna(player_row["avg_grade"]) else 0.0
+            st.markdown(f"""
+            <div class="grade-badge-container">
+                <div class="grade-badge-title">Overall Grade</div>
+                <div class="grade-badge-circle">{grade_val:.1f}</div>
+                <div style="margin-top: 10px; font-weight: 700; color: #1e3a8a;">Rank: #{int(player_row['pos_rank'])} {player_row['position']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_traits:
+            opp_score = player_row["avg_opportunity"] if not pd.isna(player_row["avg_opportunity"]) else 0.0
+            eff_score = player_row["avg_efficiency"] if not pd.isna(player_row["avg_efficiency"]) else 0.0
+            fragility = player_row["avg_role_fragility"] if not pd.isna(player_row["avg_role_fragility"]) else 0.0
+            stability_score = max(0.0, min(100.0, 100.0 - fragility))
+            
+            traits = [
+                ("Opportunity Rating (Volume)", opp_score),
+                ("Efficiency Rating (EPA/Pts)", eff_score),
+                ("Role Stability Rating (Usage)", stability_score),
+            ]
+            
+            st.markdown('<div class="scouting-traits-container">', unsafe_allow_html=True)
+            for trait_name, trait_val in traits:
+                st.markdown(f"""
+                <div class="scouting-trait-row">
+                    <div class="scouting-trait-header">
+                        <span class="scouting-trait-name">{trait_name}</span>
+                        <span class="scouting-trait-score">{trait_val:.1f}/100</span>
+                    </div>
+                    <div class="trait-progress-bar">
+                        <div class="trait-progress-fill" style="width: {trait_val}%;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        # Pigskin's AI Scouting Report
+        st.markdown("### 🧠 Pigskin's Scouting Report")
+        active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        report_cache_key = f"scouting_report_{player_id}"
+        
+        if report_cache_key not in st.session_state:
+            if not active_gemini_key:
+                st.session_state[report_cache_key] = f"""
+                No Gemini API key detected in the sidebar. Standard statistics indicate that {player_row['player_display_name']} averages {player_row['avg_ppr']:.1f} PPR points per game on a snap share of {player_row['avg_snap_share']*100:.1f}%. 
+                His average analytical grade is {player_row['avg_grade']:.1f} and he carries an opportunity score of {player_row['avg_opportunity']:.1f}.
+                
+                **KEY STRENGTHS:**
+                - Highly utilized offensive role (averaging {player_row['avg_ppr']:.1f} points/game)
+                - Good volume stability ({player_row['avg_snap_share']*100:.1f}% snap share)
+                
+                **KEY WEAKNESSES:**
+                - Efficiency metrics are subject to opponent defensive strength
+                - Rookie/college historical metrics are unmapped for this player
+                """
+            else:
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=active_gemini_key)
+                    model = genai.GenerativeModel("gemini-3.5-flash")
+                    
+                    prompt = f"""
+                    You are Pigskin, the snarky analytical co-host of AI vs Vibes.
+                    Write a 1-paragraph Draft Buzz style scouting report for the NFL player {player_row['player_display_name']}.
+                    
+                    Player Metrics:
+                    - Position: {player_row['position']}
+                    - College: {player_row['college_name']}
+                    - Draft: Round {player_row['draft_round']}, Pick {player_row['draft_pick']} (Year {player_row['draft_year']})
+                    - Experience: {player_row['years_of_experience']} years
+                    - Average PPR PPG: {player_row['avg_ppr']:.2f}
+                    - Analytical Grade (1-100): {player_row['avg_grade']:.2f}
+                    - Opportunity Rating (1-100): {player_row['avg_opportunity']:.2f}
+                    - Efficiency Rating (1-100): {player_row['avg_efficiency']:.2f}
+                    - Role Stability Rating (1-100): {100 - player_row['avg_role_fragility']:.2f}
+                    - Contract APY: {format_currency(player_row['contract_apy'])}
+                    
+                    Scouting report requirements:
+                    1. Deliver the report in the Pigskin voice contract (arrogant, analytical, highly critical of vibes-based scouting, uses slang like "cooked", "vibes tax").
+                    2. Write a brief overview (3-4 sentences).
+                    3. Output a section for "KEY STRENGTHS" and "KEY WEAKNESSES", listing exactly 2 bullet points for each based on their actual numbers. Do not include markdown headers inside the bulleted text, just write it as standard bold bullets.
+                    """
+                    res = model.generate_content(prompt)
+                    st.session_state[report_cache_key] = res.text
+                except Exception as ex:
+                    st.session_state[report_cache_key] = f"Error generating report: {ex}"
+                    
+        st.write(st.session_state[report_cache_key])
+        
+        # Weekly Stats & Trends
+        history_df = fetch_player_weekly_history(player_id)
+        if not history_df.empty:
+            st.markdown("### 📈 Performance Trends")
+            plot_df = history_df.sort_values(by=["season", "week"]).copy()
+            plot_df["Week Label"] = plot_df.apply(lambda r: f"W{r['week']}" if len(plot_df["season"].unique()) <= 1 else f"S{r['season']} W{r['week']}", axis=1)
+            plot_data = plot_df.set_index("Week Label")[["fantasy_points_ppr", "total_epa"]]
+            plot_data.columns = ["PPR Points", "Weekly EPA"]
+            st.line_chart(plot_data, height=220)
+            
+            st.markdown("#### Weekly Stats History")
+            st.dataframe(
+                history_df[["season", "week", "opponent_team", "fantasy_points_ppr", "snap_share", "targets", "receptions", "carries", "total_epa"]].rename(
+                    columns={
+                        "season": "Season",
+                        "week": "Week",
+                        "opponent_team": "Opponent",
+                        "fantasy_points_ppr": "PPR Points",
+                        "snap_share": "Snap Share",
+                        "targets": "Targets",
+                        "receptions": "Rec",
+                        "carries": "Carries",
+                        "total_epa": "EPA",
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+    # Rendering Rankings Directory List
+    else:
+        # Segmented position controls
+        if "selected_pos" not in st.session_state:
+            st.session_state.selected_pos = "QB"
+            
+        cols_pos = st.columns(5)
+        positions = ["All", "QB", "RB", "WR", "TE"]
+        
+        for idx, pos in enumerate(positions):
+            label = f"🏈 {pos}" if pos != "All" else "🌍 All"
+            btn_type = "primary" if st.session_state.selected_pos == pos else "secondary"
+            if cols_pos[idx].button(label, type=btn_type, use_container_width=True, key=f"pos_btn_{pos}"):
+                st.session_state.selected_pos = pos
+                st.rerun()
+                
+        selected_pos = st.session_state.selected_pos
+        st.markdown(f"#### 🏆 {selected_pos} Position Rankings Directory")
+        
+        # Filter and show
+        df_pos = df.copy()
+        if selected_pos != "All":
+            df_pos = df_pos[df_pos["position"] == selected_pos]
+            
+        df_pos = df_pos.sort_values(by="avg_grade", ascending=False)
+        
+        if df_pos.empty:
+            st.info("No players found matching the selected position.")
+            return
+            
+        # Format columns for rankings display
+        display_ranks = df_pos.copy()
+        display_ranks["avg_grade"] = display_ranks["avg_grade"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
+        display_ranks["avg_ppr"] = display_ranks["avg_ppr"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
+        display_ranks["contract_apy"] = display_ranks["contract_apy"].apply(format_currency)
+        display_ranks["height"] = display_ranks["height"].apply(format_height)
+        display_ranks["weight"] = display_ranks["weight"].apply(lambda x: f"{int(float(x))} lbs" if (x and not pd.isna(x)) else "N/A")
+        
+        display_ranks = display_ranks.rename(columns={
+            "pos_rank": "Rank",
+            "player_display_name": "Player",
+            "team": "Team",
+            "college_name": "College",
+            "avg_grade": "Overall Rating",
+            "avg_ppr": "Avg PPR",
+            "contract_apy": "Salary APY",
+            "height": "Height",
+            "weight": "Weight"
+        })
+        
+        st.dataframe(
+            display_ranks[["Rank", "Player", "Team", "College", "Overall Rating", "Avg PPR", "Salary APY", "Height", "Weight"]],
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        st.markdown("---")
+        col_sel, col_btn = st.columns([3, 1])
+        with col_sel:
+            rank_selected = st.selectbox(
+                f"Select a player from the {selected_pos} rankings board to inspect their full profile:",
+                options=[""] + sorted(df_pos["player_display_name"].unique().tolist()),
+                index=0,
+                format_func=lambda x: "Choose a player..." if x == "" else x,
+                key="rankings_board_select"
+            )
+        with col_btn:
+            st.write("") # Alignment spacers
+            st.write("")
+            if st.button("View Full Profile 👤", type="primary", use_container_width=True):
+                if rank_selected:
+                    st.session_state.selected_player_id = df_pos[df_pos["player_display_name"] == rank_selected].iloc[0]["player_id"]
+                    st.rerun()
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_reddit_weekly_topic_posts(subreddits, per_subreddit_limit):
@@ -1480,9 +2086,10 @@ st.markdown(
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Workflow Tabs
-tab_pigskin, tab_show_prep, tab_viewer_lab, tab_trade_lab, tab_data_ops = st.tabs([
+tab_pigskin, tab_show_prep, tab_player_profiles, tab_viewer_lab, tab_trade_lab, tab_data_ops = st.tabs([
     "💬 Pigskin Studio",
     "🎙️ Show Prep",
+    "👤 Player Profiles",
     "🏈 Viewer Team Lab",
     "📊 Trade Lab",
     "🛠️ Data Ops",
@@ -2200,6 +2807,10 @@ with tab_show_prep:
         "Rank weekly box-score spikes against role quality, usage stability, touchdown dependence, and snap trust.",
     )
     render_fraud_watch_segment()
+
+# --- PLAYER PROFILES ---
+with tab_player_profiles:
+    render_player_profiles_tab()
 
 # --- VIEWER TEAM LAB ---
 with tab_viewer_lab:
