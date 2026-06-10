@@ -1184,7 +1184,7 @@ def render_player_profiles_tab():
 
     st.markdown("### 👤 Player Profiles Directory")
     st.markdown(
-        "NFL Draft Buzz style directory and scouting profiles powered by advanced metrics, contracts, and Pigskin AI analysis."
+        "Player profiles directory and scouting profiles powered by advanced metrics, contracts, and Pigskin AI analysis."
     )
 
     try:
@@ -1239,7 +1239,7 @@ def render_player_profiles_tab():
         st.session_state.selected_player_id = None
 
     # Autocomplete Search Bar at the top of the directory
-    all_player_names = df["player_display_name"].unique().tolist()
+    all_player_names = [name for name in df["player_display_name"].unique() if isinstance(name, str) and name]
     search_player = st.selectbox(
         "🔍 Search Player Profile by Name (Autocomplete):",
         options=[""] + sorted(all_player_names),
@@ -1377,7 +1377,7 @@ def render_player_profiles_tab():
 
                     prompt = f"""
                     You are Pigskin, the snarky analytical co-host of AI vs Vibes.
-                    Write a 1-paragraph Draft Buzz style scouting report for the NFL player {player_row['player_display_name']}.
+                    Write a 1-paragraph scouting report for the NFL player {player_row['player_display_name']}.
 
                     Player Metrics:
                     - Position: {player_row['position']}
@@ -1493,7 +1493,7 @@ def render_player_profiles_tab():
         with col_sel:
             rank_selected = st.selectbox(
                 f"Select a player from the {selected_pos} rankings board to inspect their full profile:",
-                options=[""] + sorted(df_pos["player_display_name"].unique().tolist()),
+                options=[""] + sorted([name for name in df_pos["player_display_name"].unique() if isinstance(name, str) and name]),
                 index=0,
                 format_func=lambda x: "Choose a player..." if x == "" else x,
                 key="rankings_board_select"
