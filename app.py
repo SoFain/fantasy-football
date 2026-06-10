@@ -326,15 +326,78 @@ def render_section_header(title, anchor=None, subtitle=None, first=False):
     if subtitle:
         st.markdown(f"<div class='section-subtitle'>{html.escape(subtitle)}</div>", unsafe_allow_html=True)
 
-def configure_gemini(api_key):
-    import google.generativeai as genai
+def create_gemini_client(api_key):
+    from google import genai
 
-    genai.configure(api_key=api_key)
-    return genai
+    return genai.Client(api_key=api_key)
 
-def create_gemini_model(api_key, **kwargs):
-    genai = configure_gemini(api_key)
-    return genai.GenerativeModel(GEMINI_MODEL_NAME, **kwargs)
+def create_gemini_model(api_key, tools=None, system_instruction=None):
+    from google.genai import types
+
+    config_kwargs = {}
+    if system_instruction:
+        config_kwargs["system_instruction"] = system_instruction
+    if tools:
+        config_kwargs["tools"] = [types.Tool(function_declarations=[get_bigquery_tool_declaration()])]
+        config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(disable=True)
+    config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
+    return GeminiModel(create_gemini_client(api_key), GEMINI_MODEL_NAME, config)
+
+def get_bigquery_tool_declaration():
+    return {
+        "name": "execute_bigquery_sql",
+        "description": "Executes a BigQuery SQL query against the fantasy_football_brain dataset.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "sql_query": {
+                    "type": "string",
+                    "description": "A BigQuery Standard SQL query. Must explicitly select needed columns, use LIMIT 50, and filter by season/week when possible.",
+                },
+            },
+            "required": ["sql_query"],
+        },
+    }
+
+class GeminiModel:
+    def __init__(self, client, model_name, config=None):
+        self.client = client
+        self.model_name = model_name
+        self.config = config
+
+    def generate_content(self, prompt):
+        return self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config=self.config,
+        )
+
+    def start_chat(self):
+        return GeminiChatSession(self.client, self.model_name, self.config)
+
+class GeminiChatSession:
+    def __init__(self, client, model_name, config=None):
+        self.client = client
+        self.model_name = model_name
+        self.config = config
+        self.contents = []
+
+    def send_message(self, message):
+        from google.genai import types
+
+        if isinstance(message, str):
+            self.contents.append(types.Content(role="user", parts=[types.Part(text=message)]))
+        else:
+            self.contents.append(types.Content(role="user", parts=[message]))
+
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=self.contents,
+            config=self.config,
+        )
+        if response.candidates:
+            self.contents.append(response.candidates[0].content)
+        return response
 
 def mark_successful_run(run_key):
     from datetime import datetime, timezone
@@ -1035,8 +1098,6 @@ def render_ai_cohost():
             st.session_state.pop("chat_session", None)
             st.session_state.chat_session_script_mode = script_mode
         
-        configure_gemini(active_gemini_key)
-    
         # Define the BigQuery tool
         def execute_bigquery_sql(sql_query: str) -> str:
             """Executes a BigQuery SQL query against the fantasy_football_brain dataset.
@@ -1234,8 +1295,7 @@ def render_ai_cohost():
                 tools=[execute_bigquery_sql],
                 system_instruction=system_prompt
             )
-            # Disable automatic function calling so we can stream!
-            st.session_state.chat_session = model.start_chat(enable_automatic_function_calling=False)
+            st.session_state.chat_session = model.start_chat()
         
         # Display chat history
         for msg in st.session_state.messages:
@@ -1262,11 +1322,13 @@ def render_ai_cohost():
             with st.chat_message("assistant"):
                 try:
                     # Initial request (might be a tool call)
-                    response = st.session_state.chat_session.send_message(prompt, stream=False)
+                    response = st.session_state.chat_session.send_message(prompt)
                     
                     def get_fc(resp):
+                        if getattr(resp, "function_calls", None):
+                            return resp.function_calls[0]
                         try:
-                            return resp.parts[0].function_call
+                            return resp.candidates[0].content.parts[0].function_call
                         except (AttributeError, IndexError):
                             return None
 
@@ -1274,7 +1336,7 @@ def render_ai_cohost():
                     fc = get_fc(response)
                     while fc:
                         if fc.name == "execute_bigquery_sql":
-                            sql_to_run = repair_generated_sql(type(fc).to_dict(fc)["args"]["sql_query"])
+                            sql_to_run = repair_generated_sql(fc.args["sql_query"])
 
                             tool_message = {
                                 "role": "tool_status",
@@ -1315,15 +1377,13 @@ def render_ai_cohost():
                                 "expanded": False,
                             })
                             
-                            import google.ai.generativelanguage as glm
-                            tool_response = glm.Part(
-                                function_response=glm.FunctionResponse(
-                                    name="execute_bigquery_sql",
-                                    response={"result": result_str}
-                                )
+                            from google.genai import types
+                            tool_response = types.Part.from_function_response(
+                                name="execute_bigquery_sql",
+                                response={"result": result_str},
                             )
                             # Get next response (could be another tool, or text)
-                            response = st.session_state.chat_session.send_message(tool_response, stream=False)
+                            response = st.session_state.chat_session.send_message(tool_response)
                             fc = get_fc(response)
                         else:
                             break
