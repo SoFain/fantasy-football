@@ -1068,17 +1068,43 @@ def render_sleeper_watch_segment():
 def fetch_player_profiles_data():
     from google.cloud import bigquery
     sql_query = f"""
-    WITH latest_week AS (
+    WITH latest_roster_season AS (
         SELECT MAX(season) AS max_season
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.player_rosters`
+    ),
+    active_roster_players AS (
+        SELECT
+            r.gsis_id AS player_id,
+            ANY_VALUE(r.display_name) AS player_name,
+            ANY_VALUE(r.display_name) AS player_display_name,
+            ANY_VALUE(r.position) AS position,
+            ANY_VALUE(r.latest_team) AS team,
+            ANY_VALUE(r.birth_date) AS birth_date,
+            ANY_VALUE(r.height) AS height,
+            ANY_VALUE(r.weight) AS weight,
+            ANY_VALUE(r.headshot) AS headshot,
+            ANY_VALUE(r.college_name) AS college_name,
+            ANY_VALUE(r.jersey_number) AS jersey_number,
+            ANY_VALUE(r.rookie_season) AS rookie_season,
+            ANY_VALUE(r.years_of_experience) AS years_of_experience,
+            ANY_VALUE(r.draft_year) AS draft_year,
+            ANY_VALUE(r.draft_round) AS draft_round,
+            ANY_VALUE(r.draft_pick) AS draft_pick,
+            ANY_VALUE(r.draft_team) AS draft_team
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.player_rosters` r, latest_roster_season lrs
+        WHERE r.season = lrs.max_season AND r.gsis_id IS NOT NULL
+        GROUP BY r.gsis_id
+    ),
+    latest_stat_season AS (
+        SELECT
+            player_id,
+            MAX(season) AS max_stat_season
         FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
+        GROUP BY player_id
     ),
     player_weekly_agg AS (
         SELECT
             t.player_id,
-            t.player_name,
-            t.player_display_name,
-            t.position,
-            t.team,
             AVG(t.fantasy_points_ppr) AS avg_ppr,
             SUM(t.targets) AS total_targets,
             SUM(t.receptions) AS total_receptions,
@@ -1099,27 +1125,10 @@ def fetch_player_profiles_data():
             AVG(t.role_quality_score) AS avg_role_quality,
             AVG(t.role_fragility_score) AS avg_role_fragility,
             AVG(t.analytical_grade) AS avg_grade
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth` t, latest_week lw
-        WHERE t.season = lw.max_season
-        GROUP BY t.player_id, t.player_name, t.player_display_name, t.position, t.team
-    ),
-    roster_meta AS (
-        SELECT
-            r.gsis_id,
-            ANY_VALUE(r.birth_date) AS birth_date,
-            ANY_VALUE(r.height) AS height,
-            ANY_VALUE(r.weight) AS weight,
-            ANY_VALUE(r.headshot) AS headshot,
-            ANY_VALUE(r.college_name) AS college_name,
-            ANY_VALUE(r.jersey_number) AS jersey_number,
-            ANY_VALUE(r.rookie_season) AS rookie_season,
-            ANY_VALUE(r.years_of_experience) AS years_of_experience,
-            ANY_VALUE(r.draft_year) AS draft_year,
-            ANY_VALUE(r.draft_round) AS draft_round,
-            ANY_VALUE(r.draft_pick) AS draft_pick,
-            ANY_VALUE(r.draft_team) AS draft_team
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.player_rosters` r
-        GROUP BY r.gsis_id
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth` t
+        JOIN latest_stat_season lss
+            ON t.player_id = lss.player_id AND t.season = lss.max_stat_season
+        GROUP BY t.player_id
     ),
     contract_meta AS (
         SELECT
@@ -1133,13 +1142,35 @@ def fetch_player_profiles_data():
         GROUP BY c.gsis_id
     )
     SELECT
-        agg.*,
-        r.* EXCEPT(gsis_id),
-        c.* EXCEPT(gsis_id),
-        RANK() OVER(PARTITION BY agg.position ORDER BY COALESCE(agg.avg_grade, 0.0) DESC) AS pos_rank
-    FROM player_weekly_agg agg
-    LEFT JOIN roster_meta r ON agg.player_id = r.gsis_id
-    LEFT JOIN contract_meta c ON agg.player_id = c.gsis_id
+        rp.*,
+        COALESCE(agg.avg_ppr, 0.0) AS avg_ppr,
+        COALESCE(agg.total_targets, 0.0) AS total_targets,
+        COALESCE(agg.total_receptions, 0.0) AS total_receptions,
+        COALESCE(agg.total_receiving_yards, 0.0) AS total_receiving_yards,
+        COALESCE(agg.total_receiving_tds, 0.0) AS total_receiving_tds,
+        COALESCE(agg.total_carries, 0.0) AS total_carries,
+        COALESCE(agg.total_rushing_yards, 0.0) AS total_rushing_yards,
+        COALESCE(agg.total_rushing_tds, 0.0) AS total_rushing_tds,
+        COALESCE(agg.total_pass_attempts, 0.0) AS total_pass_attempts,
+        COALESCE(agg.total_passing_yards, 0.0) AS total_passing_yards,
+        COALESCE(agg.total_passing_tds, 0.0) AS total_passing_tds,
+        COALESCE(agg.avg_target_share, 0.0) AS avg_target_share,
+        COALESCE(agg.avg_wopr, 0.0) AS avg_wopr,
+        COALESCE(agg.avg_epa, 0.0) AS avg_epa,
+        COALESCE(agg.avg_snap_share, 0.0) AS avg_snap_share,
+        COALESCE(agg.avg_opportunity, 0.0) AS avg_opportunity,
+        COALESCE(agg.avg_efficiency, 0.0) AS avg_efficiency,
+        COALESCE(agg.avg_role_quality, 0.0) AS avg_role_quality,
+        COALESCE(agg.avg_role_fragility, 0.0) AS avg_role_fragility,
+        COALESCE(agg.avg_grade, 0.0) AS avg_grade,
+        c.contract_value,
+        c.contract_apy,
+        c.contract_guaranteed,
+        c.contract_year_signed,
+        RANK() OVER(PARTITION BY rp.position ORDER BY COALESCE(agg.avg_grade, 0.0) DESC) AS pos_rank
+    FROM active_roster_players rp
+    LEFT JOIN player_weekly_agg agg ON rp.player_id = agg.player_id
+    LEFT JOIN contract_meta c ON rp.player_id = c.gsis_id
     """
     client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
     df = client.query(sql_query).result().to_dataframe()

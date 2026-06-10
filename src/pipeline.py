@@ -97,16 +97,16 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         if loaded_seasons != seasons:
             logger.info(f"Using loaded seasons {loaded_seasons} for derived/static tables instead of requested seasons {seasons}.")
 
-        team_df_clean = transform_team_data(team_df_raw, loaded_seasons)
-        draft_df_clean = transform_draft_picks_data(draft_df_raw, loaded_seasons)
-        players_df_clean = transform_players_data(players_df_raw, loaded_seasons)
-        contracts_df_clean = transform_contracts_data(contracts_df_raw, loaded_seasons)
-        ngs_passing_clean = transform_standard_seasonal_data(ngs_passing_raw, loaded_seasons, "NGS Passing")
-        ngs_rushing_clean = transform_standard_seasonal_data(ngs_rushing_raw, loaded_seasons, "NGS Rushing")
-        ngs_receiving_clean = transform_standard_seasonal_data(ngs_receiving_raw, loaded_seasons, "NGS Receiving")
-        ftn_clean = transform_standard_seasonal_data(ftn_raw, loaded_seasons, "FTN Charting")
-        snap_counts_clean = transform_standard_seasonal_data(snap_counts_raw, loaded_seasons, "Snap Counts")
-        injury_reports_clean = transform_standard_seasonal_data(injury_reports_raw, loaded_seasons, "Injury Reports")
+        team_df_clean = transform_team_data(team_df_raw, seasons)
+        draft_df_clean = transform_draft_picks_data(draft_df_raw, seasons)
+        players_df_clean = transform_players_data(players_df_raw, seasons)
+        contracts_df_clean = transform_contracts_data(contracts_df_raw, seasons)
+        ngs_passing_clean = transform_standard_seasonal_data(ngs_passing_raw, seasons, "NGS Passing")
+        ngs_rushing_clean = transform_standard_seasonal_data(ngs_rushing_raw, seasons, "NGS Rushing")
+        ngs_receiving_clean = transform_standard_seasonal_data(ngs_receiving_raw, seasons, "NGS Receiving")
+        ftn_clean = transform_standard_seasonal_data(ftn_raw, seasons, "FTN Charting")
+        snap_counts_clean = transform_standard_seasonal_data(snap_counts_raw, seasons, "Snap Counts")
+        injury_reports_clean = transform_standard_seasonal_data(injury_reports_raw, seasons, "Injury Reports")
 
         # -------------------------------------------------------------
         # STEP 3: LOADING TO BIGQUERY
