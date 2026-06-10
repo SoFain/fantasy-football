@@ -525,6 +525,311 @@ def render_fraud_watch_segment():
     cols[2].metric("Label", top["fraud_label"])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+
+def render_sleeper_watch_segment():
+    import html
+    import os
+    import pandas as pd
+
+    st.markdown("### 🕵️ Sleeper Watch Search")
+    st.markdown(
+        "100% data-driven sleepers and streamers ranked by role, recent volume, efficiency, and opponent defensive matchups."
+    )
+
+    # Ingestion or data availability check
+    sql_query = f"""
+    WITH latest_week AS (
+        SELECT MAX(season) AS max_season, MAX(week) AS max_week 
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
+    ),
+    latest_snapshot AS (
+        SELECT MAX(snapshot_at) AS max_snapshot
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_rosters`
+    ),
+    def_points_allowed AS (
+        SELECT 
+            m.opponent_team AS def_team,
+            m.position,
+            SUM(m.fantasy_points_ppr) AS total_points,
+            COUNT(DISTINCT CONCAT(m.season, '_', m.week)) AS games_played
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.weekly_metrics` m, latest_week lw
+        WHERE m.season = lw.max_season AND m.season_type = 'REG'
+          AND m.position IN ('QB', 'RB', 'WR', 'TE')
+        GROUP BY def_team, m.position
+    ),
+    def_avg AS (
+        SELECT 
+            def_team,
+            position,
+            total_points / games_played AS avg_points_allowed
+        FROM def_points_allowed
+    ),
+    ranked_def AS (
+        SELECT 
+            def_team,
+            position,
+            avg_points_allowed,
+            RANK() OVER(PARTITION BY position ORDER BY avg_points_allowed ASC) AS defensive_rank
+        FROM def_avg
+    ),
+    player_leagues AS (
+        SELECT 
+            LOWER(player_name) AS clean_player_name,
+            position,
+            COUNT(DISTINCT league_id) AS rostered_leagues_count
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_roster_players`
+        WHERE snapshot_at = (SELECT max_snapshot FROM latest_snapshot)
+        GROUP BY clean_player_name, position
+    ),
+    total_leagues AS (
+        SELECT COUNT(DISTINCT league_id) AS total_leagues_count
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_rosters`
+        WHERE snapshot_at = (SELECT max_snapshot FROM latest_snapshot)
+    ),
+    latest_player_truth AS (
+        SELECT 
+            t.season,
+            t.week,
+            t.player_id,
+            t.player_name,
+            t.player_display_name,
+            t.position,
+            t.team,
+            t.opponent_team,
+            t.fantasy_points_ppr,
+            t.targets,
+            t.carries,
+            t.target_share,
+            t.wopr,
+            t.total_epa,
+            t.red_zone_touches,
+            t.offense_pct,
+            t.avg_separation,
+            t.rolling_3_week_ppr,
+            t.rolling_3_week_targets,
+            t.rolling_3_week_carries,
+            t.rolling_3_week_opportunities,
+            ROW_NUMBER() OVER(PARTITION BY t.player_id ORDER BY t.season DESC, t.week DESC) as rn
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth` t, latest_week lw
+        WHERE t.season = lw.max_season AND t.week = lw.max_week AND t.position IN ('QB', 'RB', 'WR', 'TE')
+    )
+    SELECT 
+        t.player_display_name AS player_name,
+        t.position,
+        t.team,
+        t.opponent_team,
+        SAFE_DIVIDE(COALESCE(pl.rostered_leagues_count, 0), COALESCE((SELECT total_leagues_count FROM total_leagues), 1)) AS roster_pct,
+        COALESCE(t.rolling_3_week_ppr, 0.0) AS rolling_3_week_ppr,
+        COALESCE(t.offense_pct, 0.0) AS snap_share,
+        COALESCE(t.rolling_3_week_targets, 0.0) AS targets_3w,
+        COALESCE(t.rolling_3_week_carries, 0.0) AS carries_3w,
+        COALESCE(t.wopr, 0.0) AS wopr,
+        COALESCE(t.total_epa, 0.0) AS epa,
+        COALESCE(rd.defensive_rank, 16) AS opp_def_rank,
+        ROUND(
+            CASE 
+                WHEN t.position = 'QB' THEN 
+                    0.35 * COALESCE(t.rolling_3_week_ppr, 0) + 
+                    0.25 * COALESCE(t.rolling_3_week_opportunities * 3, 0) + 
+                    0.20 * COALESCE(t.total_epa, 0) + 
+                    0.20 * COALESCE(rd.defensive_rank, 16)
+                WHEN t.position = 'RB' THEN 
+                    0.30 * COALESCE(t.rolling_3_week_ppr, 0) + 
+                    0.25 * COALESCE(t.rolling_3_week_carries * 3, 0) + 
+                    0.15 * COALESCE(t.rolling_3_week_targets * 10, 0) + 
+                    0.15 * COALESCE(t.offense_pct * 100, 0) + 
+                    0.15 * COALESCE(rd.defensive_rank, 16)
+                WHEN t.position IN ('WR', 'TE') THEN 
+                    0.30 * COALESCE(t.rolling_3_week_ppr, 0) + 
+                    0.20 * COALESCE(t.rolling_3_week_targets * 10, 0) + 
+                    0.20 * COALESCE(t.wopr * 100, 0) + 
+                    0.15 * COALESCE(t.offense_pct * 100, 0) + 
+                    0.15 * COALESCE(rd.defensive_rank, 16)
+                ELSE 0.0
+            END,
+            2
+        ) AS sleeper_score
+    FROM latest_player_truth t
+    LEFT JOIN player_leagues pl ON LOWER(t.player_display_name) = pl.clean_player_name AND t.position = pl.position
+    LEFT JOIN ranked_def rd ON t.opponent_team = rd.def_team AND t.position = rd.position
+    WHERE t.rn = 1
+    """
+
+    try:
+        df = execute_bq_cached(sql_query)
+    except Exception as e:
+        st.info(f"Sleeper Watch data is not materialized yet: {e}")
+        return
+
+    if df.empty:
+        st.info("Sleeper Watch has no candidates for the latest loaded week.")
+        return
+
+    # Add interactive settings in columns
+    col_pct, col_pos, col_limit = st.columns(3)
+    with col_pct:
+        roster_threshold = st.slider(
+            "Max Rostered Percentage (%)",
+            min_value=10,
+            max_value=100,
+            value=50,
+            step=5,
+            help="Show players rostered in this percentage of loaded leagues or less.",
+            key="sleeper_roster_threshold_slider",
+        )
+    with col_pos:
+        pos_filter = st.selectbox(
+            "Filter by Position",
+            options=["All", "QB", "RB", "WR", "TE"],
+            index=0,
+            key="sleeper_position_filter_select",
+        )
+    with col_limit:
+        candidates_limit = st.selectbox(
+            "Number of Candidates",
+            options=[25, 30, 40, 50],
+            index=0,
+            key="sleeper_candidates_limit_select",
+        )
+
+    # Filter data in pandas for instant reactivity
+    df_filtered = df.copy()
+
+    # Filter by roster percentage
+    df_filtered = df_filtered[
+        df_filtered["roster_pct"] <= (roster_threshold / 100.0)
+    ]
+
+    # Filter by position
+    if pos_filter != "All":
+        df_filtered = df_filtered[df_filtered["position"] == pos_filter]
+
+    # Sort and limit
+    df_filtered = df_filtered.sort_values(
+        by="sleeper_score", ascending=False
+    ).head(candidates_limit)
+
+    if df_filtered.empty:
+        st.warning("No players matching the selected filters.")
+        return
+
+    # Insert Rank column
+    df_filtered.insert(0, "Rank", range(1, len(df_filtered) + 1))
+
+    # Format columns for display
+    display_df = df_filtered.copy()
+    display_df["roster_pct"] = display_df["roster_pct"].apply(
+        lambda x: f"{x*100:.1f}%"
+    )
+    display_df["snap_share"] = display_df["snap_share"].apply(
+        lambda x: f"{x:.1f}%" if not pd.isna(x) else "N/A"
+    )
+    display_df["wopr"] = display_df["wopr"].apply(lambda x: f"{x:.2f}")
+    display_df["epa"] = display_df["epa"].apply(lambda x: f"{x:.2f}")
+    display_df["rolling_3_week_ppr"] = display_df["rolling_3_week_ppr"].apply(
+        lambda x: f"{x:.2f}"
+    )
+    display_df["sleeper_score"] = display_df["sleeper_score"].apply(
+        lambda x: f"{x:.2f}"
+    )
+
+    # Rename columns to show-ready labels
+    display_df = display_df.rename(
+        columns={
+            "player_name": "Player",
+            "position": "Position",
+            "team": "Team",
+            "opponent_team": "Opponent",
+            "roster_pct": "Rostered %",
+            "rolling_3_week_ppr": "3W PPR PPG",
+            "snap_share": "Snap Share",
+            "targets_3w": "3W Avg Targets",
+            "carries_3w": "3W Avg Carries",
+            "wopr": "WOPR",
+            "epa": "Weekly EPA",
+            "opp_def_rank": "Opp Def Rank vs Pos",
+            "sleeper_score": "Sleeper Score",
+        }
+    )
+
+    # Render dataframe
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Opp Def Rank vs Pos": st.column_config.NumberColumn(
+                help="Matchup ranking: 1 is best defense (hardest matchup), 32 is worst defense (easiest matchup)."
+            ),
+            "Sleeper Score": st.column_config.NumberColumn(
+                help="AI vs Vibes proprietary formula based on snaps, opportunity, EPA, and matchup favorable rating."
+            ),
+        },
+    )
+
+    # Interactive Pigskin Breakdown
+    st.markdown("#### 🧠 Pigskin's Quick Take")
+    selected_player = st.selectbox(
+        "Select a Sleeper candidate for a data-driven roast/verdict:",
+        options=df_filtered["player_name"].tolist(),
+        index=0,
+        key="sleeper_player_verdict_select",
+    )
+
+    if selected_player:
+        player_row = df_filtered[
+            df_filtered["player_name"] == selected_player
+        ].iloc[0]
+        active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+
+        if not active_gemini_key:
+            st.info(
+                "Enter your Gemini API key in the sidebar to get Pigskin's snarky take."
+            )
+        else:
+            try:
+                import google.generativeai as genai
+
+                genai.configure(api_key=active_gemini_key)
+                model = genai.GenerativeModel("gemini-3.5-flash")
+
+                # Construct data summary for prompt
+                data_summary = f"""
+                Player: {selected_player}
+                Position: {player_row['position']}
+                Team: {player_row['team']}
+                Opponent: {player_row['opponent_team']}
+                Rostered % (in loaded Sleeper leagues): {player_row['roster_pct']*100:.1f}%
+                Recent snap share: {player_row['snap_share']:.1f}%
+                3-Week average targets: {player_row['targets_3w']:.1f}
+                3-Week average carries: {player_row['carries_3w']:.1f}
+                WOPR: {player_row['wopr']:.2f}
+                EPA: {player_row['epa']:.2f}
+                Opponent Defensive Rank vs Position (1 to 32, where 32 is easiest): {player_row['opp_def_rank']}
+                Sleeper Score: {player_row['sleeper_score']:.2f}
+                """
+
+                # Call Gemini
+                prompt = f"""
+                You are Pigskin, the snarky analytical co-host of AI vs Vibes. 
+                Write a 1-2 sentence data-driven verdict explaining why {selected_player} is a potential sleeper or streamer for this week based on the metrics below.
+                
+                Metrics:
+                {data_summary}
+                
+                Requirements:
+                1. Follow the Pigskin Voice Contract (arrogant, snarky, football-sick, uses slang like cooked, vibes tax, fraud watch, cope naturally).
+                2. Be concise (max 2 sentences).
+                3. Do not make up facts. Mention the exact stats (e.g. WOPR, snaps, or matchup rank) to justify your claim.
+                """
+                res = model.generate_content(prompt)
+
+                st.markdown(f"**Pigskin's Verdict on {selected_player}:**")
+                st.write(res.text)
+            except Exception as ex:
+                st.error(f"Failed to generate take: {ex}")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_reddit_weekly_topic_posts(subreddits, per_subreddit_limit):
     import requests
@@ -2186,6 +2491,7 @@ with tab_show_prep:
     render_tab_bookmarks([
         ("Reddit Topics", "reddit-topics"),
         ("Fraud Watch", "fraud-watch"),
+        ("Sleeper Watch", "sleeper-watch"),
     ])
     render_section_header(
         "Reddit Topic Scout",
@@ -2200,6 +2506,12 @@ with tab_show_prep:
         "Rank weekly box-score spikes against role quality, usage stability, touchdown dependence, and snap trust.",
     )
     render_fraud_watch_segment()
+    render_section_header(
+        "Sleeper Watch Search",
+        "sleeper-watch",
+        "Find and rank under-rostered sleepers and weekly streamers based on underlying workload, target/carry share, efficiency, and opponent defensive matchups.",
+    )
+    render_sleeper_watch_segment()
 
 # --- VIEWER TEAM LAB ---
 with tab_viewer_lab:

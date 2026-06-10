@@ -417,25 +417,25 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
         LEFT JOIN red_zone r
             ON w.season = r.season
             AND w.week = r.week
-            AND w.player_name = r.player_name
+            AND LOWER(w.player_name) = LOWER(r.player_name)
             AND w.team = r.team
         LEFT JOIN snap_counts s
             ON w.season = s.season
             AND w.week = s.week
-            AND w.player_name = s.player_name
+            AND LOWER(w.player_display_name) = LOWER(s.player_name)
             AND w.team = s.team
         LEFT JOIN ngs_receiving n
             ON w.season = n.season
             AND w.week = n.week
-            AND w.player_name = n.player_name
+            AND LOWER(w.player_display_name) = LOWER(n.player_name)
             AND w.team = n.team
         LEFT JOIN injuries i
             ON w.season = i.season
             AND w.week = i.week
-            AND w.player_name = i.player_name
+            AND LOWER(w.player_display_name) = LOWER(i.player_name)
             AND w.team = i.team
         LEFT JOIN sleeper_trends t
-            ON w.player_name = t.player_name
+            ON LOWER(w.player_display_name) = LOWER(t.player_name)
             AND w.team = t.team
         LEFT JOIN current_rosters cr
             ON w.player_id = cr.player_id
