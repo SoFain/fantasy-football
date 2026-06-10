@@ -1184,7 +1184,7 @@ def render_player_profiles_tab():
 
     st.markdown("### 👤 Player Profiles Directory")
     st.markdown(
-        "NFL Draft Buzz style directory and scouting profiles powered by advanced metrics, contracts, and Pigskin AI analysis."
+        "Player profiles directory and scouting profiles powered by advanced metrics, contracts, and Pigskin AI analysis."
     )
 
     try:
@@ -1377,7 +1377,7 @@ def render_player_profiles_tab():
 
                     prompt = f"""
                     You are Pigskin, the snarky analytical co-host of AI vs Vibes.
-                    Write a 1-paragraph Draft Buzz style scouting report for the NFL player {player_row['player_display_name']}.
+                    Write a 1-paragraph scouting report for the NFL player {player_row['player_display_name']}.
 
                     Player Metrics:
                     - Position: {player_row['position']}
