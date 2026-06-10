@@ -13,6 +13,7 @@ BIGQUERY_PROJECT_ID = (
     or DEFAULT_BIGQUERY_PROJECT
 )
 os.environ.setdefault("BQ_PROJECT", BIGQUERY_PROJECT_ID)
+GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
 # Set Streamlit Page Configuration
 st.set_page_config(
@@ -325,6 +326,16 @@ def render_section_header(title, anchor=None, subtitle=None, first=False):
     if subtitle:
         st.markdown(f"<div class='section-subtitle'>{html.escape(subtitle)}</div>", unsafe_allow_html=True)
 
+def configure_gemini(api_key):
+    import google.generativeai as genai
+
+    genai.configure(api_key=api_key)
+    return genai
+
+def create_gemini_model(api_key, **kwargs):
+    genai = configure_gemini(api_key)
+    return genai.GenerativeModel(GEMINI_MODEL_NAME, **kwargs)
+
 def mark_successful_run(run_key):
     from datetime import datetime, timezone
 
@@ -366,6 +377,7 @@ def mark_successful_run(run_key):
 @st.cache_data(ttl=60, show_spinner=False)
 def get_persisted_last_success(run_key):
     try:
+        from google.api_core.exceptions import NotFound
         from google.cloud import bigquery
 
         client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
@@ -383,6 +395,8 @@ def get_persisted_last_success(run_key):
         if df.empty:
             return None
         return df.iloc[0]["succeeded_at"].strftime("%Y-%m-%d %I:%M:%S %p")
+    except NotFound:
+        return None
     except Exception as ex:
         logging.getLogger("app.metrics").warning(f"Could not read dashboard run status: {ex}")
     return None
@@ -788,10 +802,7 @@ def render_sleeper_watch_segment():
             )
         else:
             try:
-                import google.generativeai as genai
-
-                genai.configure(api_key=active_gemini_key)
-                model = genai.GenerativeModel("gemini-3.5-flash")
+                model = create_gemini_model(active_gemini_key)
 
                 # Construct data summary for prompt
                 data_summary = f"""
@@ -1024,8 +1035,7 @@ def render_ai_cohost():
             st.session_state.pop("chat_session", None)
             st.session_state.chat_session_script_mode = script_mode
         
-        import google.generativeai as genai
-        genai.configure(api_key=active_gemini_key)
+        configure_gemini(active_gemini_key)
     
         # Define the BigQuery tool
         def execute_bigquery_sql(sql_query: str) -> str:
@@ -1219,8 +1229,8 @@ def render_ai_cohost():
     """
     
         if "chat_session" not in st.session_state:
-            model = genai.GenerativeModel(
-                'gemini-3.5-flash',
+            model = create_gemini_model(
+                active_gemini_key,
                 tools=[execute_bigquery_sql],
                 system_instruction=system_prompt
             )
@@ -1335,7 +1345,13 @@ def render_ai_cohost():
                     st.session_state.messages.append({"role": "assistant", "content": response.text})
                     
                 except Exception as e:
-                    st.error(f"Error communicating with AI Co-Host: {e}")
+                    logging.getLogger("app.ai").exception("Error communicating with AI Co-Host")
+                    failure_text = (
+                        f"Pigskin connection failed before a usable answer. "
+                        f"Model `{GEMINI_MODEL_NAME}` raised: {e}"
+                    )
+                    st.error(failure_text)
+                    st.session_state.messages.append({"role": "assistant", "content": failure_text})
 
 def render_value_analyzer():
     import html
@@ -1681,9 +1697,7 @@ def render_value_analyzer():
                             f"  Recent News:\n{news}\n"
                         )
 
-                    import google.generativeai as genai
-                    genai.configure(api_key=active_gemini_key)
-                    model = genai.GenerativeModel('gemini-3.5-flash')
+                    model = create_gemini_model(active_gemini_key)
                     
                     prompt = f"""
                     Evaluate this dynasty fantasy football trade side-by-side:
@@ -1754,6 +1768,18 @@ else:
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
 if gemini_api_key:
     st.sidebar.success("Gemini API key loaded from environment.")
+    st.sidebar.caption(f"Gemini model: `{GEMINI_MODEL_NAME}`")
+    if st.sidebar.button("Test Gemini connection", key="test_gemini_connection"):
+        try:
+            model = create_gemini_model(gemini_api_key)
+            response = model.generate_content("Reply with exactly: OK")
+            response_text = getattr(response, "text", "").strip()
+            if response_text == "OK":
+                st.sidebar.success("Gemini connection OK.")
+            else:
+                st.sidebar.warning(f"Gemini replied, but unexpectedly: {response_text[:80]}")
+        except Exception as ex:
+            st.sidebar.error(f"Gemini connection failed: {ex}")
 else:
     gemini_key_input = st.sidebar.text_input(
         "Gemini API Key",
@@ -1763,6 +1789,7 @@ else:
     )
     if gemini_key_input:
         os.environ["GEMINI_API_KEY"] = gemini_key_input
+        st.sidebar.caption(f"Gemini model: `{GEMINI_MODEL_NAME}`")
 
 active_tables, total_size_mb = get_warehouse_metrics()
 app_version = os.environ.get("APP_VERSION", "dev")
@@ -2117,10 +2144,7 @@ def render_sleeper_viewer_console():
 
         try:
             viewer_context = get_sleeper_viewer_team_context(console_context)
-            import google.generativeai as genai
-
-            genai.configure(api_key=active_gemini_key)
-            model = genai.GenerativeModel("gemini-3.5-flash")
+            model = create_gemini_model(active_gemini_key)
             recent_history = "\n".join(
                 f"{message['role']}: {message['content']}"
                 for message in messages[-8:]
