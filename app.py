@@ -1286,6 +1286,44 @@ def fetch_player_weekly_history(player_id: str):
     df = client.query(sql_query, job_config=job_config).result().to_dataframe()
     return df
 
+def fetch_player_season_rankings(player_id: str):
+    from google.cloud import bigquery
+    sql_query = f"""
+    WITH season_averages AS (
+        SELECT
+            player_id,
+            season,
+            position,
+            AVG(analytical_grade) AS avg_grade
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
+        GROUP BY player_id, season, position
+    ),
+    season_ranks AS (
+        SELECT
+            player_id,
+            season,
+            position,
+            avg_grade,
+            RANK() OVER(PARTITION BY season, position ORDER BY COALESCE(avg_grade, 0.0) DESC) AS pos_rank
+        FROM season_averages
+    )
+    SELECT
+        season,
+        pos_rank,
+        avg_grade
+    FROM season_ranks
+    WHERE player_id = @player_id
+    ORDER BY season ASC
+    """
+    client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("player_id", "STRING", player_id)
+        ]
+    )
+    df = client.query(sql_query, job_config=job_config).result().to_dataframe()
+    return df
+
 def calculate_player_comps(player_row, df, limit=5):
     import pandas as pd
     import numpy as np
@@ -1565,22 +1603,23 @@ def render_player_profiles_tab():
             stability_score = max(0.0, min(100.0, 100.0 - fragility))
 
             traits = [
-                ("Opportunity Rating (Volume)", opp_score),
-                ("Efficiency Rating (EPA/Pts)", eff_score),
-                ("Role Stability Rating (Usage)", stability_score),
+                ("Opportunity Rating (Volume)", opp_score, "Workload volume relative to position group (derived from targets, carries, snap shares, and team opportunity shares)."),
+                ("Efficiency Rating (EPA/Pts)", eff_score, "Productivity and value added per touch, based on Expected Points Added (EPA) and points scored relative to position group norms."),
+                ("Role Stability Rating (Usage)", stability_score, "Reliability and consistency of weekly role usage (higher = lower risk of sudden usage drops)."),
             ]
 
             st.markdown('<div class="scouting-traits-container">', unsafe_allow_html=True)
-            for trait_name, trait_val in traits:
+            for trait_name, trait_val, trait_desc in traits:
                 st.markdown(f"""
-                <div class="scouting-trait-row">
-                    <div class="scouting-trait-header">
-                        <span class="scouting-trait-name">{trait_name}</span>
-                        <span class="scouting-trait-score">{trait_val:.1f}/100</span>
+                <div class="scouting-trait-row" style="margin-bottom: 12px;">
+                    <div class="scouting-trait-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                        <span style="font-weight: 700; font-size: 13px; color: inherit;">{trait_name}</span>
+                        <span style="font-weight: 800; font-size: 14px; color: #2563eb;">{trait_val:.1f}/100</span>
                     </div>
-                    <div class="trait-progress-bar">
-                        <div class="trait-progress-fill" style="width: {trait_val}%;"></div>
+                    <div class="trait-progress-bar" style="background: rgba(148, 163, 184, 0.2); border-radius: 999px; height: 8px; overflow: hidden; margin-bottom: 3px;">
+                        <div class="trait-progress-fill" style="background: #2563eb; height: 100%; border-radius: 999px; width: {trait_val}%;"></div>
                     </div>
+                    <div style="font-size: 11px; opacity: 0.75; color: inherit; line-height: 1.25; font-style: italic;">{trait_desc}</div>
                 </div>
                 """, unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1638,32 +1677,102 @@ def render_player_profiles_tab():
 
         # Weekly Stats & Trends
         history_df = fetch_player_weekly_history(player_id)
-        if not history_df.empty:
-            st.markdown("### 📈 Performance Trends")
-            plot_df = history_df.sort_values(by=["season", "week"]).copy()
-            plot_df["Week Label"] = plot_df.apply(lambda r: f"W{r['week']}" if len(plot_df["season"].unique()) <= 1 else f"S{r['season']} W{r['week']}", axis=1)
-            plot_data = plot_df.set_index("Week Label")[["fantasy_points_ppr", "total_epa"]]
-            plot_data.columns = ["PPR Points", "Weekly EPA"]
-            st.line_chart(plot_data, height=220)
-
-            st.markdown("#### Weekly Stats History")
-            st.dataframe(
-                history_df[["season", "week", "opponent_team", "fantasy_points_ppr", "snap_share", "targets", "receptions", "carries", "total_epa"]].rename(
-                    columns={
-                        "season": "Season",
-                        "week": "Week",
-                        "opponent_team": "Opponent",
-                        "fantasy_points_ppr": "PPR Points",
-                        "snap_share": "Snap Share",
-                        "targets": "Targets",
-                        "receptions": "Rec",
-                        "carries": "Carries",
-                        "total_epa": "EPA",
-                    }
-                ),
-                use_container_width=True,
-                hide_index=True
+        
+        # 1. Performance Trends: Career Position Rank by Season
+        rank_df = fetch_player_season_rankings(player_id)
+        if not rank_df.empty:
+            st.markdown("### 📈 Career Position Rank Trends")
+            
+            # Format DataFrame for Altair
+            chart_df = rank_df.copy()
+            chart_df["Season"] = chart_df["season"].astype(str)
+            chart_df["Rank"] = chart_df["pos_rank"].astype(int)
+            chart_df["Grade"] = chart_df["avg_grade"].round(1)
+            
+            import altair as alt
+            
+            chart = alt.Chart(chart_df).mark_line(point=True, strokeWidth=3, color="#2563eb").encode(
+                x=alt.X("Season:O", title="NFL Season"),
+                y=alt.Y("Rank:Q", title="Position Rank (Rank #1 is top)", scale=alt.Scale(reverse=True, zero=False)),
+                tooltip=["Season", "Rank", "Grade"]
+            ).properties(
+                height=220,
             )
+            
+            st.altair_chart(chart, use_container_width=True)
+
+        # 2. Season History
+        if not history_df.empty:
+            st.markdown("### 📅 Career Season History")
+            season_summary_data = []
+            for season, group in history_df.groupby("season"):
+                games_played = len(group)
+                total_ppr = group["fantasy_points_ppr"].sum()
+                avg_ppr = group["fantasy_points_ppr"].mean()
+                avg_snap = group["snap_share"].mean()
+                total_targets = group["targets"].sum()
+                total_receptions = group["receptions"].sum()
+                total_receiving_yds = group["receiving_yards"].sum()
+                total_receiving_tds = group["receiving_tds"].sum()
+                total_carries = group["carries"].sum()
+                total_rushing_yds = group["rushing_yards"].sum()
+                total_rushing_tds = group["rushing_tds"].sum()
+                total_passing_yds = group["passing_yards"].sum()
+                total_passing_tds = group["passing_tds"].sum()
+                total_epa = group["total_epa"].sum()
+                
+                season_summary_data.append({
+                    "Season": int(season),
+                    "Games": int(games_played),
+                    "Total PPR": round(total_ppr, 1),
+                    "PPR PPG": round(avg_ppr, 2),
+                    "Avg Snap Share": f"{avg_snap * 100:.1f}%" if not pd.isna(avg_snap) else "0.0%",
+                    "Targets": int(total_targets),
+                    "Rec": int(total_receptions),
+                    "Rec Yards": int(total_receiving_yds),
+                    "Rec TDs": int(total_receiving_tds),
+                    "Carries": int(total_carries),
+                    "Rush Yards": int(total_rushing_yds),
+                    "Rush TDs": int(total_rushing_tds),
+                    "Pass Yards": int(total_passing_yds),
+                    "Pass TDs": int(total_passing_tds),
+                    "Total EPA": round(total_epa, 1),
+                })
+                
+            season_summary_df = pd.DataFrame(season_summary_data).sort_values(by="Season", ascending=False)
+            st.dataframe(season_summary_df, use_container_width=True, hide_index=True)
+
+            # 3. Game Log dropdown
+            st.markdown("#### 📋 Seasonal Game Logs")
+            available_seasons = sorted(history_df["season"].unique(), reverse=True)
+            if available_seasons:
+                selected_season = st.selectbox(
+                    "Select Season to view weekly game logs:",
+                    options=available_seasons,
+                    key=f"gamelog_season_select_{player_id}"
+                )
+                
+                season_game_log = history_df[history_df["season"] == selected_season].sort_values(by="week").copy()
+                st.dataframe(
+                    season_game_log[["week", "opponent_team", "fantasy_points_ppr", "snap_share", "targets", "receptions", "receiving_yards", "receiving_tds", "carries", "rushing_yards", "rushing_tds", "total_epa"]].rename(
+                        columns={
+                            "week": "Week",
+                            "opponent_team": "Opponent",
+                            "fantasy_points_ppr": "PPR Points",
+                            "snap_share": "Snap Share",
+                            "targets": "Targets",
+                            "receptions": "Rec",
+                            "receiving_yards": "Rec Yards",
+                            "receiving_tds": "Rec TDs",
+                            "carries": "Carries",
+                            "rushing_yards": "Rush Yards",
+                            "rushing_tds": "Rush TDs",
+                            "total_epa": "EPA",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
         # --- SIMILAR PLAYER COMPS ---
         st.markdown("### 👥 Similar Player Comparisons (Comps)")
