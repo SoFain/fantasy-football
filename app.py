@@ -3875,3 +3875,14 @@ with tab_trade_lab:
         first=True,
     )
     render_value_analyzer()
+
+st.markdown(
+    """
+    <footer style="margin-top: 3rem; padding: 1.25rem 0 0.5rem; border-top: 1px solid rgba(148, 163, 184, 0.22); text-align: center; font-size: 0.85rem; color: rgba(226, 232, 240, 0.72);">
+        <a href="http://sputnikfx.com/" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none;">
+            &copy; 2026 Sputnik Digital
+        </a>
+    </footer>
+    """,
+    unsafe_allow_html=True,
+)
