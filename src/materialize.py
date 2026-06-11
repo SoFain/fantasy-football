@@ -322,7 +322,18 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
                 COALESCE(passing_epa, 0)
                 + COALESCE(rushing_epa, 0)
                 + COALESCE(receiving_epa, 0)
-            ) AS total_epa
+            ) AS total_epa,
+            SUM(SUM(COALESCE(carries, 0))) OVER(PARTITION BY season, week, team) AS team_carries,
+            SUM(SUM(COALESCE(attempts, 0))) OVER(PARTITION BY season, week, team) AS team_pass_attempts,
+            SAFE_DIVIDE(SUM(COALESCE(carries, 0)), SUM(SUM(COALESCE(carries, 0))) OVER(PARTITION BY season, week, team)) AS carry_share,
+            CASE 
+                WHEN position = 'QB' THEN SAFE_DIVIDE(SUM(COALESCE(carries, 0)), NULLIF(SUM(COALESCE(carries, 0)) + SUM(COALESCE(attempts, 0)), 0))
+                ELSE SAFE_DIVIDE(SUM(COALESCE(carries, 0)), NULLIF(SUM(COALESCE(carries, 0)) + SUM(COALESCE(targets, 0)), 0))
+            END AS player_run_opportunity_pct,
+            CASE 
+                WHEN position = 'QB' THEN SAFE_DIVIDE(SUM(COALESCE(attempts, 0)), NULLIF(SUM(COALESCE(carries, 0)) + SUM(COALESCE(attempts, 0)), 0))
+                ELSE SAFE_DIVIDE(SUM(COALESCE(targets, 0)), NULLIF(SUM(COALESCE(carries, 0)) + SUM(COALESCE(targets, 0)), 0))
+            END AS player_pass_opportunity_pct
         FROM weekly_source
         GROUP BY
             season,
