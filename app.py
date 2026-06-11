@@ -2465,9 +2465,9 @@ def render_ai_cohost():
     - Table: `fantasy_football_brain.ftn_charting`
       Columns: Includes FTN premium charting play-by-play data like is_no_huddle, is_play_action, is_screen_pass, is_interception_worthy.
     - Table: `fantasy_football_brain.weekly_snap_counts`
-      Columns: Includes weekly player snap metrics like offense_snaps, offense_pct, defense_pct, st_pct.
+      Columns: Includes weekly player snap metrics like `offense_snaps`, `offense_pct`, `defense_pct`, `st_pct`, and `player` (the player's name column, NOT `player_name`).
     - Table: `fantasy_football_brain.injury_reports`
-      Columns: Includes weekly injury data like report_primary_injury, report_status, practice_status.
+      Columns: Includes weekly injury data like `report_primary_injury`, `report_status`, `practice_status`, and `full_name` (the player's name column, NOT `player_name`).
 
     - Table: `fantasy_football_brain.team_descriptions`
       Columns:
