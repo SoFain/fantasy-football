@@ -191,3 +191,26 @@ def transform_standard_seasonal_data(df, seasons, dataset_name):
         
     logger.info(f"{dataset_name} Transformation complete. Rows: {len(df)}")
     return df
+
+def transform_depth_charts_data(df, seasons):
+    """
+    Transforms depth charts data:
+    - Cleans column names
+    - Filters to only the requested seasons
+    """
+    if df.empty:
+        return df
+
+    logger.info("Transforming Depth Charts data...")
+    df = clean_column_names(df)
+
+    if 'season' in df.columns:
+        df = df.dropna(subset=['season'])
+        df['season'] = df['season'].astype('int64')
+        df = df[df['season'].isin(seasons)]
+    else:
+        raise ValueError("Depth charts data is missing the 'season' column.")
+
+    logger.info(f"Depth Charts Transformation complete. Rows: {len(df)}")
+    return df
+

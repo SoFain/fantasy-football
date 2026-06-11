@@ -5,6 +5,7 @@ import urllib.error
 import requests
 import pandas as pd
 import nflreadpy as nfl
+from datetime import datetime
 
 # Configure Logger
 logger = logging.getLogger(__name__)
@@ -198,7 +199,8 @@ def get_ngs_passing_data(seasons):
     """
     Extracts NFL Next Gen Stats passing data.
     """
-    seasons = filter_supported_seasons(seasons, 2016, 2025, "NGS passing")
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2016, current_year, "NGS passing")
     if not seasons:
         return pd.DataFrame()
 
@@ -214,7 +216,8 @@ def get_ngs_rushing_data(seasons):
     """
     Extracts NFL Next Gen Stats rushing data.
     """
-    seasons = filter_supported_seasons(seasons, 2016, 2025, "NGS rushing")
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2016, current_year, "NGS rushing")
     if not seasons:
         return pd.DataFrame()
 
@@ -230,7 +233,8 @@ def get_ngs_receiving_data(seasons):
     """
     Extracts NFL Next Gen Stats receiving data.
     """
-    seasons = filter_supported_seasons(seasons, 2016, 2025, "NGS receiving")
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2016, current_year, "NGS receiving")
     if not seasons:
         return pd.DataFrame()
 
@@ -246,7 +250,8 @@ def get_ftn_charting_data(seasons):
     """
     Extracts NFL FTN charting data.
     """
-    seasons = filter_supported_seasons(seasons, 2022, 2025, "FTN charting")
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2022, current_year, "FTN charting")
     if not seasons:
         return pd.DataFrame()
 
@@ -262,7 +267,8 @@ def get_snap_counts_data(seasons):
     """
     Extracts NFL weekly snap counts data.
     """
-    seasons = filter_supported_seasons(seasons, 2012, 2025, "snap counts")
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2012, current_year, "snap counts")
     if not seasons:
         return pd.DataFrame()
 
@@ -278,7 +284,8 @@ def get_injury_reports_data(seasons):
     """
     Extracts NFL weekly injury reports data.
     """
-    seasons = filter_supported_seasons(seasons, 2009, 2025, "injury reports")
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2009, current_year, "injury reports")
     if not seasons:
         return pd.DataFrame()
 
@@ -289,3 +296,29 @@ def get_injury_reports_data(seasons):
     except Exception as e:
         logger.error(f"Error fetching injury reports data: {e}")
         return pd.DataFrame()
+
+def get_depth_charts_data(seasons):
+    """
+    Extracts NFL depth charts data.
+    """
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2001, current_year, "depth charts")
+    if not seasons:
+        return pd.DataFrame()
+
+    logger.info("Fetching depth charts data from nflreadpy")
+    dfs = []
+    for season in seasons:
+        try:
+            df = execute_with_backoff(nfl.load_depth_charts, [season])
+            pdf = df.to_pandas()
+            pdf['season'] = int(season)
+            dfs.append(pdf)
+        except Exception as e:
+            logger.error(f"Error fetching depth charts data for season {season}: {e}")
+
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
+
+
