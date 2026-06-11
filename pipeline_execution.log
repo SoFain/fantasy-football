@@ -221,3 +221,91 @@
 2026-06-01 23:06:19,263 [INFO] src.pipeline - ============================================================
 2026-06-01 23:06:19,263 [INFO] src.pipeline - NFL Data Pipeline finished successfully at 2026-06-01 23:06:19.263957!
 2026-06-01 23:06:19,263 [INFO] src.pipeline - ============================================================
+2026-06-11 09:02:11,984 [INFO] src.pipeline - ============================================================
+2026-06-11 09:02:11,985 [INFO] src.pipeline - Starting NFL Data Pipeline execution at 2026-06-11 09:02:11.985075
+2026-06-11 09:02:11,985 [INFO] src.pipeline - Target Seasons: [2025, 2026]
+2026-06-11 09:02:11,985 [INFO] src.pipeline - Write Disposition: WRITE_TRUNCATE
+2026-06-11 09:02:11,985 [INFO] src.pipeline - Dataset Name: fantasy_football_brain
+2026-06-11 09:02:11,985 [INFO] src.pipeline - ============================================================
+2026-06-11 09:02:11,985 [INFO] src.pipeline - --- Starting Step 1: Extraction ---
+2026-06-11 09:02:11,985 [INFO] src.pipeline - Extracting play-by-play data for seasons [2025, 2026]...
+2026-06-11 09:02:11,985 [INFO] src.extract - Fetching play-by-play data for season 2025 from nflreadpy
+2026-06-11 09:02:13,010 [INFO] src.extract - Fetching play-by-play data for season 2026 from nflreadpy
+2026-06-11 09:02:13,011 [WARNING] src.extract - 🏈 Play-by-play data for season 2026 is not available (typically a future/unstarted season or invalid year). Skipping this season. Error details: Season must be between 1999 and 2025
+2026-06-11 09:02:13,011 [INFO] src.pipeline - Extracting weekly player metrics data for seasons [2025, 2026]...
+2026-06-11 09:02:13,011 [INFO] src.extract - Fetching weekly player metrics for season 2025 from nflreadpy
+2026-06-11 09:02:13,153 [INFO] src.extract - Fetching weekly player metrics for season 2026 from nflreadpy
+2026-06-11 09:02:13,333 [ERROR] src.extract - Non-retryable 404 HTTP error calling load_player_stats. Raising immediately.
+2026-06-11 09:02:13,334 [WARNING] src.extract - 🏈 Weekly metrics data for season 2026 is not available (typically a future/unstarted season or invalid year). Skipping this season. Error details: 404 Not Found
+2026-06-11 09:02:13,335 [INFO] src.pipeline - Extracting team descriptions...
+2026-06-11 09:02:13,335 [INFO] src.extract - Fetching team descriptions from nflreadpy
+2026-06-11 09:02:13,491 [INFO] src.pipeline - Extracting draft picks data...
+2026-06-11 09:02:13,491 [INFO] src.extract - Fetching draft picks data from nflreadpy
+2026-06-11 09:02:13,665 [INFO] src.pipeline - Extracting player roster data...
+2026-06-11 09:02:13,665 [INFO] src.extract - Fetching players data from nflreadpy
+2026-06-11 09:02:13,879 [INFO] src.pipeline - Extracting player contract data...
+2026-06-11 09:02:13,879 [INFO] src.extract - Fetching contracts data from nflreadpy
+2026-06-11 09:02:14,881 [INFO] src.pipeline - Extracting NGS passing data...
+2026-06-11 09:02:14,881 [INFO] src.extract - Fetching NGS passing data from nflreadpy
+2026-06-11 09:02:14,881 [ERROR] src.extract - Error fetching NGS passing data: Season must be between 2016 and 2025
+2026-06-11 09:02:14,881 [INFO] src.pipeline - Extracting NGS rushing data...
+2026-06-11 09:02:14,881 [INFO] src.extract - Fetching NGS rushing data from nflreadpy
+2026-06-11 09:02:14,881 [ERROR] src.extract - Error fetching NGS rushing data: Season must be between 2016 and 2025
+2026-06-11 09:02:14,881 [INFO] src.pipeline - Extracting NGS receiving data...
+2026-06-11 09:02:14,881 [INFO] src.extract - Fetching NGS receiving data from nflreadpy
+2026-06-11 09:02:14,881 [ERROR] src.extract - Error fetching NGS receiving data: Season must be between 2016 and 2025
+2026-06-11 09:02:14,881 [INFO] src.pipeline - Extracting FTN charting data...
+2026-06-11 09:02:14,881 [INFO] src.extract - Fetching FTN charting data from nflreadpy
+2026-06-11 09:02:14,881 [ERROR] src.extract - Error fetching FTN charting data: Season must be between 2022 and 2025
+2026-06-11 09:02:14,881 [INFO] src.pipeline - Extracting snap counts data...
+2026-06-11 09:02:14,881 [INFO] src.extract - Fetching snap counts data from nflreadpy
+2026-06-11 09:02:14,881 [ERROR] src.extract - Error fetching snap counts data: Season must be between 2012 and 2025
+2026-06-11 09:02:14,881 [INFO] src.pipeline - Extracting injury reports data...
+2026-06-11 09:02:14,881 [INFO] src.extract - Fetching injury reports data from nflreadpy
+2026-06-11 09:02:14,881 [ERROR] src.extract - Error fetching injury reports data: Season must be between 2009 and 2025
+2026-06-11 09:02:14,881 [INFO] src.pipeline - Extracting depth charts data...
+2026-06-11 09:02:14,881 [INFO] src.extract - Fetching depth charts data from nflreadpy
+2026-06-11 09:02:15,771 [INFO] src.pipeline - --- Starting Step 2: Transformation ---
+2026-06-11 09:02:15,771 [INFO] src.transform - Transforming Play-by-Play data...
+2026-06-11 09:02:15,774 [INFO] src.transform - PBP Transformation complete. Rows: 48771
+2026-06-11 09:02:15,774 [INFO] src.transform - Transforming Weekly player metrics data...
+2026-06-11 09:02:15,775 [INFO] src.transform - Weekly Transformation complete. Rows: 19421
+2026-06-11 09:02:15,775 [INFO] src.pipeline - Using loaded seasons [2025] for derived/static tables instead of requested seasons [2025, 2026].
+2026-06-11 09:02:15,775 [INFO] src.transform - Transforming Team Description data...
+2026-06-11 09:02:15,776 [INFO] src.transform - Team data replicated for seasons [2025, 2026]. Rows: 72
+2026-06-11 09:02:15,776 [INFO] src.transform - Transforming Draft Picks data...
+2026-06-11 09:02:15,777 [INFO] src.transform - Draft Picks Transformation complete. Rows: 514
+2026-06-11 09:02:15,777 [INFO] src.transform - Transforming Players data...
+2026-06-11 09:02:15,778 [INFO] src.transform - Players data replicated for seasons [2025, 2026]. Rows: 50082
+2026-06-11 09:02:15,778 [INFO] src.transform - Transforming Contracts data...
+2026-06-11 09:02:15,781 [INFO] src.transform - Contracts data replicated for seasons [2025, 2026]. Rows: 103268
+2026-06-11 09:02:15,782 [INFO] src.transform - Transforming Depth Charts data...
+2026-06-11 09:02:15,784 [INFO] src.transform - Depth Charts Transformation complete. Rows: 784194
+2026-06-11 09:02:15,784 [INFO] src.pipeline - --- Starting Step 3: Loading ---
+2026-06-11 09:02:16,067 [INFO] src.load - Initialized BigQuery client with project: fantasy-football-498121
+2026-06-11 09:02:16,622 [INFO] src.load - BigQuery Dataset 'fantasy-football-498121.fantasy_football_brain' already exists.
+2026-06-11 09:02:16,622 [INFO] src.load - Starting load job for 'fantasy-football-498121.fantasy_football_brain.play_by_play' with write disposition: WRITE_TRUNCATE...
+2026-06-11 09:02:27,561 [INFO] src.load - Successfully loaded 48771 rows into partitioned table 'fantasy-football-498121.fantasy_football_brain.play_by_play'.
+2026-06-11 09:02:27,563 [INFO] src.load - Starting load job for 'fantasy-football-498121.fantasy_football_brain.weekly_metrics' with write disposition: WRITE_TRUNCATE...
+2026-06-11 09:02:30,662 [INFO] src.load - Successfully loaded 19421 rows into partitioned table 'fantasy-football-498121.fantasy_football_brain.weekly_metrics'.
+2026-06-11 09:02:30,664 [INFO] src.load - Starting load job for 'fantasy-football-498121.fantasy_football_brain.team_descriptions' with write disposition: WRITE_TRUNCATE...
+2026-06-11 09:02:35,102 [INFO] src.load - Successfully loaded 72 rows into partitioned table 'fantasy-football-498121.fantasy_football_brain.team_descriptions'.
+2026-06-11 09:02:35,104 [INFO] src.load - Starting load job for 'fantasy-football-498121.fantasy_football_brain.draft_picks' with write disposition: WRITE_TRUNCATE...
+2026-06-11 09:02:39,951 [INFO] src.load - Successfully loaded 514 rows into partitioned table 'fantasy-football-498121.fantasy_football_brain.draft_picks'.
+2026-06-11 09:02:39,953 [INFO] src.load - Starting load job for 'fantasy-football-498121.fantasy_football_brain.player_rosters' with write disposition: WRITE_TRUNCATE...
+2026-06-11 09:02:46,240 [INFO] src.load - Successfully loaded 50082 rows into partitioned table 'fantasy-football-498121.fantasy_football_brain.player_rosters'.
+2026-06-11 09:02:46,241 [INFO] src.load - Starting load job for 'fantasy-football-498121.fantasy_football_brain.player_contracts' with write disposition: WRITE_TRUNCATE...
+2026-06-11 09:02:58,633 [INFO] src.load - Successfully loaded 103268 rows into partitioned table 'fantasy-football-498121.fantasy_football_brain.player_contracts'.
+2026-06-11 09:02:58,633 [WARNING] src.load - DataFrame for table 'ngs_passing' is empty. Skipping upload.
+2026-06-11 09:02:58,634 [WARNING] src.load - DataFrame for table 'ngs_rushing' is empty. Skipping upload.
+2026-06-11 09:02:58,634 [WARNING] src.load - DataFrame for table 'ngs_receiving' is empty. Skipping upload.
+2026-06-11 09:02:58,634 [WARNING] src.load - DataFrame for table 'ftn_charting' is empty. Skipping upload.
+2026-06-11 09:02:58,634 [WARNING] src.load - DataFrame for table 'weekly_snap_counts' is empty. Skipping upload.
+2026-06-11 09:02:58,634 [WARNING] src.load - DataFrame for table 'injury_reports' is empty. Skipping upload.
+2026-06-11 09:02:58,635 [INFO] src.load - Starting load job for 'fantasy-football-498121.fantasy_football_brain.depth_charts' with write disposition: WRITE_TRUNCATE...
+2026-06-11 09:03:05,831 [INFO] src.load - Successfully loaded 784194 rows into partitioned table 'fantasy-football-498121.fantasy_football_brain.depth_charts'.
+2026-06-11 09:03:05,831 [INFO] src.pipeline - --- Starting Step 4: Materializing AI vs Vibes truth table ---
+2026-06-11 09:03:29,592 [INFO] src.pipeline - Successfully materialized AI vs Vibes analytics tables.
+2026-06-11 09:03:29,592 [INFO] src.pipeline - ============================================================
+2026-06-11 09:03:29,592 [INFO] src.pipeline - NFL Data Pipeline finished successfully at 2026-06-11 09:03:29.592522!
+2026-06-11 09:03:29,592 [INFO] src.pipeline - ============================================================

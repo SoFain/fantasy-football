@@ -1286,6 +1286,71 @@ def fetch_player_weekly_history(player_id: str):
     df = client.query(sql_query, job_config=job_config).result().to_dataframe()
     return df
 
+def calculate_player_comps(player_row, df, limit=5):
+    import pandas as pd
+    import numpy as np
+
+    pos = player_row["position"]
+    pos_df = df[df["position"] == pos].copy()
+    
+    # Exclude target player
+    pos_df = pos_df[pos_df["player_id"] != player_row["player_id"]]
+    if pos_df.empty:
+        return []
+
+    # Features to use for similarity
+    features = ["avg_ppr", "avg_opportunity", "avg_efficiency", "avg_grade", "avg_snap_share"]
+    
+    # Fill NaN values with 0.0 before calculation
+    pos_df[features] = pos_df[features].fillna(0.0)
+    player_features = player_row[features].fillna(0.0)
+    
+    # Normalization (Min-Max)
+    # Stack the player row on top of pos_df to normalize together
+    temp_df = pd.concat([pos_df, pd.DataFrame([player_features])], ignore_index=True)
+    target_idx = len(pos_df)
+    
+    for feat in features:
+        min_val = temp_df[feat].min()
+        max_val = temp_df[feat].max()
+        if pd.isna(min_val) or pd.isna(max_val) or max_val == min_val:
+            temp_df[feat + "_norm"] = 0.0
+        else:
+            temp_df[feat + "_norm"] = (temp_df[feat] - min_val) / (max_val - min_val)
+            
+    target_vector = temp_df.iloc[target_idx][[f + "_norm" for f in features]].values.astype(float)
+    
+    comps = []
+    for idx in range(len(pos_df)):
+        row = temp_df.iloc[idx]
+        vec = row[[f + "_norm" for f in features]].values.astype(float)
+        
+        # Euclidean distance
+        dist = np.sqrt(np.sum((target_vector - vec) ** 2))
+        max_dist = np.sqrt(len(features))
+        
+        # Match % calculation
+        match_pct = max(0.0, 100.0 * (1.0 - (dist / max_dist)))
+        
+        # Check if match_pct is NaN
+        if pd.isna(match_pct):
+            match_pct = 0.0
+            
+        comps.append({
+            "player_id": row["player_id"],
+            "player_display_name": row["player_display_name"],
+            "position": row["position"],
+            "team": row["team"],
+            "avg_grade": row["avg_grade"],
+            "avg_ppr": row["avg_ppr"],
+            "headshot": row["headshot"],
+            "match_pct": match_pct
+        })
+        
+    # Sort by match_pct descending
+    comps = sorted(comps, key=lambda x: x["match_pct"], reverse=True)
+    return comps[:limit]
+
 def render_player_profiles_tab():
     import pandas as pd
     import os
@@ -1600,6 +1665,30 @@ def render_player_profiles_tab():
                 hide_index=True
             )
 
+        # --- SIMILAR PLAYER COMPS ---
+        st.markdown("### 👥 Similar Player Comparisons (Comps)")
+        comps = calculate_player_comps(player_row, df)
+        if comps:
+            cols_comps = st.columns(len(comps))
+            for idx, comp in enumerate(comps):
+                with cols_comps[idx]:
+                    comp_headshot = comp["headshot"] if (comp["headshot"] and not pd.isna(comp["headshot"])) else "https://www.nfl.com/static/content/public/static/wildcat/assets/images/application-logos/share/nfl-share.png"
+                    st.markdown(f"""
+                    <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center; background-color: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 10px;">
+                        <img src="{comp_headshot}" style="width: 65px; height: 65px; border-radius: 50%; object-fit: cover; border: 2px solid #2563eb; margin-bottom: 8px;">
+                        <div style="font-weight: 700; font-size: 14px; color: #1e293b; height: 38px; overflow: hidden; display: flex; align-items: center; justify-content: center;">{comp['player_display_name']}</div>
+                        <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">{comp['position']} - {comp['team']}</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #2563eb; margin-bottom: 4px;">Match: {comp['match_pct']:.1f}%</div>
+                        <div style="font-size: 11px; color: #0284c7;">Grade: {comp['avg_grade']:.1f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button("🔍 View Profile", key=f"comp_jump_{comp['player_id']}", use_container_width=True):
+                        st.session_state.selected_player_id = comp["player_id"]
+                        st.session_state.global_profile_search = comp["player_display_name"]
+                        st.rerun()
+        else:
+            st.info("No similar player comparisons found.")
+
     # Rendering Rankings Directory List
     else:
         # Segmented position controls
@@ -1673,6 +1762,264 @@ def render_player_profiles_tab():
                 if rank_selected:
                     st.session_state.selected_player_id = df_pos[df_pos["player_display_name"] == rank_selected].iloc[0]["player_id"]
                     st.rerun()
+
+def render_versus_finder_tab():
+    import pandas as pd
+    import numpy as np
+    import os
+
+    st.markdown("### 🔍 Versus Finder")
+    st.markdown(
+        "Compare two players side-by-side on volume, efficiency, physical profile, opportunity share, and financial contracts, with a Pigskin AI synthesis."
+    )
+
+    try:
+        df = fetch_player_profiles_data()
+    except Exception as e:
+        st.info(f"Database query failed: {e}")
+        return
+
+    if df.empty:
+        st.warning("No player profiles found in the data warehouse.")
+        return
+
+    # Select box options
+    all_player_names = sorted([name for name in df["player_display_name"].unique() if isinstance(name, str) and name])
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        player_a_name = st.selectbox(
+            "Select Player A:",
+            options=all_player_names,
+            index=0 if all_player_names else None,
+            key="vs_player_a"
+        )
+    with col_b:
+        # Default player B to second player if available
+        default_b_idx = 1 if len(all_player_names) > 1 else 0
+        player_b_name = st.selectbox(
+            "Select Player B:",
+            options=all_player_names,
+            index=default_b_idx,
+            key="vs_player_b"
+        )
+
+    if not player_a_name or not player_b_name:
+        st.info("Please select two players to compare.")
+        return
+
+    row_a = df[df["player_display_name"] == player_a_name].iloc[0]
+    row_b = df[df["player_display_name"] == player_b_name].iloc[0]
+
+    # Render head-to-head header
+    headshot_a = row_a["headshot"] if (row_a["headshot"] and not pd.isna(row_a["headshot"])) else "https://www.nfl.com/static/content/public/static/wildcat/assets/images/application-logos/share/nfl-share.png"
+    headshot_b = row_b["headshot"] if (row_b["headshot"] and not pd.isna(row_b["headshot"])) else "https://www.nfl.com/static/content/public/static/wildcat/assets/images/application-logos/share/nfl-share.png"
+
+    # Helpers for formatting
+    def format_currency(val):
+        if not val or pd.isna(val):
+            return "N/A"
+        try:
+            num = float(val)
+            if num >= 1_000_000:
+                return f"${num / 1_000_000:.2f}M"
+            elif num >= 1_000:
+                return f"${num / 1_000:.1f}K"
+            else:
+                return f"${num:.0f}"
+        except Exception:
+            return str(val)
+
+    def format_height(inches):
+        if not inches or pd.isna(inches):
+            return "N/A"
+        try:
+            val = int(float(inches))
+            feet = val // 12
+            rem_inches = val % 12
+            return f"{feet}'{rem_inches}\""
+        except Exception:
+            return str(inches)
+
+    def format_age(birth_date_str):
+        if not birth_date_str or pd.isna(birth_date_str):
+            return "N/A"
+        try:
+            from datetime import datetime
+            birth_date = datetime.strptime(birth_date_str[:10], "%Y-%m-%d")
+            today = datetime(2026, 6, 9)
+            age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+            return f"{age} yrs"
+        except Exception:
+            return "N/A"
+
+    def format_pct(val):
+        if val is None or pd.isna(val):
+            return "0.0%"
+        return f"{float(val) * 100:.1f}%"
+
+    def format_val(val):
+        if val is None or pd.isna(val):
+            return "0.0"
+        return f"{float(val):.1f}"
+
+    def format_exp(val):
+        if val is None or pd.isna(val):
+            return "Rookie"
+        try:
+            exp = int(float(val))
+            return "Rookie" if exp == 0 else f"{exp} yrs"
+        except Exception:
+            return str(val)
+
+    st.markdown(f"""
+    <div style="display: flex; justify-content: space-around; align-items: center; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px; padding: 20px; background-color: #f8fafc; margin-bottom: 25px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+        <div style="text-align: center; width: 40%;">
+            <img src="{headshot_a}" style="width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 4px solid #2563eb; margin-bottom: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+            <div style="font-size: 20px; font-weight: 800; color: #1e293b;">{row_a['player_display_name']}</div>
+            <div style="font-size: 14px; color: #64748b; font-weight: 600; margin-top: 4px;">{row_a['position']} - {row_a['team']}</div>
+            <div style="display: inline-block; background-color: #2563eb; color: white; padding: 4px 12px; border-radius: 999px; font-size: 14px; font-weight: 700; margin-top: 10px; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">Rating: {row_a['avg_grade']:.1f}</div>
+        </div>
+        <div style="font-size: 28px; font-weight: 900; color: #94a3b8; font-style: italic;">VS</div>
+        <div style="text-align: center; width: 40%;">
+            <img src="{headshot_b}" style="width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 4px solid #f59e0b; margin-bottom: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+            <div style="font-size: 20px; font-weight: 800; color: #1e293b;">{row_b['player_display_name']}</div>
+            <div style="font-size: 14px; color: #64748b; font-weight: 600; margin-top: 4px;">{row_b['position']} - {row_b['team']}</div>
+            <div style="display: inline-block; background-color: #f59e0b; color: white; padding: 4px 12px; border-radius: 999px; font-size: 14px; font-weight: 700; margin-top: 10px; box-shadow: 0 2px 4px rgba(245,158,11,0.2);">Rating: {row_b['avg_grade']:.1f}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Comparison rows
+    rows_html = []
+    
+    def make_comparison_row(metric_name, val_a, val_b, format_fn, higher_is_better=True, highlight=True):
+        style_a = "padding: 10px 15px; text-align: center; border-bottom: 1px solid #e2e8f0; color: #475569;"
+        style_b = "padding: 10px 15px; text-align: center; border-bottom: 1px solid #e2e8f0; color: #475569;"
+        
+        try:
+            num_a = float(val_a) if val_a is not None and not pd.isna(val_a) else None
+            num_b = float(val_b) if val_b is not None and not pd.isna(val_b) else None
+        except Exception:
+            num_a = None
+            num_b = None
+            
+        highlight_style_a = "background-color: #eff6ff; color: #1e40af; font-weight: 700; border-bottom: 1px solid #e2e8f0; border-left: 2px solid #2563eb;"
+        highlight_style_b = "background-color: #fffbeb; color: #854d0e; font-weight: 700; border-bottom: 1px solid #e2e8f0; border-right: 2px solid #f59e0b;"
+        
+        if highlight and num_a is not None and num_b is not None:
+            if num_a != num_b:
+                if (num_a > num_b and higher_is_better) or (num_a < num_b and not higher_is_better):
+                    style_a = f"padding: 10px 15px; text-align: center; {highlight_style_a}"
+                else:
+                    style_b = f"padding: 10px 15px; text-align: center; {highlight_style_b}"
+                    
+        str_a = format_fn(val_a)
+        str_b = format_fn(val_b)
+        
+        return f"""
+        <tr>
+            <td style="padding: 10px 15px; font-weight: 600; color: #334155; border-bottom: 1px solid #e2e8f0; background-color: #fafafa; width: 40%;">{metric_name}</td>
+            <td style="{style_a}">{str_a}</td>
+            <td style="{style_b}">{str_b}</td>
+        </tr>
+        """
+
+    # Build Comparison HTML Table
+    rows_html.append(make_comparison_row("Age", row_a["birth_date"], row_b["birth_date"], format_age, higher_is_better=False, highlight=True))
+    rows_html.append(make_comparison_row("Height", row_a["height"], row_b["height"], format_height, higher_is_better=True, highlight=False))
+    rows_html.append(make_comparison_row("Weight", row_a["weight"], row_b["weight"], lambda x: f"{int(float(x))} lbs" if (x and not pd.isna(x)) else "N/A", higher_is_better=True, highlight=False))
+    rows_html.append(make_comparison_row("Experience", row_a["years_of_experience"], row_b["years_of_experience"], format_exp, higher_is_better=True, highlight=False))
+    rows_html.append(make_comparison_row("Contract APY", row_a["contract_apy"], row_b["contract_apy"], format_currency, higher_is_better=True, highlight=True))
+    rows_html.append(make_comparison_row("Total Contract Value", row_a["contract_value"], row_b["contract_value"], format_currency, higher_is_better=True, highlight=True))
+    rows_html.append(make_comparison_row("Overall Rating / Grade", row_a["avg_grade"], row_b["avg_grade"], format_val, higher_is_better=True, highlight=True))
+    rows_html.append(make_comparison_row("Avg PPR PPG", row_a["avg_ppr"], row_b["avg_ppr"], format_val, higher_is_better=True, highlight=True))
+    rows_html.append(make_comparison_row("Average Snap Share", row_a["avg_snap_share"], row_b["avg_snap_share"], format_pct, higher_is_better=True, highlight=True))
+    rows_html.append(make_comparison_row("Team Target Share", row_a["avg_target_share"], row_b["avg_target_share"], format_pct, higher_is_better=True, highlight=True))
+    
+    if row_a["position"] == "RB" or row_b["position"] == "RB":
+        rows_html.append(make_comparison_row("Team Carry Share", row_a["avg_carry_share"], row_b["avg_carry_share"], format_pct, higher_is_better=True, highlight=True))
+        
+    rows_html.append(make_comparison_row("Opportunity split (Runs)", row_a["avg_player_run_opportunity_pct"], row_b["avg_player_run_opportunity_pct"], format_pct, higher_is_better=True, highlight=False))
+    rows_html.append(make_comparison_row("Opportunity split (Passes)", row_a["avg_player_pass_opportunity_pct"], row_b["avg_player_pass_opportunity_pct"], format_pct, higher_is_better=True, highlight=False))
+    rows_html.append(make_comparison_row("Opportunity Rating", row_a["avg_opportunity"], row_b["avg_opportunity"], format_val, higher_is_better=True, highlight=True))
+    rows_html.append(make_comparison_row("Efficiency Rating", row_a["avg_efficiency"], row_b["avg_efficiency"], format_val, higher_is_better=True, highlight=True))
+    rows_html.append(make_comparison_row("Role Fragility Rating", row_a["avg_role_fragility"], row_b["avg_role_fragility"], format_val, higher_is_better=False, highlight=True))
+
+    st.markdown(f"""
+    <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <thead>
+            <tr style="background-color: #f1f5f9; border-bottom: 2px solid #cbd5e1;">
+                <th style="padding: 12px 15px; text-align: left; font-weight: 700; color: #475569; width: 40%;">Stat Feature</th>
+                <th style="padding: 12px 15px; text-align: center; font-weight: 700; color: #2563eb; width: 30%;">{row_a['player_display_name']}</th>
+                <th style="padding: 12px 15px; text-align: center; font-weight: 700; color: #f59e0b; width: 30%;">{row_b['player_display_name']}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {"".join(rows_html)}
+        </tbody>
+    </table>
+    """, unsafe_allow_html=True)
+
+    st.write("")
+
+    # AI VS CO-HOST SYNTESIS
+    st.markdown("### 🧠 Pigskin's Head-to-Head Breakdown")
+    active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    vs_cache_key = f"versus_report_{row_a['player_id']}_{row_b['player_id']}"
+
+    if vs_cache_key not in st.session_state:
+        if not active_gemini_key:
+            st.session_state[vs_cache_key] = f"""
+            **Pigskin analytical comparison**:
+            - **{row_a['player_display_name']}** vs **{row_b['player_display_name']}**.
+            - Overall grades: {row_a['avg_grade']:.1f} vs {row_b['avg_grade']:.1f}.
+            - Fantasy PPR PPG: {row_a['avg_ppr']:.1f} vs {row_b['avg_ppr']:.1f}.
+            - Please configure a Gemini API key in the sidebar to get a full Pigskin AI roast and analytical breakdown of this comparison.
+            """
+        else:
+            try:
+                model = create_gemini_model(active_gemini_key)
+                prompt = f"""
+                You are Pigskin, the snarky analytical co-host of AI vs Vibes.
+                Evaluate a side-by-side comparison between NFL players {row_a['player_display_name']} and {row_b['player_display_name']}.
+                
+                Player A details ({row_a['player_display_name']}):
+                - Position: {row_a['position']} | Team: {row_a['team']}
+                - Overall Rating: {row_a['avg_grade']:.1f}
+                - Avg PPR PPG: {row_a['avg_ppr']:.1f}
+                - Snap Share: {format_pct(row_a['avg_snap_share'])}
+                - Target Share: {format_pct(row_a['avg_target_share'])}
+                - Carry Share: {format_pct(row_a['avg_carry_share'])}
+                - Opportunity Score: {row_a['avg_opportunity']:.1f}
+                - Efficiency Score: {row_a['avg_efficiency']:.1f}
+                - Role Fragility: {row_a['avg_role_fragility']:.1f}
+                - Run/Pass Split: {format_pct(row_a['avg_player_run_opportunity_pct'])} Run / {format_pct(row_a['avg_player_pass_opportunity_pct'])} Pass
+                - Salary APY: {format_currency(row_a['contract_apy'])}
+                
+                Player B details ({row_b['player_display_name']}):
+                - Position: {row_b['position']} | Team: {row_b['team']}
+                - Overall Rating: {row_b['avg_grade']:.1f}
+                - Avg PPR PPG: {row_b['avg_ppr']:.1f}
+                - Snap Share: {format_pct(row_b['avg_snap_share'])}
+                - Target Share: {format_pct(row_b['avg_target_share'])}
+                - Carry Share: {format_pct(row_b['avg_carry_share'])}
+                - Opportunity Score: {row_b['avg_opportunity']:.1f}
+                - Efficiency Score: {row_b['avg_efficiency']:.1f}
+                - Role Fragility: {row_b['avg_role_fragility']:.1f}
+                - Run/Pass Split: {format_pct(row_b['avg_player_run_opportunity_pct'])} Run / {format_pct(row_b['avg_player_pass_opportunity_pct'])} Pass
+                - Salary APY: {format_currency(row_b['contract_apy'])}
+
+                Scouting breakdown requirements:
+                1. Deliver the comparison in the Pigskin voice contract (arrogant, analytical, highly critical of vibes-based drafting/trading, uses words like "cooked", "vibes tax", "opportunity merchant", "efficiency god").
+                2. Write a 2-paragraph analysis. In the first paragraph, compare their workloads and opportunity metrics (opportunity scores, snap/target shares). In the second paragraph, compare their efficiencies and contracts, and declare a definitive, analytical verdict on who is the superior fantasy football asset to roster.
+                """
+                res = model.generate_content(prompt)
+                st.session_state[vs_cache_key] = res.text
+            except Exception as ex:
+                st.session_state[vs_cache_key] = f"Error generating comparison breakdown: {ex}"
+
+    st.write(st.session_state[vs_cache_key])
 
 @st.cache_data(ttl=3600, show_spinner=False)
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -2643,10 +2990,11 @@ st.markdown(
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 # Workflow Tabs
-tab_pigskin, tab_show_prep, tab_player_profiles, tab_viewer_lab, tab_trade_lab, tab_data_ops = st.tabs([
+tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_lab, tab_trade_lab, tab_data_ops = st.tabs([
     "💬 Pigskin Studio",
     "🎙️ Show Prep",
     "👤 Player Profiles",
+    "🔍 Versus Finder",
     "🏈 Viewer Team Lab",
     "📊 Trade Lab",
     "🛠️ Data Ops",
@@ -3372,6 +3720,10 @@ with tab_show_prep:
 # --- PLAYER PROFILES ---
 with tab_player_profiles:
     render_player_profiles_tab()
+
+# --- VERSUS FINDER ---
+with tab_versus_finder:
+    render_versus_finder_tab()
 
 # --- VIEWER TEAM LAB ---
 with tab_viewer_lab:
