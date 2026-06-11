@@ -296,3 +296,29 @@ def get_injury_reports_data(seasons):
     except Exception as e:
         logger.error(f"Error fetching injury reports data: {e}")
         return pd.DataFrame()
+
+def get_depth_charts_data(seasons):
+    """
+    Extracts NFL depth charts data.
+    """
+    current_year = datetime.now().year
+    seasons = filter_supported_seasons(seasons, 2001, current_year, "depth charts")
+    if not seasons:
+        return pd.DataFrame()
+
+    logger.info("Fetching depth charts data from nflreadpy")
+    dfs = []
+    for season in seasons:
+        try:
+            df = execute_with_backoff(nfl.load_depth_charts, [season])
+            pdf = df.to_pandas()
+            pdf['season'] = int(season)
+            dfs.append(pdf)
+        except Exception as e:
+            logger.error(f"Error fetching depth charts data for season {season}: {e}")
+
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
+
+

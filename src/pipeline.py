@@ -3,8 +3,8 @@ import argparse
 import logging
 from datetime import datetime
 
-from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data, get_ngs_passing_data, get_ngs_rushing_data, get_ngs_receiving_data, get_ftn_charting_data, get_snap_counts_data, get_injury_reports_data
-from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data, transform_standard_seasonal_data
+from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data, get_ngs_passing_data, get_ngs_rushing_data, get_ngs_receiving_data, get_ftn_charting_data, get_snap_counts_data, get_injury_reports_data, get_depth_charts_data
+from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data, transform_standard_seasonal_data, transform_depth_charts_data
 from src.load import get_bigquery_client, create_dataset_if_not_exists, load_df_to_partitioned_table
 from src.materialize import materialize_all
 
@@ -83,6 +83,9 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         logger.info("Extracting injury reports data...")
         injury_reports_raw = get_injury_reports_data(seasons)
         
+        logger.info("Extracting depth charts data...")
+        depth_charts_raw = get_depth_charts_data(seasons)
+        
         # -------------------------------------------------------------
         # STEP 2: TRANSFORMATION
         # -------------------------------------------------------------
@@ -107,6 +110,7 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         ftn_clean = transform_standard_seasonal_data(ftn_raw, seasons, "FTN Charting")
         snap_counts_clean = transform_standard_seasonal_data(snap_counts_raw, seasons, "Snap Counts")
         injury_reports_clean = transform_standard_seasonal_data(injury_reports_raw, seasons, "Injury Reports")
+        depth_charts_clean = transform_depth_charts_data(depth_charts_raw, seasons)
 
         # -------------------------------------------------------------
         # STEP 3: LOADING TO BIGQUERY
@@ -179,6 +183,9 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         # Load snap counts and injury reports
         load_df_to_partitioned_table(client=bq_client, df=snap_counts_clean, dataset_id=dataset_id, table_name="weekly_snap_counts", write_disposition=write_disposition)
         load_df_to_partitioned_table(client=bq_client, df=injury_reports_clean, dataset_id=dataset_id, table_name="injury_reports", write_disposition=write_disposition)
+        
+        # Load depth charts
+        load_df_to_partitioned_table(client=bq_client, df=depth_charts_clean, dataset_id=dataset_id, table_name="depth_charts", write_disposition=write_disposition)
 
         logger.info("--- Starting Step 4: Materializing AI vs Vibes truth table ---")
         materialize_all(bq_client, dataset_id=dataset_name)

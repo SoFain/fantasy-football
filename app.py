@@ -1124,7 +1124,10 @@ def fetch_player_profiles_data():
             AVG(t.efficiency_score) AS avg_efficiency,
             AVG(t.role_quality_score) AS avg_role_quality,
             AVG(t.role_fragility_score) AS avg_role_fragility,
-            AVG(t.analytical_grade) AS avg_grade
+            AVG(t.analytical_grade) AS avg_grade,
+            AVG(t.carry_share) AS avg_carry_share,
+            AVG(t.player_run_opportunity_pct) AS avg_player_run_opportunity_pct,
+            AVG(t.player_pass_opportunity_pct) AS avg_player_pass_opportunity_pct
         FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth` t
         JOIN latest_stat_season lss
             ON t.player_id = lss.player_id AND t.season = lss.max_stat_season
@@ -1140,6 +1143,53 @@ def fetch_player_profiles_data():
         FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.player_contracts` c
         WHERE c.is_active = TRUE
         GROUP BY c.gsis_id
+    ),
+    latest_depth_charts AS (
+        SELECT
+            gsis_id,
+            ANY_VALUE(pos_abb) AS depth_position,
+            ANY_VALUE(pos_rank) AS depth_rank
+        FROM (
+            SELECT
+                gsis_id,
+                pos_abb,
+                pos_rank,
+                ROW_NUMBER() OVER(PARTITION BY gsis_id ORDER BY dt DESC) as rn
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.depth_charts`
+        )
+        WHERE rn = 1 AND gsis_id IS NOT NULL
+        GROUP BY gsis_id
+    ),
+    college_stats_agg AS (
+        SELECT
+            LOWER(player_name) AS clean_name,
+            ANY_VALUE(team) AS college_team,
+            ANY_VALUE(conference) AS college_conf,
+            ANY_VALUE(games) AS college_games,
+            ANY_VALUE(passing_yards) AS college_passing_yards,
+            ANY_VALUE(passing_tds) AS college_passing_tds,
+            ANY_VALUE(rushing_yards) AS college_rushing_yards,
+            ANY_VALUE(rushing_tds) AS college_rushing_tds,
+            ANY_VALUE(receptions) AS college_receptions,
+            ANY_VALUE(receiving_yards) AS college_receiving_yards,
+            ANY_VALUE(receiving_tds) AS college_receiving_tds
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.college_player_stats`
+        GROUP BY LOWER(player_name)
+    ),
+    rookie_scouting_agg AS (
+        SELECT
+            LOWER(player_name) AS clean_name,
+            ANY_VALUE(yards_after_contact_per_attempt) AS yards_after_contact_per_attempt,
+            ANY_VALUE(yards_per_route_run) AS yards_per_route_run,
+            ANY_VALUE(college_target_share) AS college_target_share,
+            ANY_VALUE(catch_radius_grade) AS catch_radius_grade,
+            ANY_VALUE(success_rate_vs_man) AS success_rate_vs_man,
+            ANY_VALUE(success_rate_vs_zone) AS success_rate_vs_zone,
+            ANY_VALUE(success_rate_vs_press) AS success_rate_vs_press,
+            ANY_VALUE(avg_separation_inches) AS avg_separation_inches,
+            ANY_VALUE(data_source) AS scouting_source
+        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.rookie_scouting_metrics`
+        GROUP BY LOWER(player_name)
     )
     SELECT
         rp.*,
@@ -1163,14 +1213,41 @@ def fetch_player_profiles_data():
         COALESCE(agg.avg_role_quality, 0.0) AS avg_role_quality,
         COALESCE(agg.avg_role_fragility, 0.0) AS avg_role_fragility,
         COALESCE(agg.avg_grade, 0.0) AS avg_grade,
+        COALESCE(agg.avg_carry_share, 0.0) AS avg_carry_share,
+        COALESCE(agg.avg_player_run_opportunity_pct, 0.0) AS avg_player_run_opportunity_pct,
+        COALESCE(agg.avg_player_pass_opportunity_pct, 0.0) AS avg_player_pass_opportunity_pct,
         c.contract_value,
         c.contract_apy,
         c.contract_guaranteed,
         c.contract_year_signed,
+        dc.depth_position,
+        dc.depth_rank,
+        col.college_team,
+        col.college_conf,
+        col.college_games,
+        col.college_passing_yards,
+        col.college_passing_tds,
+        col.college_rushing_yards,
+        col.college_rushing_tds,
+        col.college_receptions,
+        col.college_receiving_yards,
+        col.college_receiving_tds,
+        rsk.yards_after_contact_per_attempt,
+        rsk.yards_per_route_run,
+        rsk.college_target_share,
+        rsk.catch_radius_grade,
+        rsk.success_rate_vs_man,
+        rsk.success_rate_vs_zone,
+        rsk.success_rate_vs_press,
+        rsk.avg_separation_inches,
+        rsk.scouting_source,
         RANK() OVER(PARTITION BY rp.position ORDER BY COALESCE(agg.avg_grade, 0.0) DESC) AS pos_rank
     FROM active_roster_players rp
     LEFT JOIN player_weekly_agg agg ON rp.player_id = agg.player_id
     LEFT JOIN contract_meta c ON rp.player_id = c.gsis_id
+    LEFT JOIN latest_depth_charts dc ON rp.player_id = dc.gsis_id
+    LEFT JOIN college_stats_agg col ON LOWER(rp.player_name) = col.clean_name
+    LEFT JOIN rookie_scouting_agg rsk ON LOWER(rp.player_name) = rsk.clean_name
     """
     client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
     df = client.query(sql_query).result().to_dataframe()
@@ -1306,6 +1383,11 @@ def render_player_profiles_tab():
         jersey_num = f"#{int(float(player_row['jersey_number']))}" if (player_row["jersey_number"] and not pd.isna(player_row["jersey_number"])) else ""
         draft_str = f"Drafted Rd {int(float(player_row['draft_round']))}, Pick {int(float(player_row['draft_pick']))} by {player_row['draft_team']}" if (player_row["draft_pick"] and not pd.isna(player_row["draft_pick"])) else "Undrafted Free Agent"
 
+        # Depth chart details
+        depth_pos = player_row["depth_position"] if (player_row["depth_position"] and not pd.isna(player_row["depth_position"])) else "N/A"
+        depth_rank_val = f"Rank {int(player_row['depth_rank'])}" if (player_row["depth_rank"] and not pd.isna(player_row["depth_rank"])) else "Rank N/A"
+        depth_str_display = f"Depth Chart: {depth_pos} ({depth_rank_val})"
+
         # Header banner
         st.markdown(f"""
         <div class="profile-header">
@@ -1317,6 +1399,7 @@ def render_player_profiles_tab():
                     <span class="profile-meta-badge">{player_row['team']}</span>
                     <span class="profile-meta-badge">{player_row['college_name'] if player_row['college_name'] else 'Unknown College'}</span>
                     <span class="profile-meta-badge">{draft_str}</span>
+                    <span class="profile-meta-badge" style="background-color: #2563eb; color: white;">{depth_str_display}</span>
                 </div>
             </div>
         </div>
@@ -1342,8 +1425,62 @@ def render_player_profiles_tab():
 
         st.write("")
 
+        # Opportunity Splits Section
+        run_pct = (player_row["avg_player_run_opportunity_pct"] or 0.0) * 100
+        pass_pct = (player_row["avg_player_pass_opportunity_pct"] or 0.0) * 100
+        carry_share_pct = (player_row["avg_carry_share"] or 0.0) * 100
+        target_share_pct = (player_row["avg_target_share"] or 0.0) * 100
+
+        st.markdown("### 📈 Run/Pass Opportunity & Team Shares")
+        col_splits, col_shares = st.columns(2)
+        with col_splits:
+            st.markdown(f"**Weekly Run/Pass Split** (Player's own touches/throws/targets)")
+            st.markdown(f"- 🏃 Rushing / Carries: **{run_pct:.1f}%**")
+            st.markdown(f"- 🏈 Targets / Throws: **{pass_pct:.1f}%**")
+            st.progress(float(player_row["avg_player_run_opportunity_pct"]) if not pd.isna(player_row["avg_player_run_opportunity_pct"]) else 0.0)
+        with col_shares:
+            st.markdown(f"**Team Volume Shares** (When active on field)")
+            if player_row["position"] == "RB":
+                st.markdown(f"- 🏃 Team Carry Share: **{carry_share_pct:.1f}%**")
+            st.markdown(f"- 🎯 Team Target Share: **{target_share_pct:.1f}%**")
+            st.markdown(f"- ⏱ Snap Share: **{(player_row['avg_snap_share'] or 0.0)*100:.1f}%**")
+
+        # College & Rookie Scouting Metrics Section
+        has_college_stats = (player_row["college_team"] and not pd.isna(player_row["college_team"])) or (player_row["college_receptions"] and player_row["college_receptions"] > 0)
+        has_rookie_metrics = (player_row["scouting_source"] and not pd.isna(player_row["scouting_source"]))
+
+        if has_college_stats or has_rookie_metrics:
+            st.markdown("### 🎓 Prospect & College Scouting Profile")
+            col_col_stats, col_adv_metrics = st.columns(2)
+            with col_col_stats:
+                if has_college_stats:
+                    st.markdown(f"**College Career Stats ({player_row['college_team']} - {player_row['college_conf']})**")
+                    st.markdown(f"- 📅 Games: **{int(player_row['college_games'])}**" if not pd.isna(player_row["college_games"]) else "- Games: N/A")
+                    if player_row["position"] == "QB":
+                        st.markdown(f"- 🏈 Passing: **{player_row['college_passing_yards']:.0f} yds**, **{player_row['college_passing_tds']:.0f} TDs**" if not pd.isna(player_row["college_passing_yards"]) else "")
+                    st.markdown(f"- 🏃 Rushing: **{player_row['college_rushing_yards']:.0f} yds**, **{player_row['college_rushing_tds']:.0f} TDs**" if not pd.isna(player_row["college_rushing_yards"]) else "")
+                    st.markdown(f"- 👐 Receptions: **{player_row['college_receptions']:.0f} rec**, **{player_row['college_receiving_yards']:.0f} yds**, **{player_row['college_receiving_tds']:.0f} TDs**" if not pd.isna(player_row["college_receptions"]) else "")
+                else:
+                    st.write("College stats not available.")
+            with col_adv_metrics:
+                if has_rookie_metrics:
+                    st.markdown(f"**Advanced Scouting Metrics ({player_row['scouting_source']})**")
+                    if player_row["position"] in ("WR", "TE"):
+                        st.markdown(f"- Yards Per Route Run (YPRR): **{player_row['yards_per_route_run']:.2f}**" if not pd.isna(player_row["yards_per_route_run"]) else "")
+                        st.markdown(f"- College Target Share: **{player_row['college_target_share']:.1f}%**" if not pd.isna(player_row["college_target_share"]) else "")
+                        st.markdown(f"- Catch Radius Grade: **{player_row['catch_radius_grade']:.1f}/100**" if not pd.isna(player_row["catch_radius_grade"]) else "")
+                        st.markdown(f"- Success vs. Man Coverage: **{player_row['success_rate_vs_man']:.1f}%**" if not pd.isna(player_row["success_rate_vs_man"]) else "")
+                        st.markdown(f"- Success vs. Zone Coverage: **{player_row['success_rate_vs_zone']:.1f}%**" if not pd.isna(player_row["success_rate_vs_zone"]) else "")
+                        st.markdown(f"- Success vs. Press Coverage: **{player_row['success_rate_vs_press']:.1f}%**" if not pd.isna(player_row["success_rate_vs_press"]) else "")
+                    elif player_row["position"] == "RB":
+                        st.markdown(f"- Yards After Contact/Att: **{player_row['yards_after_contact_per_attempt']:.2f}**" if not pd.isna(player_row["yards_after_contact_per_attempt"]) else "")
+                    else:
+                        st.markdown(f"- Yards Per Route Run: **{player_row['yards_per_route_run']:.2f}**" if not pd.isna(player_row["yards_per_route_run"]) else "")
+                else:
+                    st.write("Advanced scouting metrics not available.")
+
         # Scouting Ratings Grid
-        st.markdown("### 📊 Player Grades & Metrics")
+        st.markdown("### 📊 Player Grades & Ratings")
         col_grade, col_traits = st.columns([1, 2])
 
         with col_grade:
@@ -1393,14 +1530,8 @@ def render_player_profiles_tab():
                 st.session_state[report_cache_key] = f"""
                 No Gemini API key detected in the sidebar. Standard statistics indicate that {player_row['player_display_name']} averages {player_row['avg_ppr']:.1f} PPR points per game on a snap share of {player_row['avg_snap_share']*100:.1f}%.
                 His average analytical grade is {player_row['avg_grade']:.1f} and he carries an opportunity score of {player_row['avg_opportunity']:.1f}.
-
-                **KEY STRENGTHS:**
-                - Highly utilized offensive role (averaging {player_row['avg_ppr']:.1f} points/game)
-                - Good volume stability ({player_row['avg_snap_share']*100:.1f}% snap share)
-
-                **KEY WEAKNESSES:**
-                - Efficiency metrics are subject to opponent defensive strength
-                - Rookie/college historical metrics are unmapped for this player
+                - **Depth Chart**: {depth_pos} (Rank {int(player_row['depth_rank']) if not pd.isna(player_row['depth_rank']) else 'N/A'})
+                - **Opportunity Splits**: {run_pct:.1f}% Run / {pass_pct:.1f}% Pass/Targets
                 """
             else:
                 try:
@@ -1421,10 +1552,16 @@ def render_player_profiles_tab():
                     - Efficiency Rating (1-100): {player_row['avg_efficiency']:.2f}
                     - Role Stability Rating (1-100): {100 - player_row['avg_role_fragility']:.2f}
                     - Contract APY: {format_currency(player_row['contract_apy'])}
+                    - Team Website-scraped Depth Position: {depth_pos} (Rank {int(player_row['depth_rank']) if not pd.isna(player_row['depth_rank']) else 'N/A'})
+                    - Run/Pass Split: {run_pct:.1f}% Runs / {pass_pct:.1f}% Throws/Targets
+                    - Carry Share: {carry_share_pct:.1f}%
+                    - Target Share: {target_share_pct:.1f}%
+                    - College Stats (if available): {player_row['college_team']} ({player_row['college_conf']}), Games: {player_row['college_games']}, Passing Yds: {player_row['college_passing_yards']}, Rushing Yds: {player_row['college_rushing_yards']}, Receptions: {player_row['college_receptions']}, Receiving Yds: {player_row['college_receiving_yards']}
+                    - Advanced Prospect metrics (if available): YPRR = {player_row['yards_per_route_run']}, Yards after contact/att = {player_row['yards_after_contact_per_attempt']}, Success rate vs Man = {player_row['success_rate_vs_man']}, Success rate vs press = {player_row['success_rate_vs_press']}, Catch radius = {player_row['catch_radius_grade']}
 
                     Scouting report requirements:
                     1. Deliver the report in the Pigskin voice contract (arrogant, analytical, highly critical of vibes-based scouting, uses slang like "cooked", "vibes tax").
-                    2. Write a brief overview (3-4 sentences).
+                    2. Write a brief overview (3-4 sentences), making sure to touch on their depth chart status, run/pass opportunity splits, and college prospect profile or rookie metrics where relevant.
                     3. Output a section for "KEY STRENGTHS" and "KEY WEAKNESSES", listing exactly 2 bullet points for each based on their actual numbers. Do not include markdown headers inside the bulleted text, just write it as standard bold bullets.
                     """
                     res = model.generate_content(prompt)
