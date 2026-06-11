@@ -2437,10 +2437,10 @@ def render_ai_cohost():
       Columns include: `snapshot_at`, `league_id`, `season`, `week`, `viewer_roster_id`, `viewer_owner_id`, `viewer_username`, `viewer_display_name`, `viewer_team_name`, `matchup_id`, `points`, `starters_json`, and `players_json`.
     - Table: `fantasy_football_brain.sleeper_roster_players`
       Description: Current rostered players for every team in a loaded Sleeper league snapshot.
-      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id`, `player_name`, `position`, `team`, `gsis_id`, `status`, `injury_status`, `is_starter`, `is_taxi`, and `is_reserve`.
+      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id` (STRING: containing numeric IDs or team abbreviations for D/ST, e.g. 'PHI'; use SAFE_CAST if converting to INT64 to avoid query failures), `player_name`, `position`, `team`, `gsis_id`, `status`, `injury_status`, `is_starter`, `is_taxi`, and `is_reserve`.
     - Table: `fantasy_football_brain.sleeper_lineups`
       Description: Week-specific matchup lineup/player points for loaded Sleeper league snapshots.
-      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `matchup_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id`, `player_name`, `position`, `team`, `gsis_id`, `is_starter`, and `points`.
+      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `matchup_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id` (STRING: containing numeric IDs or team abbreviations for D/ST, e.g. 'PHI'; use SAFE_CAST if converting to INT64 to avoid query failures), `player_name`, `position`, `team`, `gsis_id`, `is_starter`, and `points`.
     - Table: `fantasy_football_brain.sleeper_rosters`, `fantasy_football_brain.sleeper_matchups`, `fantasy_football_brain.sleeper_league_users`, and `fantasy_football_brain.sleeper_leagues`
       Description: Sleeper league metadata, users, standings, matchup ids, scoring settings, roster positions, and raw league settings for loaded viewer-team snapshots.
     - Table: `fantasy_football_brain.analytics_player_qb_splits`
@@ -2487,6 +2487,7 @@ def render_ai_cohost():
     You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
     Never query `epa_per_play`; that column does not exist. Use `analytics_player_weekly_truth.total_epa` for player analysis, or calculate total weekly EPA from `weekly_metrics.passing_epa + weekly_metrics.rushing_epa + weekly_metrics.receiving_epa`.
+    Never use `CAST(col AS INT64)` on columns that may contain non-numeric characters (like `sleeper_player_id` which can contain team names like 'PHI' for D/ST rosters). Always use `SAFE_CAST(col AS INT64)` to prevent bad int64 value query failures.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
     For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
     For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.
