@@ -772,6 +772,10 @@ def render_sleeper_watch_segment():
     st.markdown(
         "100% data-driven sleepers and streamers ranked by role, recent volume, efficiency, and opponent defensive matchups."
     )
+    st.caption(
+        "ℹ️ **Rostered % Note**: The Rostered % is calculated locally across the **loaded Sleeper leagues** in your BigQuery database, not globally. "
+        "If you have only 1 league loaded, rostered percentage is binary: 0.0% (available in your league) or 100.0% (already rostered, which are filtered out by the slider)."
+    )
 
     # Ingestion or data availability check
     sql_query = f"""
