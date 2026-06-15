@@ -1273,6 +1273,10 @@ def fetch_pigskin_rankings_data():
         sleeper_depth_chart_order,
         raw_ranking_score,
         depth_chart_penalty,
+        candidate_rank,
+        candidate_ranking_score,
+        rank_source,
+        adjudicated_at,
         ranking_eligibility,
         pigskin_verdict,
         rank_rationale,
@@ -1473,6 +1477,10 @@ def render_player_profiles_tab():
         "sleeper_depth_chart_order": pd.NA,
         "raw_ranking_score": pd.NA,
         "depth_chart_penalty": pd.NA,
+        "candidate_rank": pd.NA,
+        "candidate_ranking_score": pd.NA,
+        "rank_source": pd.NA,
+        "adjudicated_at": pd.NA,
         "ranking_eligibility": pd.NA,
     }
     for col_name, default_value in ranking_defaults.items():
@@ -1726,13 +1734,14 @@ def render_player_profiles_tab():
             sleeper_status = player_row.get("sleeper_status") if not pd.isna(player_row.get("sleeper_status")) else "unknown"
             penalty_val = player_row.get("depth_chart_penalty")
             penalty_display = float(penalty_val) if not pd.isna(penalty_val) else 0.0
+            rank_source = player_row.get("rank_source") if not pd.isna(player_row.get("rank_source")) else "candidate fallback"
             st.markdown(
                 f"**{rank_label}** · **{player_row.get('pigskin_tier', 'tier unknown')}** · "
                 f"confidence **{confidence_display:.1f}/100**"
             )
             st.caption(
                 f"Sleeper eligibility: {sleeper_team}, {sleeper_status}, "
-                f"depth {depth_display}, penalty {penalty_display:.1f}"
+                f"depth {depth_display}, penalty {penalty_display:.1f}, source {rank_source}"
             )
             if not pd.isna(player_row.get("pigskin_verdict")):
                 st.info(str(player_row["pigskin_verdict"]))
@@ -2527,9 +2536,13 @@ def render_ai_cohost():
       *PRIORITIZE THIS TABLE for almost all player analysis.*
 
     - Table: `fantasy_football_brain.analytics_pigskin_rankings`
-      Description: Canonical active Pigskin rankings used by Player Profiles and chat. This is the source of truth for Pigskin-owned 2026 player ranks.
-      Columns include: `ranking_version`, `generated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `sleeper_player_id`, `sleeper_team`, `sleeper_active`, `sleeper_status`, `sleeper_depth_chart_position`, `sleeper_depth_chart_order`, `ranking_eligibility`, `raw_ranking_score`, `depth_chart_penalty`, `ranking_score`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
+      Description: Canonical active Pigskin rankings used by Player Profiles and chat. This table is written by a Gemini/Pigskin adjudication pass over curated BigQuery candidate evidence. This is the source of truth for Pigskin-owned 2026 player ranks.
+      Columns include: `ranking_version`, `generated_at`, `adjudicated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `sleeper_player_id`, `sleeper_team`, `sleeper_active`, `sleeper_status`, `sleeper_depth_chart_position`, `sleeper_depth_chart_order`, `ranking_eligibility`, `candidate_rank`, `candidate_ranking_score`, `raw_ranking_score`, `depth_chart_penalty`, `ranking_score`, `rank_source`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_total_epa`, `season_total_epa`, `avg_epa_per_opportunity`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
       If this table says a player is ranked at a position, that is Pigskin's current owned ranking. Do not deny it. Defend it, critique the risk, or explain what would change it. Backup QBs are penalized through `depth_chart_penalty`; do not describe a QB with `sleeper_depth_chart_order > 1` as a normal QB1 projection.
+
+    - Table: `fantasy_football_brain.analytics_pigskin_rankings_candidates`
+      Description: SQL-generated candidate evidence board used as the input to Pigskin's LLM adjudication pass. This is evidence, not the final ranking.
+      Columns mostly match `analytics_pigskin_rankings`, but `rank` and `ranking_score` are candidate values before Pigskin's final LLM judgment.
 
     - Table: `fantasy_football_brain.analytics_pigskin_rankings_history`
       Description: Append-only history of Pigskin ranking publications. Use it when the user asks how a ranking changed across versions or asks about an older call.
@@ -2634,6 +2647,7 @@ def render_ai_cohost():
     You are mandated to follow a strict query protocol when analyzing players.
     For any question about rankings, positional rank, projections, draft price, Player Profiles, "why did you rank", "defend your ranking", or 2026 rank disagreements, query `analytics_pigskin_rankings` first.
     If the active ranking table contains the player, acknowledge the rank directly. Never say "I did not rank him there" when `analytics_pigskin_rankings` says Pigskin did.
+    When `rank_source = 'llm_pigskin_adjudicated'`, treat the row as Pigskin's model-authored ranking. Use `analytics_pigskin_rankings_candidates` only to explain the evidence behind the adjudication, not to override the final rank.
     If the user asks about an older or prior ranking call, query `analytics_pigskin_rankings_history` and compare ranking versions before answering.
     For non-ranking player analysis, default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
@@ -3860,14 +3874,16 @@ with tab_data_ops:
                     mark_successful_run("statistics_ingestion")
 
         st.markdown("#### Publish Pigskin Rankings")
-        st.caption("Materialize the canonical active rankings and append a rankings-history snapshot for Pigskin chat and Player Profiles.")
+        st.caption("Generate LLM-authored Pigskin rankings from curated BigQuery evidence, then append a rankings-history snapshot.")
         render_last_success("pigskin_rankings")
-        if st.button("🏆 Materialize Pigskin Rankings", type="secondary"):
-            cmd_args = ["-m", "src.materialize", "--only", "pigskin-rankings"]
+        if st.button("🏆 Generate Pigskin Rankings", type="secondary"):
+            cmd_args = ["-m", "src.generate_pigskin_rankings", "--refresh-sleeper"]
 
             exec_env = {}
             if gcp_key_path:
                 exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+            if gemini_api_key:
+                exec_env["GEMINI_API_KEY"] = gemini_api_key
 
             if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
                 mark_successful_run("pigskin_rankings")
