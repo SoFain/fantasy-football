@@ -663,6 +663,28 @@ def execute_bq_cached(sql_query: str):
 def repair_generated_sql(sql_query: str) -> str:
     import re
 
+    if re.search(r"\banalytics_player_weekly_truth\b", sql_query, flags=re.IGNORECASE):
+        sql_query = re.sub(
+            r"\bLOWER\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*\.)?player_name\s*\)",
+            lambda match: f"LOWER({match.group(1) or ''}player_full_name)",
+            sql_query,
+            flags=re.IGNORECASE,
+        )
+
+        def replace_full_name_predicate(match):
+            value = match.group("value")
+            if " " not in value.strip():
+                return match.group(0)
+            prefix = match.group("prefix") or ""
+            return f"{prefix}player_full_name {match.group('operator')} '{value}'"
+
+        sql_query = re.sub(
+            r"\b(?P<prefix>[a-zA-Z_][a-zA-Z0-9_]*\.)?player_name\s+(?P<operator>=|LIKE)\s+'(?P<value>[^']+)'",
+            replace_full_name_predicate,
+            sql_query,
+            flags=re.IGNORECASE,
+        )
+
     # 1. First, repair epa_per_play
     if re.search(r"\bepa_per_play\b", sql_query, flags=re.IGNORECASE):
         if re.search(r"\banalytics_player_weekly_truth\b", sql_query, flags=re.IGNORECASE):
@@ -1273,6 +1295,19 @@ def fetch_pigskin_rankings_data():
         sleeper_depth_chart_order,
         raw_ranking_score,
         depth_chart_penalty,
+        avg_passing_epa,
+        season_passing_epa,
+        avg_rushing_epa,
+        season_rushing_epa,
+        avg_receiving_epa,
+        season_receiving_epa,
+        latest_season_wopr,
+        previous_season_wopr,
+        two_years_ago_wopr,
+        latest_season_target_share,
+        previous_season_target_share,
+        latest_season_carry_share,
+        previous_season_carry_share,
         candidate_rank,
         candidate_ranking_score,
         rank_source,
@@ -1317,6 +1352,9 @@ def fetch_player_weekly_history(player_id: str):
         rushing_tds,
         passing_yards,
         passing_tds,
+        passing_epa,
+        rushing_epa,
+        receiving_epa,
         total_epa
     FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
     WHERE player_id = @player_id
@@ -1477,6 +1515,19 @@ def render_player_profiles_tab():
         "sleeper_depth_chart_order": pd.NA,
         "raw_ranking_score": pd.NA,
         "depth_chart_penalty": pd.NA,
+        "avg_passing_epa": pd.NA,
+        "season_passing_epa": pd.NA,
+        "avg_rushing_epa": pd.NA,
+        "season_rushing_epa": pd.NA,
+        "avg_receiving_epa": pd.NA,
+        "season_receiving_epa": pd.NA,
+        "latest_season_wopr": pd.NA,
+        "previous_season_wopr": pd.NA,
+        "two_years_ago_wopr": pd.NA,
+        "latest_season_target_share": pd.NA,
+        "previous_season_target_share": pd.NA,
+        "latest_season_carry_share": pd.NA,
+        "previous_season_carry_share": pd.NA,
         "candidate_rank": pd.NA,
         "candidate_ranking_score": pd.NA,
         "rank_source": pd.NA,
@@ -2531,13 +2582,13 @@ def render_ai_cohost():
 
     - Table: `fantasy_football_brain.analytics_player_weekly_truth` (PRIMARY TABLE)
       Description: Derived AI vs Vibes player truth table with fantasy output, usage, red-zone role, EPA, recent trend, opportunity scoring, efficiency scoring, and criticism-ready flags.
-      Columns include: `season`, `week`, `player_id`, `player_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, `points_outran_role`, `thin_role_big_week`, `fragile_role`, `role_backed_production`, and `analytical_verdict`.
+      Columns include: `season`, `week`, `player_id`, `player_name`, `player_full_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, `rushing_epa`, `receiving_epa`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, `points_outran_role`, `thin_role_big_week`, `fragile_role`, `role_backed_production`, and `analytical_verdict`.
       `team` is the historical team for that stat week. `current_team` is the latest known roster team. If `team_changed_since_stats` is true, do not describe the player as currently on `team`.
       *PRIORITIZE THIS TABLE for almost all player analysis.*
 
     - Table: `fantasy_football_brain.analytics_pigskin_rankings`
       Description: Canonical active Pigskin rankings used by Player Profiles and chat. This table is written by a Gemini/Pigskin adjudication pass over curated BigQuery candidate evidence. This is the source of truth for Pigskin-owned 2026 player ranks.
-      Columns include: `ranking_version`, `generated_at`, `adjudicated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `sleeper_player_id`, `sleeper_team`, `sleeper_active`, `sleeper_status`, `sleeper_depth_chart_position`, `sleeper_depth_chart_order`, `ranking_eligibility`, `candidate_rank`, `candidate_ranking_score`, `raw_ranking_score`, `depth_chart_penalty`, `ranking_score`, `rank_source`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_total_epa`, `season_total_epa`, `avg_epa_per_opportunity`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
+      Columns include: `ranking_version`, `generated_at`, `adjudicated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `sleeper_player_id`, `sleeper_team`, `sleeper_active`, `sleeper_status`, `sleeper_depth_chart_position`, `sleeper_depth_chart_order`, `ranking_eligibility`, `candidate_rank`, `candidate_ranking_score`, `raw_ranking_score`, `depth_chart_penalty`, `ranking_score`, `rank_source`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_total_epa`, `season_total_epa`, `avg_epa_per_opportunity`, `avg_passing_epa`, `season_passing_epa`, `avg_rushing_epa`, `season_rushing_epa`, `avg_receiving_epa`, `season_receiving_epa`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `latest_season_wopr`, `previous_season_wopr`, `two_years_ago_wopr`, `latest_season_target_share`, `previous_season_target_share`, `latest_season_carry_share`, `previous_season_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
       If this table says a player is ranked at a position, that is Pigskin's current owned ranking. Do not deny it. Defend it, critique the risk, or explain what would change it. Backup QBs are penalized through `depth_chart_penalty`; do not describe a QB with `sleeper_depth_chart_order > 1` as a normal QB1 projection.
 
     - Table: `fantasy_football_brain.analytics_pigskin_rankings_candidates`
@@ -2651,7 +2702,8 @@ def render_ai_cohost():
     If the user asks about an older or prior ranking call, query `analytics_pigskin_rankings_history` and compare ranking versions before answering.
     For non-ranking player analysis, default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
-    Never query `epa_per_play`; that column does not exist. Use `analytics_player_weekly_truth.total_epa` for player analysis, or calculate total weekly EPA from `weekly_metrics.passing_epa + weekly_metrics.rushing_epa + weekly_metrics.receiving_epa`.
+    For player-name filters in `analytics_player_weekly_truth`, use `LOWER(player_full_name) LIKE '%full name%'` when the user gives a normal full name. The raw `player_name` field may be abbreviated, like `D.Jones`.
+    Never query `epa_per_play`; that column does not exist. Use `analytics_player_weekly_truth.total_epa` for total EPA and `analytics_player_weekly_truth.passing_epa`, `analytics_player_weekly_truth.rushing_epa`, and `analytics_player_weekly_truth.receiving_epa` for split EPA.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
     For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
     For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.

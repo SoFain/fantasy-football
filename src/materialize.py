@@ -217,6 +217,7 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
     current_rosters AS (
         SELECT
             gsis_id AS player_id,
+            ARRAY_AGG(display_name IGNORE NULLS ORDER BY season DESC LIMIT 1)[SAFE_OFFSET(0)] AS player_full_name,
             ARRAY_AGG(latest_team IGNORE NULLS ORDER BY season DESC LIMIT 1)[SAFE_OFFSET(0)] AS current_team,
             ARRAY_AGG(status IGNORE NULLS ORDER BY season DESC LIMIT 1)[SAFE_OFFSET(0)] AS roster_status,
             ARRAY_AGG(espn_id IGNORE NULLS ORDER BY season DESC LIMIT 1)[SAFE_OFFSET(0)] AS espn_id
@@ -228,6 +229,7 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
     current_rosters AS (
         SELECT
             CAST(NULL AS STRING) AS player_id,
+            CAST(NULL AS STRING) AS player_full_name,
             CAST(NULL AS STRING) AS current_team,
             CAST(NULL AS STRING) AS roster_status,
             CAST(NULL AS STRING) AS espn_id
@@ -318,6 +320,9 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
             AVG(target_share) AS target_share,
             AVG(air_yards_share) AS air_yards_share,
             AVG(wopr) AS wopr,
+            SUM(COALESCE(passing_epa, 0)) AS passing_epa,
+            SUM(COALESCE(rushing_epa, 0)) AS rushing_epa,
+            SUM(COALESCE(receiving_epa, 0)) AS receiving_epa,
             SUM(
                 COALESCE(passing_epa, 0)
                 + COALESCE(rushing_epa, 0)
@@ -398,6 +403,7 @@ def build_player_weekly_truth_sql(project_id, dataset_id, existing_tables):
     joined AS (
         SELECT
             w.*,
+            COALESCE(cr.player_full_name, w.player_display_name, w.player_name) AS player_full_name,
             COALESCE(cr.current_team, w.team) AS current_team,
             cr.roster_status,
             cr.espn_id,
@@ -716,6 +722,13 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         FROM (
             SELECT
                 sp.*,
+                LOWER(
+                    REGEXP_REPLACE(
+                        REGEXP_REPLACE(LOWER(sp.player_name), r'\s+(jr|sr|ii|iii|iv|v)\.?$', ''),
+                        r'[^a-z0-9]+',
+                        ''
+                    )
+                ) AS player_name_key,
                 ROW_NUMBER() OVER(
                     PARTITION BY sp.sleeper_player_id
                     ORDER BY sp.snapshot_at DESC, COALESCE(sp.search_rank, 999999)
@@ -731,7 +744,7 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         )
         WHERE rn = 1
     ),
-    roster_players AS (
+    roster_players_raw AS (
         SELECT
             r.gsis_id AS player_id,
             ARRAY_AGG(r.display_name IGNORE NULLS ORDER BY r.season DESC LIMIT 1)[SAFE_OFFSET(0)] AS player_name,
@@ -745,11 +758,23 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             AND (r.status IS NULL OR r.status IN ('ACT', 'RES', 'PUP', 'SUS', 'NWT', 'INA'))
         GROUP BY r.gsis_id
     ),
+    roster_players AS (
+        SELECT
+            *,
+            LOWER(
+                REGEXP_REPLACE(
+                    REGEXP_REPLACE(LOWER(player_name), r'\s+(jr|sr|ii|iii|iv|v)\.?$', ''),
+                    r'[^a-z0-9]+',
+                    ''
+                )
+            ) AS player_name_key
+        FROM roster_players_raw
+    ),
     active_roster_players AS (
         SELECT
             COALESCE(rp.player_id, sc.gsis_id, sc.sleeper_player_id) AS player_id,
             sc.sleeper_player_id,
-            COALESCE(sc.player_name, rp.player_name) AS player_name,
+            COALESCE(rp.player_name, sc.player_name) AS player_name,
             sc.position,
             sc.team AS current_team,
             rp.roster_status,
@@ -768,8 +793,9 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
                 AND sc.gsis_id = rp.player_id
             )
             OR (
-                LOWER(sc.player_name) = LOWER(rp.player_name)
+                sc.player_name_key = rp.player_name_key
                 AND sc.position = rp.position
+                AND sc.team = rp.current_team
             )
     ),
     latest_stat_season AS (
@@ -796,6 +822,12 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             AVG(t.total_epa) AS avg_total_epa,
             SUM(t.total_epa) AS season_total_epa,
             AVG(t.epa_per_opportunity) AS avg_epa_per_opportunity,
+            AVG(t.passing_epa) AS avg_passing_epa,
+            SUM(t.passing_epa) AS season_passing_epa,
+            AVG(t.rushing_epa) AS avg_rushing_epa,
+            SUM(t.rushing_epa) AS season_rushing_epa,
+            AVG(t.receiving_epa) AS avg_receiving_epa,
+            SUM(t.receiving_epa) AS season_receiving_epa,
             AVG(t.role_quality_score) AS avg_role_quality,
             AVG(t.role_fragility_score) AS avg_role_fragility,
             AVG(t.analytical_grade) AS avg_grade,
@@ -816,6 +848,42 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         WHERE t.season_type = 'REG'
             AND t.position IN ('QB', 'RB', 'WR', 'TE')
         GROUP BY t.player_id
+    ),
+    player_season_agg AS (
+        SELECT
+            t.player_id,
+            t.season,
+            AVG(t.fantasy_points_ppr) AS season_avg_ppr,
+            AVG(t.wopr) AS season_wopr,
+            AVG(t.target_share) AS season_target_share,
+            AVG(t.carry_share) AS season_carry_share,
+            AVG(t.role_quality_score) AS season_role_quality,
+            AVG(t.role_fragility_score) AS season_role_fragility,
+            SUM(t.total_epa) AS season_total_epa,
+            SUM(t.passing_epa) AS season_passing_epa,
+            SUM(t.rushing_epa) AS season_rushing_epa,
+            SUM(t.receiving_epa) AS season_receiving_epa
+        FROM `{project_id}.{dataset_id}.analytics_player_weekly_truth` t
+        WHERE t.season_type = 'REG'
+            AND t.position IN ('QB', 'RB', 'WR', 'TE')
+        GROUP BY t.player_id, t.season
+    ),
+    player_multi_season AS (
+        SELECT
+            player_id,
+            ARRAY_AGG(season_wopr IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(0)] AS latest_season_wopr,
+            ARRAY_AGG(season_wopr IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(1)] AS previous_season_wopr,
+            ARRAY_AGG(season_wopr IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(2)] AS two_years_ago_wopr,
+            ARRAY_AGG(season_target_share IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(0)] AS latest_season_target_share,
+            ARRAY_AGG(season_target_share IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(1)] AS previous_season_target_share,
+            ARRAY_AGG(season_carry_share IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(0)] AS latest_season_carry_share,
+            ARRAY_AGG(season_carry_share IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(1)] AS previous_season_carry_share,
+            ARRAY_AGG(season_avg_ppr IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(0)] AS latest_season_ppr,
+            ARRAY_AGG(season_avg_ppr IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(1)] AS previous_season_ppr,
+            ARRAY_AGG(season_total_epa IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(0)] AS latest_season_total_epa,
+            ARRAY_AGG(season_total_epa IGNORE NULLS ORDER BY season DESC LIMIT 3)[SAFE_OFFSET(1)] AS previous_season_total_epa
+        FROM player_season_agg
+        GROUP BY player_id
     ),
     base_scored AS (
         SELECT
@@ -846,12 +914,29 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             agg.avg_total_epa,
             agg.season_total_epa,
             agg.avg_epa_per_opportunity,
+            agg.avg_passing_epa,
+            agg.season_passing_epa,
+            agg.avg_rushing_epa,
+            agg.season_rushing_epa,
+            agg.avg_receiving_epa,
+            agg.season_receiving_epa,
             agg.avg_role_quality,
             agg.avg_role_fragility,
             agg.avg_grade,
             agg.avg_wopr,
             agg.avg_target_share,
             agg.avg_carry_share,
+            ms.latest_season_wopr,
+            ms.previous_season_wopr,
+            ms.two_years_ago_wopr,
+            ms.latest_season_target_share,
+            ms.previous_season_target_share,
+            ms.latest_season_carry_share,
+            ms.previous_season_carry_share,
+            ms.latest_season_ppr,
+            ms.previous_season_ppr,
+            ms.latest_season_total_epa,
+            ms.previous_season_total_epa,
             agg.avg_player_run_opportunity_pct,
             agg.avg_player_pass_opportunity_pct,
             agg.total_ppr,
@@ -899,6 +984,8 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
                 LOWER(rp.player_name) = LOWER(agg.player_name)
                 AND rp.position = agg.position
             )
+        LEFT JOIN player_multi_season ms
+            ON rp.player_id = ms.player_id
         CROSS JOIN run_context rc
     ),
     scored AS (
@@ -961,12 +1048,29 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         avg_total_epa,
         season_total_epa,
         avg_epa_per_opportunity,
+        avg_passing_epa,
+        season_passing_epa,
+        avg_rushing_epa,
+        season_rushing_epa,
+        avg_receiving_epa,
+        season_receiving_epa,
         avg_role_quality,
         avg_role_fragility,
         avg_grade,
         avg_wopr,
         avg_target_share,
         avg_carry_share,
+        latest_season_wopr,
+        previous_season_wopr,
+        two_years_ago_wopr,
+        latest_season_target_share,
+        previous_season_target_share,
+        latest_season_carry_share,
+        previous_season_carry_share,
+        latest_season_ppr,
+        previous_season_ppr,
+        latest_season_total_epa,
+        previous_season_total_epa,
         avg_player_run_opportunity_pct,
         avg_player_pass_opportunity_pct,
         total_ppr,
@@ -1407,7 +1511,7 @@ def main():
     )
     parser.add_argument(
         "--only",
-        choices=["all", "pigskin-rankings"],
+        choices=["all", "player-weekly-truth", "pigskin-rankings"],
         default="all",
         help="Materialize all analytics tables or only one targeted table group.",
     )
@@ -1415,7 +1519,9 @@ def main():
 
     client = bigquery.Client(project=args.project)
     print("Materializing AI vs Vibes analytics tables...")
-    if args.only == "pigskin-rankings":
+    if args.only == "player-weekly-truth":
+        jobs = [materialize_player_weekly_truth(client, dataset_id=args.dataset, dry_run=args.dry_run)]
+    elif args.only == "pigskin-rankings":
         jobs = materialize_pigskin_rankings(client, dataset_id=args.dataset, dry_run=args.dry_run)
     else:
         jobs = materialize_all(client, dataset_id=args.dataset, dry_run=args.dry_run)
