@@ -1253,6 +1253,40 @@ def fetch_player_profiles_data():
     df = client.query(sql_query).result().to_dataframe()
     return df
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_pigskin_rankings_data():
+    import pandas as pd
+    from google.cloud import bigquery
+
+    sql_query = f"""
+    SELECT
+        player_id,
+        position,
+        rank AS pigskin_rank,
+        tier AS pigskin_tier,
+        ranking_score AS pigskin_ranking_score,
+        confidence_score AS pigskin_confidence_score,
+        pigskin_verdict,
+        rank_rationale,
+        risk_flags,
+        what_would_change_mind,
+        ranking_version,
+        generated_at AS ranking_generated_at,
+        model_name AS ranking_model_name,
+        prompt_version AS ranking_prompt_version,
+        data_snapshot_label AS ranking_data_snapshot
+    FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_pigskin_rankings`
+    WHERE is_active = TRUE
+    """
+    try:
+        client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+        return client.query(sql_query).result().to_dataframe()
+    except Exception as ex:
+        logging.getLogger("app.rankings").warning(f"Could not load canonical Pigskin rankings: {ex}")
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=3600, show_spinner="Loading player weekly history...")
 def fetch_player_weekly_history(player_id: str):
     from google.cloud import bigquery
@@ -1407,6 +1441,46 @@ def render_player_profiles_tab():
     if df.empty:
         st.warning("No player profile metrics found in the data warehouse.")
         return
+
+    rankings_df = fetch_pigskin_rankings_data()
+    if not rankings_df.empty:
+        df = df.merge(rankings_df, on=["player_id", "position"], how="left")
+
+    ranking_defaults = {
+        "pigskin_rank": pd.NA,
+        "pigskin_tier": pd.NA,
+        "pigskin_ranking_score": pd.NA,
+        "pigskin_confidence_score": pd.NA,
+        "pigskin_verdict": pd.NA,
+        "rank_rationale": pd.NA,
+        "risk_flags": pd.NA,
+        "what_would_change_mind": pd.NA,
+        "ranking_version": pd.NA,
+        "ranking_generated_at": pd.NA,
+        "ranking_model_name": pd.NA,
+        "ranking_prompt_version": pd.NA,
+        "ranking_data_snapshot": pd.NA,
+    }
+    for col_name, default_value in ranking_defaults.items():
+        if col_name not in df.columns:
+            df[col_name] = default_value
+
+    pigskin_rank_series = pd.to_numeric(df["pigskin_rank"], errors="coerce")
+    legacy_rank_series = pd.to_numeric(df["pos_rank"], errors="coerce")
+    pigskin_score_series = pd.to_numeric(df["pigskin_ranking_score"], errors="coerce")
+    legacy_score_series = pd.to_numeric(df["avg_grade"], errors="coerce")
+    df["display_rank"] = pigskin_rank_series.combine_first(legacy_rank_series)
+    df["display_score"] = pigskin_score_series.combine_first(legacy_score_series)
+    has_pigskin_rankings = df["pigskin_rank"].notna().any()
+
+    if has_pigskin_rankings:
+        version_values = df["ranking_version"].dropna().unique()
+        version_label = str(version_values[0]) if len(version_values) else "unknown"
+        st.caption(f"Canonical Pigskin rankings loaded from `analytics_pigskin_rankings`, version `{version_label}`.")
+    else:
+        st.warning(
+            "Canonical Pigskin rankings are not materialized yet. Showing legacy analytical grade order until Data Ops publishes Pigskin rankings."
+        )
 
     # Helpers for rendering
     def format_currency(val):
@@ -1587,12 +1661,16 @@ def render_player_profiles_tab():
         col_grade, col_traits = st.columns([1, 2])
 
         with col_grade:
-            grade_val = player_row["avg_grade"] if not pd.isna(player_row["avg_grade"]) else 0.0
+            has_player_pigskin_rank = not pd.isna(player_row.get("pigskin_rank"))
+            grade_val = player_row["display_score"] if not pd.isna(player_row["display_score"]) else 0.0
+            rank_val = player_row["display_rank"] if not pd.isna(player_row["display_rank"]) else player_row["pos_rank"]
+            rank_label = f"#{int(float(rank_val))} {player_row['position']}" if not pd.isna(rank_val) else "Unranked"
+            grade_title = "Pigskin Score" if has_player_pigskin_rank else "Overall Grade"
             st.markdown(f"""
             <div class="grade-badge-container">
-                <div class="grade-badge-title">Overall Grade</div>
+                <div class="grade-badge-title">{grade_title}</div>
                 <div class="grade-badge-circle">{grade_val:.1f}</div>
-                <div style="margin-top: 10px; font-weight: 700; color: #1e3a8a;">Rank: #{int(player_row['pos_rank'])} {player_row['position']}</div>
+                <div style="margin-top: 10px; font-weight: 700; color: #1e3a8a;">Rank: {rank_label}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1624,6 +1702,23 @@ def render_player_profiles_tab():
                 """, unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
+        if not pd.isna(player_row.get("pigskin_rank")):
+            st.markdown("### 🏆 Canonical Pigskin Ranking")
+            confidence_val = player_row.get("pigskin_confidence_score")
+            confidence_display = float(confidence_val) if not pd.isna(confidence_val) else 0.0
+            st.markdown(
+                f"**{rank_label}** · **{player_row.get('pigskin_tier', 'tier unknown')}** · "
+                f"confidence **{confidence_display:.1f}/100**"
+            )
+            if not pd.isna(player_row.get("pigskin_verdict")):
+                st.info(str(player_row["pigskin_verdict"]))
+            if not pd.isna(player_row.get("rank_rationale")):
+                st.markdown(f"**Why Pigskin owns the rank:** {player_row['rank_rationale']}")
+            if not pd.isna(player_row.get("risk_flags")):
+                st.markdown(f"**Risk flags:** {player_row['risk_flags']}")
+            if not pd.isna(player_row.get("what_would_change_mind")):
+                st.markdown(f"**What would change the rank:** {player_row['what_would_change_mind']}")
+
         # Pigskin's AI Scouting Report
         st.markdown("### 🧠 Pigskin's Scouting Report")
         active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
@@ -1647,6 +1742,10 @@ def render_player_profiles_tab():
 
                     Player Metrics:
                     - Position: {player_row['position']}
+                    - Canonical Pigskin ranking: {rank_label}
+                    - Canonical Pigskin tier: {player_row.get('pigskin_tier', 'not materialized')}
+                    - Canonical Pigskin verdict: {player_row.get('pigskin_verdict', 'not materialized')}
+                    - Canonical rank rationale: {player_row.get('rank_rationale', 'not materialized')}
                     - College: {player_row['college_name']}
                     - Draft: Round {player_row['draft_round']}, Pick {player_row['draft_pick']} (Year {player_row['draft_year']})
                     - Experience: {player_row['years_of_experience']} years
@@ -1665,8 +1764,9 @@ def render_player_profiles_tab():
 
                     Scouting report requirements:
                     1. Deliver the report in the Pigskin voice contract (arrogant, analytical, highly critical of vibes-based scouting, uses slang like "cooked", "vibes tax").
-                    2. Write a brief overview (3-4 sentences), making sure to touch on their depth chart status, run/pass opportunity splits, and college prospect profile or rookie metrics where relevant.
-                    3. Output a section for "KEY STRENGTHS" and "KEY WEAKNESSES", listing exactly 2 bullet points for each based on their actual numbers. Do not include markdown headers inside the bulleted text, just write it as standard bold bullets.
+                    2. Do not contradict the canonical Pigskin ranking if it is materialized. Defend it, criticize its risk, or explain what would change it.
+                    3. Write a brief overview (3-4 sentences), making sure to touch on their depth chart status, run/pass opportunity splits, and college prospect profile or rookie metrics where relevant.
+                    4. Output a section for "KEY STRENGTHS" and "KEY WEAKNESSES", listing exactly 2 bullet points for each based on their actual numbers. Do not include markdown headers inside the bulleted text, just write it as standard bold bullets.
                     """
                     res = model.generate_content(prompt)
                     st.session_state[report_cache_key] = res.text
@@ -1821,8 +1921,15 @@ def render_player_profiles_tab():
         df_pos = df.copy()
         if selected_pos != "All":
             df_pos = df_pos[df_pos["position"] == selected_pos]
+        if has_pigskin_rankings:
+            df_pos = df_pos[df_pos["pigskin_rank"].notna()]
 
-        df_pos = df_pos.sort_values(by="avg_grade", ascending=False)
+        df_pos["display_rank_sort"] = pd.to_numeric(df_pos["display_rank"], errors="coerce").fillna(9999)
+        df_pos["display_score_sort"] = pd.to_numeric(df_pos["display_score"], errors="coerce").fillna(0)
+        if selected_pos == "All":
+            df_pos = df_pos.sort_values(by=["position", "display_rank_sort", "display_score_sort"], ascending=[True, True, False])
+        else:
+            df_pos = df_pos.sort_values(by=["display_rank_sort", "display_score_sort"], ascending=[True, False])
 
         if df_pos.empty:
             st.info("No players found matching the selected position.")
@@ -1830,18 +1937,23 @@ def render_player_profiles_tab():
 
         # Format columns for rankings display
         display_ranks = df_pos.copy()
-        display_ranks["avg_grade"] = display_ranks["avg_grade"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
+        display_ranks["display_rank"] = display_ranks["display_rank"].apply(lambda x: f"{int(float(x))}" if not pd.isna(x) else "N/A")
+        display_ranks["display_score"] = display_ranks["display_score"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
+        display_ranks["pigskin_tier"] = display_ranks["pigskin_tier"].fillna("legacy grade")
+        display_ranks["pigskin_verdict"] = display_ranks["pigskin_verdict"].fillna("Pigskin ranking not materialized yet.")
         display_ranks["avg_ppr"] = display_ranks["avg_ppr"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
         display_ranks["contract_apy"] = display_ranks["contract_apy"].apply(format_currency)
         display_ranks["height"] = display_ranks["height"].apply(format_height)
         display_ranks["weight"] = display_ranks["weight"].apply(lambda x: f"{int(float(x))} lbs" if (x and not pd.isna(x)) else "N/A")
 
         display_ranks = display_ranks.rename(columns={
-            "pos_rank": "Rank",
+            "display_rank": "Rank",
             "player_display_name": "Player",
             "team": "Team",
             "college_name": "College",
-            "avg_grade": "Overall Rating",
+            "display_score": "Pigskin Score",
+            "pigskin_tier": "Tier",
+            "pigskin_verdict": "Pigskin Verdict",
             "avg_ppr": "Avg PPR",
             "contract_apy": "Salary APY",
             "height": "Height",
@@ -1849,7 +1961,7 @@ def render_player_profiles_tab():
         })
 
         st.dataframe(
-            display_ranks[["Rank", "Player", "Team", "College", "Overall Rating", "Avg PPR", "Salary APY", "Height", "Weight"]],
+            display_ranks[["Rank", "Player", "Team", "College", "Pigskin Score", "Tier", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
             use_container_width=True,
             hide_index=True
         )
@@ -2390,6 +2502,15 @@ def render_ai_cohost():
       `team` is the historical team for that stat week. `current_team` is the latest known roster team. If `team_changed_since_stats` is true, do not describe the player as currently on `team`.
       *PRIORITIZE THIS TABLE for almost all player analysis.*
 
+    - Table: `fantasy_football_brain.analytics_pigskin_rankings`
+      Description: Canonical active Pigskin rankings used by Player Profiles and chat. This is the source of truth for Pigskin-owned 2026 player ranks.
+      Columns include: `ranking_version`, `generated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `stat_season`, `weekly_rows`, `ranking_score`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
+      If this table says a player is ranked at a position, that is Pigskin's current owned ranking. Do not deny it. Defend it, critique the risk, or explain what would change it.
+
+    - Table: `fantasy_football_brain.analytics_pigskin_rankings_history`
+      Description: Append-only history of Pigskin ranking publications. Use it when the user asks how a ranking changed across versions or asks about an older call.
+      Columns match `analytics_pigskin_rankings`, with one snapshot per `ranking_version`.
+
     - Table: `fantasy_football_brain.analytics_fraud_watch`
       Description: First AI vs Vibes show segment table. Use it to identify fantasy box scores that outran the player's actual role quality.
       Columns include: `season`, `week`, `player_name`, `position`, `team`, `current_team`, `fantasy_points_ppr`, `skill_player_opportunities`, `target_share`, `wopr`, `offense_pct`, `touchdowns`, `touchdown_dependency_rate`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `fraud_score`, `fraud_label`, `fraud_case`, and `what_would_change_mind`.
@@ -2484,7 +2605,10 @@ def render_ai_cohost():
 
     ### The Analytical Filter Protocol ###
     You are mandated to follow a strict query protocol when analyzing players.
-    You MUST default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
+    For any question about rankings, positional rank, projections, draft price, Player Profiles, "why did you rank", "defend your ranking", or 2026 rank disagreements, query `analytics_pigskin_rankings` first.
+    If the active ranking table contains the player, acknowledge the rank directly. Never say "I did not rank him there" when `analytics_pigskin_rankings` says Pigskin did.
+    If the user asks about an older or prior ranking call, query `analytics_pigskin_rankings_history` and compare ranking versions before answering.
+    For non-ranking player analysis, default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
     Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
     Never query `epa_per_play`; that column does not exist. Use `analytics_player_weekly_truth.total_epa` for player analysis, or calculate total weekly EPA from `weekly_metrics.passing_epa + weekly_metrics.rushing_epa + weekly_metrics.receiving_epa`.
     When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
@@ -3707,6 +3831,19 @@ with tab_data_ops:
 
                 if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
                     mark_successful_run("statistics_ingestion")
+
+        st.markdown("#### Publish Pigskin Rankings")
+        st.caption("Materialize the canonical active rankings and append a rankings-history snapshot for Pigskin chat and Player Profiles.")
+        render_last_success("pigskin_rankings")
+        if st.button("🏆 Materialize Pigskin Rankings", type="secondary"):
+            cmd_args = ["-m", "src.materialize", "--only", "pigskin-rankings"]
+
+            exec_env = {}
+            if gcp_key_path:
+                exec_env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(gcp_key_path)
+
+            if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
+                mark_successful_run("pigskin_rankings")
 
         st.markdown("#### Upload Rookie Scouting CSV")
         st.caption("Import advanced player profiling spreadsheets into BigQuery.")
