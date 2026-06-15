@@ -692,6 +692,260 @@ def build_fraud_watch_sql(project_id, dataset_id):
     """
 
 
+def build_pigskin_rankings_sql(project_id, dataset_id):
+    return f"""
+    CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.analytics_pigskin_rankings`
+    PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(2020, 2050, 1))
+    CLUSTER BY position, rank, player_name AS
+    WITH run_context AS (
+        SELECT
+            CURRENT_TIMESTAMP() AS generated_at,
+            EXTRACT(YEAR FROM CURRENT_DATE()) AS season,
+            CONCAT('pigskin-', FORMAT_TIMESTAMP('%Y%m%d%H%M%S', CURRENT_TIMESTAMP())) AS ranking_version
+    ),
+    latest_roster_season AS (
+        SELECT MAX(season) AS max_season
+        FROM `{project_id}.{dataset_id}.player_rosters`
+    ),
+    active_roster_players AS (
+        SELECT
+            r.gsis_id AS player_id,
+            ARRAY_AGG(r.display_name IGNORE NULLS ORDER BY r.season DESC LIMIT 1)[SAFE_OFFSET(0)] AS player_name,
+            ARRAY_AGG(r.position IGNORE NULLS ORDER BY r.season DESC LIMIT 1)[SAFE_OFFSET(0)] AS position,
+            ARRAY_AGG(r.latest_team IGNORE NULLS ORDER BY r.season DESC LIMIT 1)[SAFE_OFFSET(0)] AS current_team,
+            ARRAY_AGG(r.status IGNORE NULLS ORDER BY r.season DESC LIMIT 1)[SAFE_OFFSET(0)] AS roster_status
+        FROM `{project_id}.{dataset_id}.player_rosters` r, latest_roster_season lrs
+        WHERE r.season = lrs.max_season
+            AND r.gsis_id IS NOT NULL
+            AND r.position IN ('QB', 'RB', 'WR', 'TE')
+            AND (r.status IS NULL OR r.status IN ('ACT', 'RES', 'PUP', 'SUS', 'NWT', 'INA'))
+        GROUP BY r.gsis_id
+    ),
+    latest_stat_season AS (
+        SELECT
+            player_id,
+            MAX(season) AS max_stat_season
+        FROM `{project_id}.{dataset_id}.analytics_player_weekly_truth`
+        WHERE season_type = 'REG'
+            AND position IN ('QB', 'RB', 'WR', 'TE')
+        GROUP BY player_id
+    ),
+    player_weekly_agg AS (
+        SELECT
+            t.player_id,
+            ARRAY_AGG(t.player_name IGNORE NULLS ORDER BY t.season DESC, t.week DESC LIMIT 1)[SAFE_OFFSET(0)] AS player_name,
+            ARRAY_AGG(t.position IGNORE NULLS ORDER BY t.season DESC, t.week DESC LIMIT 1)[SAFE_OFFSET(0)] AS position,
+            ARRAY_AGG(t.current_team IGNORE NULLS ORDER BY t.season DESC, t.week DESC LIMIT 1)[SAFE_OFFSET(0)] AS current_team,
+            ARRAY_AGG(t.roster_status IGNORE NULLS ORDER BY t.season DESC, t.week DESC LIMIT 1)[SAFE_OFFSET(0)] AS roster_status,
+            MAX(t.season) AS stat_season,
+            COUNT(DISTINCT CONCAT(CAST(t.season AS STRING), '-', CAST(t.week AS STRING))) AS weekly_rows,
+            AVG(t.fantasy_points_ppr) AS avg_ppr,
+            AVG(t.opportunity_score) AS avg_opportunity,
+            AVG(t.efficiency_score) AS avg_efficiency,
+            AVG(t.role_quality_score) AS avg_role_quality,
+            AVG(t.role_fragility_score) AS avg_role_fragility,
+            AVG(t.analytical_grade) AS avg_grade,
+            AVG(t.wopr) AS avg_wopr,
+            AVG(t.target_share) AS avg_target_share,
+            AVG(t.carry_share) AS avg_carry_share,
+            AVG(t.player_run_opportunity_pct) AS avg_player_run_opportunity_pct,
+            AVG(t.player_pass_opportunity_pct) AS avg_player_pass_opportunity_pct,
+            SUM(t.fantasy_points_ppr) AS total_ppr,
+            SUM(t.targets) AS total_targets,
+            SUM(t.carries) AS total_carries,
+            SUM(t.red_zone_touches) AS total_red_zone_touches,
+            SUM(t.touchdowns) AS total_touchdowns
+        FROM `{project_id}.{dataset_id}.analytics_player_weekly_truth` t
+        JOIN latest_stat_season lss
+            ON t.player_id = lss.player_id
+            AND t.season = lss.max_stat_season
+        WHERE t.season_type = 'REG'
+            AND t.position IN ('QB', 'RB', 'WR', 'TE')
+        GROUP BY t.player_id
+    ),
+    scored AS (
+        SELECT
+            rc.ranking_version,
+            rc.generated_at,
+            rc.season,
+            'preseason' AS ranking_phase,
+            'PPR' AS format,
+            COALESCE(rp.position, agg.position) AS position,
+            rp.player_id,
+            COALESCE(rp.player_name, agg.player_name) AS player_name,
+            COALESCE(rp.current_team, agg.current_team) AS current_team,
+            COALESCE(rp.roster_status, agg.roster_status) AS roster_status,
+            agg.stat_season,
+            COALESCE(agg.weekly_rows, 0) AS weekly_rows,
+            agg.avg_ppr,
+            agg.avg_opportunity,
+            agg.avg_efficiency,
+            agg.avg_role_quality,
+            agg.avg_role_fragility,
+            agg.avg_grade,
+            agg.avg_wopr,
+            agg.avg_target_share,
+            agg.avg_carry_share,
+            agg.avg_player_run_opportunity_pct,
+            agg.avg_player_pass_opportunity_pct,
+            agg.total_ppr,
+            agg.total_targets,
+            agg.total_carries,
+            agg.total_red_zone_touches,
+            agg.total_touchdowns,
+            ROUND(
+                0.55 * COALESCE(agg.avg_grade, 0)
+                + 0.15 * COALESCE(agg.avg_opportunity, 0)
+                + 0.10 * COALESCE(agg.avg_efficiency, 0)
+                + 0.10 * GREATEST(0, 100 - COALESCE(agg.avg_role_fragility, 50))
+                + 0.10 * LEAST(100, COALESCE(agg.avg_ppr, 0) * 4),
+                2
+            ) AS ranking_score,
+            ROUND(
+                LEAST(
+                    100,
+                    GREATEST(
+                        0,
+                        35
+                        + COALESCE(agg.weekly_rows, 0) * 2
+                        + IF(agg.avg_grade IS NOT NULL, 20, 0)
+                        - IF(COALESCE(agg.avg_role_fragility, 0) >= 60, 10, 0)
+                    )
+                ),
+                2
+            ) AS confidence_score
+        FROM active_roster_players rp
+        LEFT JOIN player_weekly_agg agg
+            ON rp.player_id = agg.player_id
+        CROSS JOIN run_context rc
+    ),
+    ranked AS (
+        SELECT
+            *,
+            RANK() OVER(
+                PARTITION BY position
+                ORDER BY ranking_score DESC, COALESCE(avg_ppr, 0) DESC, player_name
+            ) AS rank
+        FROM scored
+        WHERE position IN ('QB', 'RB', 'WR', 'TE')
+    )
+    SELECT
+        ranking_version,
+        generated_at,
+        season,
+        ranking_phase,
+        format,
+        position,
+        rank,
+        CASE
+            WHEN rank <= 3 THEN 'elite'
+            WHEN rank <= 8 THEN 'front-line starter'
+            WHEN rank <= 16 THEN 'starter'
+            WHEN rank <= 30 THEN 'flex or matchup'
+            ELSE 'deep or watchlist'
+        END AS tier,
+        player_id,
+        player_name,
+        current_team,
+        roster_status,
+        stat_season,
+        weekly_rows,
+        ranking_score,
+        avg_ppr,
+        avg_opportunity,
+        avg_efficiency,
+        avg_role_quality,
+        avg_role_fragility,
+        avg_grade,
+        avg_wopr,
+        avg_target_share,
+        avg_carry_share,
+        avg_player_run_opportunity_pct,
+        avg_player_pass_opportunity_pct,
+        total_ppr,
+        total_targets,
+        total_carries,
+        total_red_zone_touches,
+        total_touchdowns,
+        confidence_score,
+        CASE
+            WHEN avg_grade IS NULL THEN 'No recent NFL weekly sample. Pigskin is treating this as a watchlist profile, not a ranked conviction.'
+            WHEN rank <= 3 AND COALESCE(avg_role_fragility, 0) < 40 THEN 'Elite ranking with enough role support to survive the usual offseason noise.'
+            WHEN COALESCE(avg_role_fragility, 0) >= 60 THEN 'Ranked, but fragile. The box score may be wearing a nicer suit than the role deserves.'
+            WHEN COALESCE(avg_ppr, 0) >= 12 AND COALESCE(avg_role_quality, 0) < 45 THEN 'Useful fantasy output, questionable process. That is exactly where the vibes tax starts getting expensive.'
+            WHEN COALESCE(avg_opportunity, 0) >= 60 THEN 'The volume is doing real work. Pigskin can respect that, even if the market gets weird about it.'
+            ELSE 'Ranked off the blended Pigskin score: role, efficiency, opportunity, fragility, and PPR output.'
+        END AS pigskin_verdict,
+        CONCAT(
+            'Pigskin rank #', CAST(rank AS STRING), ' at ', position,
+            ' from a ', CAST(ROUND(ranking_score, 1) AS STRING), ' score. ',
+            'Inputs: grade ', CAST(ROUND(COALESCE(avg_grade, 0), 1) AS STRING),
+            ', opportunity ', CAST(ROUND(COALESCE(avg_opportunity, 0), 1) AS STRING),
+            ', efficiency ', CAST(ROUND(COALESCE(avg_efficiency, 0), 1) AS STRING),
+            ', role fragility ', CAST(ROUND(COALESCE(avg_role_fragility, 0), 1) AS STRING),
+            ', PPR/G ', CAST(ROUND(COALESCE(avg_ppr, 0), 1) AS STRING), '.'
+        ) AS rank_rationale,
+        COALESCE(
+            NULLIF(
+                ARRAY_TO_STRING(
+                    ARRAY(
+                        SELECT flag
+                        FROM UNNEST([
+                            IF(avg_grade IS NULL, 'missing recent weekly sample', NULL),
+                            IF(COALESCE(avg_role_fragility, 0) >= 60, 'fragile role', NULL),
+                            IF(COALESCE(avg_ppr, 0) >= 12 AND COALESCE(avg_role_quality, 0) < 45, 'box-score support outruns role quality', NULL),
+                            IF(position IN ('WR', 'TE') AND COALESCE(avg_wopr, 0) < 0.35 AND rank <= 24, 'target profile is thin for price', NULL),
+                            IF(position = 'RB' AND COALESCE(avg_carry_share, 0) < 0.35 AND rank <= 24, 'backfield share is thin for price', NULL)
+                        ]) AS flag
+                        WHERE flag IS NOT NULL
+                    ),
+                    '; '
+                ),
+                ''
+            ),
+            'no major Pigskin ranking flag'
+        ) AS risk_flags,
+        CASE
+            WHEN position IN ('WR', 'TE') THEN 'A target-share, WOPR, route, or QB-context change can move this rank materially.'
+            WHEN position = 'RB' THEN 'A backfield share, goal-line role, injury, or pass-game usage change can move this rank materially.'
+            WHEN position = 'QB' THEN 'A rushing role, pass-volume, play-caller, protection, or weapons change can move this rank materially.'
+            ELSE 'A meaningful role, team, or health context change can move this rank materially.'
+        END AS what_would_change_mind,
+        'deterministic-pigskin-v1' AS model_name,
+        'pigskin-rankings-v1' AS prompt_version,
+        CONCAT(
+            'stats_through_', COALESCE(CAST(stat_season AS STRING), 'none'),
+            '_generated_', FORMAT_TIMESTAMP('%Y%m%d', generated_at)
+        ) AS data_snapshot_label,
+        TRUE AS is_active
+    FROM ranked
+    """
+
+
+def build_pigskin_rankings_history_create_sql(project_id, dataset_id):
+    return f"""
+    CREATE TABLE IF NOT EXISTS `{project_id}.{dataset_id}.analytics_pigskin_rankings_history`
+    PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(2020, 2050, 1))
+    CLUSTER BY position, ranking_version, rank AS
+    SELECT *
+    FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings`
+    WHERE FALSE
+    """
+
+
+def build_pigskin_rankings_history_insert_sql(project_id, dataset_id):
+    return f"""
+    INSERT INTO `{project_id}.{dataset_id}.analytics_pigskin_rankings_history`
+    SELECT active.*
+    FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings` active
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings_history` history
+        WHERE history.ranking_version = active.ranking_version
+    )
+    """
+
+
 def build_player_qb_weekly_sql(project_id, dataset_id):
     return f"""
     CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.analytics_player_qb_weekly`
@@ -872,6 +1126,30 @@ def materialize_fraud_watch(client, dataset_id="fantasy_football_brain", dry_run
     return job
 
 
+def materialize_pigskin_rankings(client, dataset_id="fantasy_football_brain", dry_run=False):
+    existing_tables = get_existing_tables(client, dataset_id)
+    if "analytics_player_weekly_truth" not in existing_tables:
+        raise RuntimeError(f"Missing required table: {dataset_id}.analytics_player_weekly_truth")
+    if "player_rosters" not in existing_tables:
+        raise RuntimeError(f"Missing required table: {dataset_id}.player_rosters")
+
+    queries = [build_pigskin_rankings_sql(client.project, dataset_id)]
+    if not dry_run:
+        queries.extend([
+            build_pigskin_rankings_history_create_sql(client.project, dataset_id),
+            build_pigskin_rankings_history_insert_sql(client.project, dataset_id),
+        ])
+
+    job_config = bigquery.QueryJobConfig(dry_run=True) if dry_run else None
+    jobs = []
+    for query in queries:
+        job = client.query(query, job_config=job_config)
+        if not dry_run:
+            job.result()
+        jobs.append(job)
+    return jobs
+
+
 def materialize_player_qb_context(client, dataset_id="fantasy_football_brain", dry_run=False):
     existing_tables = get_existing_tables(client, dataset_id)
     if "play_by_play" not in existing_tables:
@@ -910,6 +1188,7 @@ def materialize_all(client, dataset_id="fantasy_football_brain", dry_run=False):
     jobs.extend(materialize_player_qb_context(client, dataset_id=dataset_id, dry_run=dry_run))
     jobs.append(materialize_player_weekly_truth(client, dataset_id=dataset_id, dry_run=dry_run))
     jobs.append(materialize_fraud_watch(client, dataset_id=dataset_id, dry_run=dry_run))
+    jobs.extend(materialize_pigskin_rankings(client, dataset_id=dataset_id, dry_run=dry_run))
     return jobs
 
 
@@ -932,11 +1211,20 @@ def main():
         action="store_true",
         help="Validate the BigQuery query without creating or replacing tables.",
     )
+    parser.add_argument(
+        "--only",
+        choices=["all", "pigskin-rankings"],
+        default="all",
+        help="Materialize all analytics tables or only one targeted table group.",
+    )
     args = parser.parse_args()
 
     client = bigquery.Client(project=args.project)
     print("Materializing AI vs Vibes analytics tables...")
-    jobs = materialize_all(client, dataset_id=args.dataset, dry_run=args.dry_run)
+    if args.only == "pigskin-rankings":
+        jobs = materialize_pigskin_rankings(client, dataset_id=args.dataset, dry_run=args.dry_run)
+    else:
+        jobs = materialize_all(client, dataset_id=args.dataset, dry_run=args.dry_run)
     if args.dry_run:
         total_bytes = sum(job.total_bytes_processed or 0 for job in jobs)
         print(f"Dry run passed. Estimated bytes processed: {total_bytes}")
