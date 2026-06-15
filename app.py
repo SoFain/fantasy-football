@@ -1267,6 +1267,13 @@ def fetch_pigskin_rankings_data():
         tier AS pigskin_tier,
         ranking_score AS pigskin_ranking_score,
         confidence_score AS pigskin_confidence_score,
+        sleeper_team,
+        sleeper_status,
+        sleeper_depth_chart_position,
+        sleeper_depth_chart_order,
+        raw_ranking_score,
+        depth_chart_penalty,
+        ranking_eligibility,
         pigskin_verdict,
         rank_rationale,
         risk_flags,
@@ -1460,6 +1467,13 @@ def render_player_profiles_tab():
         "ranking_model_name": pd.NA,
         "ranking_prompt_version": pd.NA,
         "ranking_data_snapshot": pd.NA,
+        "sleeper_team": pd.NA,
+        "sleeper_status": pd.NA,
+        "sleeper_depth_chart_position": pd.NA,
+        "sleeper_depth_chart_order": pd.NA,
+        "raw_ranking_score": pd.NA,
+        "depth_chart_penalty": pd.NA,
+        "ranking_eligibility": pd.NA,
     }
     for col_name, default_value in ranking_defaults.items():
         if col_name not in df.columns:
@@ -1706,9 +1720,19 @@ def render_player_profiles_tab():
             st.markdown("### 🏆 Canonical Pigskin Ranking")
             confidence_val = player_row.get("pigskin_confidence_score")
             confidence_display = float(confidence_val) if not pd.isna(confidence_val) else 0.0
+            depth_order = player_row.get("sleeper_depth_chart_order")
+            depth_display = f"#{int(float(depth_order))}" if not pd.isna(depth_order) else "unknown"
+            sleeper_team = player_row.get("sleeper_team") if not pd.isna(player_row.get("sleeper_team")) else "unknown"
+            sleeper_status = player_row.get("sleeper_status") if not pd.isna(player_row.get("sleeper_status")) else "unknown"
+            penalty_val = player_row.get("depth_chart_penalty")
+            penalty_display = float(penalty_val) if not pd.isna(penalty_val) else 0.0
             st.markdown(
                 f"**{rank_label}** · **{player_row.get('pigskin_tier', 'tier unknown')}** · "
                 f"confidence **{confidence_display:.1f}/100**"
+            )
+            st.caption(
+                f"Sleeper eligibility: {sleeper_team}, {sleeper_status}, "
+                f"depth {depth_display}, penalty {penalty_display:.1f}"
             )
             if not pd.isna(player_row.get("pigskin_verdict")):
                 st.info(str(player_row["pigskin_verdict"]))
@@ -2504,8 +2528,8 @@ def render_ai_cohost():
 
     - Table: `fantasy_football_brain.analytics_pigskin_rankings`
       Description: Canonical active Pigskin rankings used by Player Profiles and chat. This is the source of truth for Pigskin-owned 2026 player ranks.
-      Columns include: `ranking_version`, `generated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `stat_season`, `weekly_rows`, `ranking_score`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
-      If this table says a player is ranked at a position, that is Pigskin's current owned ranking. Do not deny it. Defend it, critique the risk, or explain what would change it.
+      Columns include: `ranking_version`, `generated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `sleeper_player_id`, `sleeper_team`, `sleeper_active`, `sleeper_status`, `sleeper_depth_chart_position`, `sleeper_depth_chart_order`, `ranking_eligibility`, `raw_ranking_score`, `depth_chart_penalty`, `ranking_score`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
+      If this table says a player is ranked at a position, that is Pigskin's current owned ranking. Do not deny it. Defend it, critique the risk, or explain what would change it. Backup QBs are penalized through `depth_chart_penalty`; do not describe a QB with `sleeper_depth_chart_order > 1` as a normal QB1 projection.
 
     - Table: `fantasy_football_brain.analytics_pigskin_rankings_history`
       Description: Append-only history of Pigskin ranking publications. Use it when the user asks how a ranking changed across versions or asks about an older call.
@@ -2553,6 +2577,9 @@ def render_ai_cohost():
     - Table: `fantasy_football_brain.realtime_player_news`
       Columns: `player_id` (STRING), `gsis_id` (STRING), `player_name` (STRING), `position` (STRING), `team` (STRING), `trend_type` (STRING, 'ADD' or 'DROP'), `trend_count` (INT64).
       Description: Real-time trending Sleeper data for tracking recent add/drop volume.
+    - Table: `fantasy_football_brain.sleeper_players_current`
+      Description: Current Sleeper global NFL player map used for active fantasy eligibility, team, status, and depth chart context. This is not a viewer league roster.
+      Columns include: `snapshot_at`, `sleeper_player_id`, `gsis_id`, `player_name`, `position`, `team`, `active`, `status`, `injury_status`, `fantasy_positions_json`, `depth_chart_position`, `depth_chart_order`, `search_rank`, and `years_exp`.
     - Table: `fantasy_football_brain.sleeper_viewer_team_snapshots`
       Description: On-demand viewer team snapshot from Sleeper for YouTube team reviews.
       Columns include: `snapshot_at`, `league_id`, `season`, `week`, `viewer_roster_id`, `viewer_owner_id`, `viewer_username`, `viewer_display_name`, `viewer_team_name`, `matchup_id`, `points`, `starters_json`, and `players_json`.
@@ -3688,8 +3715,8 @@ with tab_data_ops:
         "Network-backed refreshes that write narrow context tables or append fresh market/news signals.",
     )
     with st.container(border=True):
-        st.markdown("#### Sleeper News and Trending")
-        st.caption("Refresh real-time player news and trending add/drop vectors.")
+        st.markdown("#### Sleeper Player Status, News, and Trending")
+        st.caption("Refresh the global Sleeper player map plus real-time add/drop vectors used by rankings and context.")
         render_last_success("realtime_news")
         if st.button("🚀 Ingest Realtime Player News", type="secondary"):
             cmd_args = ["-m", "src.ingest_news"]

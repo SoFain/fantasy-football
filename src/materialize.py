@@ -707,7 +707,31 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         SELECT MAX(season) AS max_season
         FROM `{project_id}.{dataset_id}.player_rosters`
     ),
-    active_roster_players AS (
+    sleeper_latest_snapshot AS (
+        SELECT MAX(snapshot_at) AS max_snapshot_at
+        FROM `{project_id}.{dataset_id}.sleeper_players_current`
+    ),
+    sleeper_current AS (
+        SELECT * EXCEPT(rn)
+        FROM (
+            SELECT
+                sp.*,
+                ROW_NUMBER() OVER(
+                    PARTITION BY sp.sleeper_player_id
+                    ORDER BY sp.snapshot_at DESC, COALESCE(sp.search_rank, 999999)
+                ) AS rn
+            FROM `{project_id}.{dataset_id}.sleeper_players_current` sp
+            JOIN sleeper_latest_snapshot sls
+                ON sp.snapshot_at = sls.max_snapshot_at
+            WHERE sp.position IN ('QB', 'RB', 'WR', 'TE')
+                AND sp.active IS TRUE
+                AND sp.team IS NOT NULL
+                AND (sp.status IS NULL OR sp.status IN ('Active', 'ACT'))
+                AND REGEXP_CONTAINS(COALESCE(sp.fantasy_positions_json, ''), CONCAT('"', sp.position, '"'))
+        )
+        WHERE rn = 1
+    ),
+    roster_players AS (
         SELECT
             r.gsis_id AS player_id,
             ARRAY_AGG(r.display_name IGNORE NULLS ORDER BY r.season DESC LIMIT 1)[SAFE_OFFSET(0)] AS player_name,
@@ -720,6 +744,33 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             AND r.position IN ('QB', 'RB', 'WR', 'TE')
             AND (r.status IS NULL OR r.status IN ('ACT', 'RES', 'PUP', 'SUS', 'NWT', 'INA'))
         GROUP BY r.gsis_id
+    ),
+    active_roster_players AS (
+        SELECT
+            COALESCE(rp.player_id, sc.gsis_id, sc.sleeper_player_id) AS player_id,
+            sc.sleeper_player_id,
+            COALESCE(sc.player_name, rp.player_name) AS player_name,
+            sc.position,
+            sc.team AS current_team,
+            rp.roster_status,
+            sc.team AS sleeper_team,
+            sc.active AS sleeper_active,
+            sc.status AS sleeper_status,
+            sc.injury_status AS sleeper_injury_status,
+            sc.depth_chart_position AS sleeper_depth_chart_position,
+            sc.depth_chart_order AS sleeper_depth_chart_order,
+            sc.search_rank AS sleeper_search_rank,
+            'eligible_current_sleeper_player' AS ranking_eligibility
+        FROM sleeper_current sc
+        LEFT JOIN roster_players rp
+            ON (
+                sc.gsis_id IS NOT NULL
+                AND sc.gsis_id = rp.player_id
+            )
+            OR (
+                LOWER(sc.player_name) = LOWER(rp.player_name)
+                AND sc.position = rp.position
+            )
     ),
     latest_stat_season AS (
         SELECT
@@ -763,7 +814,7 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             AND t.position IN ('QB', 'RB', 'WR', 'TE')
         GROUP BY t.player_id
     ),
-    scored AS (
+    base_scored AS (
         SELECT
             rc.ranking_version,
             rc.generated_at,
@@ -772,9 +823,18 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             'PPR' AS format,
             COALESCE(rp.position, agg.position) AS position,
             rp.player_id,
+            rp.sleeper_player_id,
             COALESCE(rp.player_name, agg.player_name) AS player_name,
             COALESCE(rp.current_team, agg.current_team) AS current_team,
             COALESCE(rp.roster_status, agg.roster_status) AS roster_status,
+            rp.sleeper_team,
+            rp.sleeper_active,
+            rp.sleeper_status,
+            rp.sleeper_injury_status,
+            rp.sleeper_depth_chart_position,
+            rp.sleeper_depth_chart_order,
+            rp.sleeper_search_rank,
+            rp.ranking_eligibility,
             agg.stat_season,
             COALESCE(agg.weekly_rows, 0) AS weekly_rows,
             agg.avg_ppr,
@@ -800,7 +860,19 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
                 + 0.10 * GREATEST(0, 100 - COALESCE(agg.avg_role_fragility, 50))
                 + 0.10 * LEAST(100, COALESCE(agg.avg_ppr, 0) * 4),
                 2
-            ) AS ranking_score,
+            ) AS raw_ranking_score,
+            CASE
+                WHEN COALESCE(rp.position, agg.position) = 'QB'
+                    AND COALESCE(rp.sleeper_depth_chart_order, 99) > 1
+                    THEN 18.0
+                WHEN COALESCE(rp.position, agg.position) = 'QB'
+                    AND rp.sleeper_depth_chart_order IS NULL
+                    THEN 10.0
+                WHEN COALESCE(rp.position, agg.position) IN ('RB', 'WR', 'TE')
+                    AND COALESCE(rp.sleeper_depth_chart_order, 99) > 5
+                    THEN 5.0
+                ELSE 0.0
+            END AS depth_chart_penalty,
             ROUND(
                 LEAST(
                     100,
@@ -817,7 +889,17 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         FROM active_roster_players rp
         LEFT JOIN player_weekly_agg agg
             ON rp.player_id = agg.player_id
+            OR (
+                LOWER(rp.player_name) = LOWER(agg.player_name)
+                AND rp.position = agg.position
+            )
         CROSS JOIN run_context rc
+    ),
+    scored AS (
+        SELECT
+            *,
+            ROUND(GREATEST(0, raw_ranking_score - depth_chart_penalty), 2) AS ranking_score
+        FROM base_scored
     ),
     ranked AS (
         SELECT
@@ -838,6 +920,11 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         position,
         rank,
         CASE
+            WHEN position = 'QB' AND COALESCE(sleeper_depth_chart_order, 99) > 1 THEN 'backup or handcuff'
+            WHEN position = 'QB' AND rank <= 3 THEN 'elite QB1'
+            WHEN position = 'QB' AND rank <= 8 THEN 'QB1'
+            WHEN position = 'QB' AND rank <= 18 THEN 'QB2 or streamer'
+            WHEN position = 'QB' THEN 'bench or watchlist'
             WHEN rank <= 3 THEN 'elite'
             WHEN rank <= 8 THEN 'front-line starter'
             WHEN rank <= 16 THEN 'starter'
@@ -848,8 +935,19 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         player_name,
         current_team,
         roster_status,
+        sleeper_player_id,
+        sleeper_team,
+        sleeper_active,
+        sleeper_status,
+        sleeper_injury_status,
+        sleeper_depth_chart_position,
+        sleeper_depth_chart_order,
+        sleeper_search_rank,
+        ranking_eligibility,
         stat_season,
         weekly_rows,
+        raw_ranking_score,
+        depth_chart_penalty,
         ranking_score,
         avg_ppr,
         avg_opportunity,
@@ -870,6 +968,7 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         confidence_score,
         CASE
             WHEN avg_grade IS NULL THEN 'No recent NFL weekly sample. Pigskin is treating this as a watchlist profile, not a ranked conviction.'
+            WHEN position = 'QB' AND COALESCE(sleeper_depth_chart_order, 99) > 1 THEN 'Historical production noted, but Sleeper has him as a backup. Calling that a QB1 projection would be malpractice with a spreadsheet.'
             WHEN rank <= 3 AND COALESCE(avg_role_fragility, 0) < 40 THEN 'Elite ranking with enough role support to survive the usual offseason noise.'
             WHEN COALESCE(avg_role_fragility, 0) >= 60 THEN 'Ranked, but fragile. The box score may be wearing a nicer suit than the role deserves.'
             WHEN COALESCE(avg_ppr, 0) >= 12 AND COALESCE(avg_role_quality, 0) < 45 THEN 'Useful fantasy output, questionable process. That is exactly where the vibes tax starts getting expensive.'
@@ -879,6 +978,10 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         CONCAT(
             'Pigskin rank #', CAST(rank AS STRING), ' at ', position,
             ' from a ', CAST(ROUND(ranking_score, 1) AS STRING), ' score. ',
+            'Raw score ', CAST(ROUND(raw_ranking_score, 1) AS STRING),
+            ', depth-chart penalty ', CAST(ROUND(depth_chart_penalty, 1) AS STRING),
+            ', Sleeper team ', COALESCE(sleeper_team, 'none'),
+            ', Sleeper depth ', COALESCE(CAST(sleeper_depth_chart_order AS STRING), 'unknown'), '. ',
             'Inputs: grade ', CAST(ROUND(COALESCE(avg_grade, 0), 1) AS STRING),
             ', opportunity ', CAST(ROUND(COALESCE(avg_opportunity, 0), 1) AS STRING),
             ', efficiency ', CAST(ROUND(COALESCE(avg_efficiency, 0), 1) AS STRING),
@@ -892,6 +995,8 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
                         SELECT flag
                         FROM UNNEST([
                             IF(avg_grade IS NULL, 'missing recent weekly sample', NULL),
+                            IF(position = 'QB' AND COALESCE(sleeper_depth_chart_order, 99) > 1, 'not current QB1 on own NFL depth chart', NULL),
+                            IF(sleeper_team IS NULL, 'not on a current Sleeper NFL team', NULL),
                             IF(COALESCE(avg_role_fragility, 0) >= 60, 'fragile role', NULL),
                             IF(COALESCE(avg_ppr, 0) >= 12 AND COALESCE(avg_role_quality, 0) < 45, 'box-score support outruns role quality', NULL),
                             IF(position IN ('WR', 'TE') AND COALESCE(avg_wopr, 0) < 0.35 AND rank <= 24, 'target profile is thin for price', NULL),
@@ -911,8 +1016,8 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             WHEN position = 'QB' THEN 'A rushing role, pass-volume, play-caller, protection, or weapons change can move this rank materially.'
             ELSE 'A meaningful role, team, or health context change can move this rank materially.'
         END AS what_would_change_mind,
-        'deterministic-pigskin-v1' AS model_name,
-        'pigskin-rankings-v1' AS prompt_version,
+        'deterministic-pigskin-v2-sleeper-eligible' AS model_name,
+        'pigskin-rankings-v2-sleeper-depth' AS prompt_version,
         CONCAT(
             'stats_through_', COALESCE(CAST(stat_season AS STRING), 'none'),
             '_generated_', FORMAT_TIMESTAMP('%Y%m%d', generated_at)
@@ -933,10 +1038,89 @@ def build_pigskin_rankings_history_create_sql(project_id, dataset_id):
     """
 
 
+def build_pigskin_rankings_history_schema_update_sql(project_id, dataset_id):
+    table_id = f"`{project_id}.{dataset_id}.analytics_pigskin_rankings_history`"
+    new_columns = [
+        ("sleeper_player_id", "STRING"),
+        ("sleeper_team", "STRING"),
+        ("sleeper_active", "BOOLEAN"),
+        ("sleeper_status", "STRING"),
+        ("sleeper_injury_status", "STRING"),
+        ("sleeper_depth_chart_position", "STRING"),
+        ("sleeper_depth_chart_order", "INT64"),
+        ("sleeper_search_rank", "INT64"),
+        ("ranking_eligibility", "STRING"),
+        ("raw_ranking_score", "FLOAT64"),
+        ("depth_chart_penalty", "FLOAT64"),
+    ]
+    return [
+        f"ALTER TABLE {table_id} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+        for column_name, column_type in new_columns
+    ]
+
+
 def build_pigskin_rankings_history_insert_sql(project_id, dataset_id):
+    columns = [
+        "ranking_version",
+        "generated_at",
+        "season",
+        "ranking_phase",
+        "format",
+        "position",
+        "rank",
+        "tier",
+        "player_id",
+        "player_name",
+        "current_team",
+        "roster_status",
+        "sleeper_player_id",
+        "sleeper_team",
+        "sleeper_active",
+        "sleeper_status",
+        "sleeper_injury_status",
+        "sleeper_depth_chart_position",
+        "sleeper_depth_chart_order",
+        "sleeper_search_rank",
+        "ranking_eligibility",
+        "stat_season",
+        "weekly_rows",
+        "raw_ranking_score",
+        "depth_chart_penalty",
+        "ranking_score",
+        "avg_ppr",
+        "avg_opportunity",
+        "avg_efficiency",
+        "avg_role_quality",
+        "avg_role_fragility",
+        "avg_grade",
+        "avg_wopr",
+        "avg_target_share",
+        "avg_carry_share",
+        "avg_player_run_opportunity_pct",
+        "avg_player_pass_opportunity_pct",
+        "total_ppr",
+        "total_targets",
+        "total_carries",
+        "total_red_zone_touches",
+        "total_touchdowns",
+        "confidence_score",
+        "pigskin_verdict",
+        "rank_rationale",
+        "risk_flags",
+        "what_would_change_mind",
+        "model_name",
+        "prompt_version",
+        "data_snapshot_label",
+        "is_active",
+    ]
+    column_csv = ",\n        ".join(columns)
+    active_column_csv = ",\n        ".join(f"active.{column}" for column in columns)
     return f"""
-    INSERT INTO `{project_id}.{dataset_id}.analytics_pigskin_rankings_history`
-    SELECT active.*
+    INSERT INTO `{project_id}.{dataset_id}.analytics_pigskin_rankings_history` (
+        {column_csv}
+    )
+    SELECT
+        {active_column_csv}
     FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings` active
     WHERE NOT EXISTS (
         SELECT 1
@@ -1132,11 +1316,17 @@ def materialize_pigskin_rankings(client, dataset_id="fantasy_football_brain", dr
         raise RuntimeError(f"Missing required table: {dataset_id}.analytics_player_weekly_truth")
     if "player_rosters" not in existing_tables:
         raise RuntimeError(f"Missing required table: {dataset_id}.player_rosters")
+    if "sleeper_players_current" not in existing_tables:
+        raise RuntimeError(
+            f"Missing required table: {dataset_id}.sleeper_players_current. "
+            "Run the Sleeper news/current-player ingest before materializing Pigskin rankings."
+        )
 
     queries = [build_pigskin_rankings_sql(client.project, dataset_id)]
     if not dry_run:
         queries.extend([
             build_pigskin_rankings_history_create_sql(client.project, dataset_id),
+            *build_pigskin_rankings_history_schema_update_sql(client.project, dataset_id),
             build_pigskin_rankings_history_insert_sql(client.project, dataset_id),
         ])
 
