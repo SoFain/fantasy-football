@@ -694,7 +694,7 @@ def build_fraud_watch_sql(project_id, dataset_id):
 
 def build_pigskin_rankings_sql(project_id, dataset_id):
     return f"""
-    CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.analytics_pigskin_rankings`
+    CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.analytics_pigskin_rankings_candidates`
     PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(2020, 2050, 1))
     CLUSTER BY position, rank, player_name AS
     WITH run_context AS (
@@ -793,6 +793,9 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             AVG(t.fantasy_points_ppr) AS avg_ppr,
             AVG(t.opportunity_score) AS avg_opportunity,
             AVG(t.efficiency_score) AS avg_efficiency,
+            AVG(t.total_epa) AS avg_total_epa,
+            SUM(t.total_epa) AS season_total_epa,
+            AVG(t.epa_per_opportunity) AS avg_epa_per_opportunity,
             AVG(t.role_quality_score) AS avg_role_quality,
             AVG(t.role_fragility_score) AS avg_role_fragility,
             AVG(t.analytical_grade) AS avg_grade,
@@ -840,6 +843,9 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             agg.avg_ppr,
             agg.avg_opportunity,
             agg.avg_efficiency,
+            agg.avg_total_epa,
+            agg.season_total_epa,
+            agg.avg_epa_per_opportunity,
             agg.avg_role_quality,
             agg.avg_role_fragility,
             agg.avg_grade,
@@ -952,6 +958,9 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
         avg_ppr,
         avg_opportunity,
         avg_efficiency,
+        avg_total_epa,
+        season_total_epa,
+        avg_epa_per_opportunity,
         avg_role_quality,
         avg_role_fragility,
         avg_grade,
@@ -985,6 +994,7 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             'Inputs: grade ', CAST(ROUND(COALESCE(avg_grade, 0), 1) AS STRING),
             ', opportunity ', CAST(ROUND(COALESCE(avg_opportunity, 0), 1) AS STRING),
             ', efficiency ', CAST(ROUND(COALESCE(avg_efficiency, 0), 1) AS STRING),
+            ', EPA/opportunity ', CAST(ROUND(COALESCE(avg_epa_per_opportunity, 0), 3) AS STRING),
             ', role fragility ', CAST(ROUND(COALESCE(avg_role_fragility, 0), 1) AS STRING),
             ', PPR/G ', CAST(ROUND(COALESCE(avg_ppr, 0), 1) AS STRING), '.'
         ) AS rank_rationale,
@@ -1323,12 +1333,6 @@ def materialize_pigskin_rankings(client, dataset_id="fantasy_football_brain", dr
         )
 
     queries = [build_pigskin_rankings_sql(client.project, dataset_id)]
-    if not dry_run:
-        queries.extend([
-            build_pigskin_rankings_history_create_sql(client.project, dataset_id),
-            *build_pigskin_rankings_history_schema_update_sql(client.project, dataset_id),
-            build_pigskin_rankings_history_insert_sql(client.project, dataset_id),
-        ])
 
     job_config = bigquery.QueryJobConfig(dry_run=True) if dry_run else None
     jobs = []
