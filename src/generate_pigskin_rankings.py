@@ -108,11 +108,18 @@ def build_evidence_lines(df):
                 f"eff={format_num(row.avg_efficiency)}",
                 f"epa_per_opp={format_num(row.avg_epa_per_opportunity, 3)}",
                 f"season_epa={format_num(row.season_total_epa)}",
+                f"season_pass_epa={format_num(row.season_passing_epa)}",
+                f"season_rush_epa={format_num(row.season_rushing_epa)}",
+                f"season_rec_epa={format_num(row.season_receiving_epa)}",
                 f"role_quality={format_num(row.avg_role_quality)}",
                 f"fragility={format_num(row.avg_role_fragility)}",
                 f"wopr={format_num(row.avg_wopr, 3)}",
+                f"wopr_hist={format_num(row.latest_season_wopr, 3)}/{format_num(row.previous_season_wopr, 3)}/{format_num(row.two_years_ago_wopr, 3)}",
                 f"target_share={format_num(row.avg_target_share, 3)}",
+                f"target_share_hist={format_num(row.latest_season_target_share, 3)}/{format_num(row.previous_season_target_share, 3)}",
                 f"carry_share={format_num(row.avg_carry_share, 3)}",
+                f"carry_share_hist={format_num(row.latest_season_carry_share, 3)}/{format_num(row.previous_season_carry_share, 3)}",
+                f"ppr_hist={format_num(row.latest_season_ppr)}/{format_num(row.previous_season_ppr)}",
                 f"risk={row.risk_flags}",
             ])
         )
@@ -134,7 +141,7 @@ You are generating the official 2026 PPR {position} rankings for the show.
 
 This is not a vibes list and not a popularity list. Use the candidate board as evidence, not as an order you must obey.
 The SQL rank is only `candidate_rank`. It is not your final ranking.
-Your job is to adjudicate the board with deeper analytics: opportunity quality, EPA, WOPR or target share, carry share, role quality, role fragility, current Sleeper team, current Sleeper depth chart, and whether the prior fantasy output is sustainable.
+Your job is to adjudicate the board with deeper analytics: opportunity quality, split EPA, WOPR history, target-share history, carry-share history, role quality, role fragility, current Sleeper team, current Sleeper depth chart, and whether the prior fantasy output is sustainable.
 
 Hard rules:
 1. Rank every listed player exactly once.
@@ -145,7 +152,7 @@ Hard rules:
 6. Do not put backup QBs in elite QB1 or QB1 tiers. A player can be talented and still be a fantasy bench stash if the role says bench.
 7. Penalize players with no stable current role, high fragility, bad EPA, or volume that looks like box-score cosplay.
 8. Prefer repeatable role and efficiency over touchdown spikes.
-9. For WR and TE, WOPR and target share matter. For RB, carry share and pass-game role matter. For QB, rushing role, EPA, depth chart, and volume matter.
+9. For WR and TE, WOPR history and target share matter. For RB, carry share history, receiving role, and rushing EPA matter. For QB, passing EPA, rushing EPA, rushing role, depth chart, and volume matter.
 10. Be ruthless, but do not invent facts not present in the evidence.
 
 Allowed tiers for {position}: {tier_contract}.
@@ -287,7 +294,7 @@ def build_final_row(candidate, model_item, ranking_version, model_name):
         model_item.get("what_would_change_mind") or candidate.get("what_would_change_mind") or ""
     )
     row["model_name"] = model_name
-    row["prompt_version"] = "pigskin-rankings-llm-v2"
+    row["prompt_version"] = "pigskin-rankings-llm-v3"
     row["rank_source"] = "llm_pigskin_adjudicated"
     row["adjudicated_at"] = adjudicated_at
     row["data_snapshot_label"] = f"{candidate.get('data_snapshot_label')}_llm"
