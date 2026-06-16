@@ -1,12 +1,12 @@
 # Cloud Run Jobs
 
-This document defines the Cloud Run Job-ready path for long-running warehouse work. The Streamlit Cloud Run service remains the admin/UI surface. These jobs use the same container image unless a later cost or dependency split is justified.
+This document defines the Cloud Run Job path for long-running warehouse work. The Streamlit Cloud Run service remains the admin and control surface. These jobs should use the shared app container image unless a later dependency split is justified.
 
-No Cloud infrastructure is created by this document. The commands below are operator commands.
+No Cloud infrastructure is created by this document.
 
 ## Entry Point
 
-Job runner:
+Local runner:
 
 ```powershell
 .\venv\Scripts\python.exe -m src.job_runner --job-name validate-warehouse --dry-run
@@ -18,25 +18,29 @@ Container command:
 python -m src.job_runner --job-name <job-name> [args]
 ```
 
-The runner writes execution metadata to `fantasy_football_brain.cloud_run_job_runs`.
+The runner writes execution metadata to `fantasy_football_brain.cloud_run_job_runs`. Real BigQuery clients should write new metadata rows with load jobs, not streaming inserts, because the runner updates the same row at job finish time.
 
 ## Supported Jobs
 
-| Job | Wrapped path | Required context |
-| --- | --- | --- |
-| `ingest-nflverse` | `src.pipeline.run_pipeline` | optional `--season` |
-| `ingest-sleeper-news` | `src.ingest_news.load_realtime_news` | none |
-| `ingest-sleeper-league` | `src.ingest_sleeper_league.ingest_sleeper_league` | `--league-id`, `--week` |
-| `ingest-context-events` | `src.ingest_context_events.load_context_events` | optional `--csv` |
-| `ingest-market-values` | `src.fetch_market_values` | optional `--league-type` |
-| `ingest-college-stats` | `src.ingest_college_data` | `--season` |
-| `materialize-analytics` | `src.materialize` plus current mart materializers | optional season/week context |
-| `generate-pigskin-rankings` | `src.generate_pigskin_rankings.generate_rankings` | Gemini secret |
-| `generate-evidence-packets` | `src.segment_packets`, `src.materialize_llm_packets` | optional season/week/model run context |
-| `run-projections` | `src.projection_engine.run_projection` | `--season`, `--week`, `--horizon` |
-| `run-backtests` | `src.backtesting.run_backtest` | `--season-start`, `--season-end`, `--horizon` |
-| `validate-warehouse` | `scripts/run_bigquery_validations.py` | optional `--pattern` |
-| `verify-external-context` | `src.verify_player_context.verify_player_context` | `--player` |
+Code and docs must agree on this allowlist:
+
+| Job | Wrapped path | Required context | Notes |
+| --- | --- | --- | --- |
+| `ingest-nflverse` | `src.pipeline.run_pipeline` | optional `--season` | Mutates warehouse. |
+| `ingest-sleeper-news` | `src.ingest_news.load_realtime_news` | none | External API call. |
+| `ingest-sleeper-league` | `src.ingest_sleeper_league.ingest_sleeper_league` | `--league-id`, `--week` | External API call. |
+| `ingest-context-events` | `src.ingest_context_events.load_context_events` | optional `--csv` | Curated context event import. |
+| `ingest-market-values` | `src.fetch_market_values` | optional `--league-type` | External source, refresh cadence controlled manually at first. |
+| `ingest-college-stats` | `src.ingest_college_data` | `--season` | Prospect and college context. |
+| `materialize-analytics` | `src.materialize` plus mart materializers | optional season/week context | Runs marts and compatibility objects. |
+| `generate-pigskin-rankings` | `src.generate_pigskin_rankings.generate_rankings` | optional position context | Requires Gemini only when not dry-run. |
+| `generate-evidence-packets` | `src.segment_packets`, `src.materialize_llm_packets` | optional season/week/model context | Creates curated evidence packets. |
+| `run-projections` | `src.projection_engine.run_projection` | `--season`, `--week`, `--horizon` | Versioned outputs. |
+| `run-backtests` | `src.backtesting.run_backtest` | `--season-start`, `--season-end`, `--horizon` | Keep windows bounded. |
+| `validate-warehouse` | `scripts/run_bigquery_validations.py` | optional `--pattern` | Prefer narrow validation patterns. |
+| `verify-external-context` | `src.verify_player_context.verify_player_context` | `--player` | Cost and quota controlled. |
+| `generate-content-briefs` | `src.content_briefs` | `--brief-type`, `--season` | Deterministic brief generation. |
+| `grade-claims` | `src.claim_grading.run_claim_grading` | optional claim or season/week context | Claim accountability scoring. |
 
 ## Common Arguments
 
@@ -63,7 +67,7 @@ The runner writes execution metadata to `fantasy_football_brain.cloud_run_job_ru
 --allow-large-backtest
 ```
 
-Additional job-specific arguments include:
+Additional job-specific arguments:
 
 ```text
 --horizon
@@ -81,11 +85,15 @@ Additional job-specific arguments include:
 --position-limit
 --refresh-sleeper
 --write-disposition
+--brief-type
+--claim-id
 ```
 
 ## Project And Dataset Resolution
 
-Project resolution follows the existing repo pattern from `src/load.py`.
+Prefer explicit `--project` and `--dataset` in Cloud Run Job definitions.
+
+Project resolution follows the existing repo pattern:
 
 1. `BQ_PROJECT`
 2. `GCP_PROJECT`
@@ -99,224 +107,137 @@ Dataset resolution:
 3. `DATASET_NAME`
 4. `fantasy_football_brain`
 
-Prefer explicit `--project` and `--dataset` in Cloud Run Job definitions so job metadata is unambiguous.
+## Local Dry-Run Examples
 
-## Local Commands
-
-Validate job wiring without running a validation query:
+Validate job wiring:
 
 ```powershell
 .\venv\Scripts\python.exe -m src.job_runner --job-name validate-warehouse --dry-run --pattern "^096_"
 ```
 
-Preview a backtest entrypoint:
-
-```powershell
-.\venv\Scripts\python.exe -m src.job_runner --job-name run-backtests --season-start 2023 --season-end 2024 --horizon weekly --scoring-profile half_ppr --league-type redraft --roster-format superflex --dry-run
-```
-
-Run projection generation in dry-run mode:
+Preview projections:
 
 ```powershell
 .\venv\Scripts\python.exe -m src.job_runner --job-name run-projections --season 2026 --week 1 --horizon weekly --dry-run --limit 25
 ```
 
-Generate Pigskin rankings in dry-run mode:
+Preview backtests:
 
 ```powershell
-.\venv\Scripts\python.exe -m src.job_runner --job-name generate-pigskin-rankings --dry-run --position-limit 5
+.\venv\Scripts\python.exe -m src.job_runner --job-name run-backtests --season-start 2023 --season-end 2024 --horizon weekly --scoring-profile half_ppr --league-type redraft --roster-format superflex --dry-run
 ```
 
-## Cloud Run Job Commands
-
-Set image variables first:
+Preview content briefs:
 
 ```powershell
-$PROJECT_ID = "fantasy-football-498121"
-$REGION = "us-central1"
-$IMAGE = "us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest"
-$SERVICE_ACCOUNT = "nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com"
+.\venv\Scripts\python.exe -m src.job_runner --job-name generate-content-briefs --brief-type fraud_watch_show --season 2026 --week 1 --dry-run
 ```
 
-Create jobs:
+Preview claim grading:
 
 ```powershell
-gcloud run jobs create ingest-nflverse `
-  --image $IMAGE `
-  --region $REGION `
-  --service-account $SERVICE_ACCOUNT `
-  --set-env-vars BQ_PROJECT=$PROJECT_ID,BQ_DATASET=fantasy_football_brain `
-  --command python `
-  --args "-m,src.job_runner,--job-name,ingest-nflverse"
+.\venv\Scripts\python.exe -m src.job_runner --job-name grade-claims --season 2026 --week 1 --dry-run
 ```
+
+## Deployment Scripts
+
+Dry-run all job deploy commands:
 
 ```powershell
-gcloud run jobs create materialize-analytics `
-  --image $IMAGE `
-  --region $REGION `
-  --service-account $SERVICE_ACCOUNT `
-  --set-env-vars BQ_PROJECT=$PROJECT_ID,BQ_DATASET=fantasy_football_brain `
-  --command python `
-  --args "-m,src.job_runner,--job-name,materialize-analytics"
+.\scripts\deploy_cloud_run_jobs.ps1 --dry-run --project fantasy-football-498121 --region us-central1 --image us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest
 ```
+
+Dry-run one job:
 
 ```powershell
-gcloud run jobs create generate-pigskin-rankings `
-  --image $IMAGE `
-  --region $REGION `
-  --service-account $SERVICE_ACCOUNT `
-  --set-env-vars BQ_PROJECT=$PROJECT_ID,BQ_DATASET=fantasy_football_brain `
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest `
-  --command python `
-  --args "-m,src.job_runner,--job-name,generate-pigskin-rankings"
+.\scripts\deploy_cloud_run_jobs.ps1 --dry-run --job-name validate-warehouse --project fantasy-football-498121 --region us-central1 --image us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest
 ```
 
-```powershell
-gcloud run jobs create generate-evidence-packets `
-  --image $IMAGE `
-  --region $REGION `
-  --service-account $SERVICE_ACCOUNT `
-  --set-env-vars BQ_PROJECT=$PROJECT_ID,BQ_DATASET=fantasy_football_brain `
-  --command python `
-  --args "-m,src.job_runner,--job-name,generate-evidence-packets"
+Bash equivalent:
+
+```bash
+scripts/deploy_cloud_run_jobs.sh --dry-run --job-name validate-warehouse --project fantasy-football-498121 --region us-central1 --image us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest
 ```
 
-```powershell
-gcloud run jobs create run-projections `
-  --image $IMAGE `
-  --region $REGION `
-  --service-account $SERVICE_ACCOUNT `
-  --set-env-vars BQ_PROJECT=$PROJECT_ID,BQ_DATASET=fantasy_football_brain `
-  --command python `
-  --args "-m,src.job_runner,--job-name,run-projections"
-```
+The scripts:
 
-```powershell
-gcloud run jobs create run-backtests `
-  --image $IMAGE `
-  --region $REGION `
-  --service-account $SERVICE_ACCOUNT `
-  --set-env-vars BQ_PROJECT=$PROJECT_ID,BQ_DATASET=fantasy_football_brain `
-  --command python `
-  --args "-m,src.job_runner,--job-name,run-backtests"
-```
+- Support `--dry-run`.
+- Support `--project`, `--region`, `--image`, `--service-account`, `--job-name`, and `--dataset`.
+- Print commands before execution.
+- Do not run jobs after deploy unless `--run-after-deploy` is explicitly passed.
+- Do not embed secrets.
 
-```powershell
-gcloud run jobs create validate-warehouse `
-  --image $IMAGE `
-  --region $REGION `
-  --service-account $SERVICE_ACCOUNT `
-  --set-env-vars BQ_PROJECT=$PROJECT_ID,BQ_DATASET=fantasy_football_brain `
-  --command python `
-  --args "-m,src.job_runner,--job-name,validate-warehouse"
-```
+## Streamlit Trigger Path
 
-Execute a job with overrides:
+`src/cloud_run_jobs.py` powers the default-off Data Ops control surface.
 
-```powershell
-gcloud run jobs execute run-projections `
-  --region $REGION `
-  --args "-m,src.job_runner,--job-name,run-projections,--season,2026,--week,1,--horizon,weekly"
-```
+Live trigger requirements:
 
-```powershell
-gcloud run jobs execute run-backtests `
-  --region $REGION `
-  --args "-m,src.job_runner,--job-name,run-backtests,--season-start,2023,--season-end,2024,--horizon,weekly,--scoring-profile,half_ppr,--league-type,redraft,--roster-format,superflex"
-```
+- `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`
+- `CLOUD_RUN_JOBS_ENABLED=true`
+- `DATA_OPS_ALLOW_JOB_TRIGGER=true`
+- User confirmation checkbox checked
+- `gcloud` available in the runtime path
 
-```powershell
-gcloud run jobs execute run-backtests `
-  --region $REGION `
-  --args "-m,src.job_runner,--job-name,run-backtests,--season-start,2024,--season-end,2024,--horizon,weekly,--scoring-profile,ppr,--market-source-id,manual_ecr"
-```
+Dry-run previews do not require live credentials or `gcloud`.
 
-## IAM Expectations
+If `gcloud` is missing for a live trigger, the helper returns a clear error and keeps dry-run previews available.
 
-The job service account needs:
+## Metadata And Status
 
-- Project: `roles/bigquery.jobUser`
-- Dataset `fantasy_football_brain`: `roles/bigquery.dataEditor`
-- Secret access for required secrets such as `GEMINI_API_KEY`
+Actual trigger attempts record sanitized metadata in `cloud_run_job_runs`.
 
-Read-only operators who only inspect pending migrations or validations need:
+Metadata includes:
 
-- Project: `roles/bigquery.jobUser`
-- Dataset: `roles/bigquery.dataViewer`
+- job name
+- Cloud Run job name
+- trigger status
+- sanitized args
+- command preview
+- project and dataset
+- error message when trigger startup fails
 
-## Secret Manager Expectations
+Secrets and sensitive env names are redacted or refused.
 
-Secrets should be provided by Cloud Run secret bindings or environment variables.
+Metadata write behavior:
 
-Current required secret for LLM ranking generation:
+- `src.job_runner.start_job_run()` uses `load_table_from_json()` when the real BigQuery client supports it.
+- `src.cloud_run_jobs.record_cloud_run_job_trigger()` uses `load_table_from_json()` when the real BigQuery client supports it.
+- Test doubles without load-job support still use `insert_rows_json`.
+- Avoid streaming inserts for rows that need immediate status updates because BigQuery can reject `UPDATE` statements while rows are still in the streaming buffer.
 
-- `GEMINI_API_KEY`
+## IAM And Secrets
 
-Future external adapters should follow the same pattern.
+See:
+
+- [IAM Hardening Plan](iam-hardening-plan.md)
+- [Secret Manager Plan](secret-manager-plan.md)
+
+Runtime identities should have the minimum BigQuery, Secret Manager, and Cloud Run permissions needed for their job class. Deploy identities can have Cloud Run developer permissions. Runtime identities should not.
 
 ## Failure Behavior
 
 The runner:
 
-- Inserts a `running` row before dispatch.
-- Marks `success` with result metadata when the wrapped job completes.
-- Marks `failed` with the original error message when the wrapped job raises.
+- Rejects unknown job names.
+- Rejects unsupported args.
+- Records failed status with `error_message`.
+- Preserves the original exception when metadata updates fail.
 - Exits nonzero on failure.
-- Does not silently swallow exceptions.
+- Does not hide retries from logs.
 
-If failure metadata cannot be written, the runner logs that secondary metadata problem and preserves the original job exception.
+## Validation
 
-## Retry Strategy
+Run:
 
-Use Cloud Run Job retry settings only for idempotent jobs or jobs that safely overwrite by version.
-
-Recommended starting point:
-
-- Ingestion: low retry count, explicit inspection after repeated failure.
-- Materialization: one retry if queries are idempotent.
-- Ranking generation: manual retry unless the failure is clearly transient.
-- External verification: strict quota guardrails and low retry count.
-- Validation: one retry is acceptable.
-
-## Cost Controls
-
-- Prefer `--dry-run` during setup.
-- Use `--limit` for projections, rankings, and packet generation tests.
-- Use validation `--pattern` when checking a narrow area.
-- Keep external verification behind explicit player/query inputs.
-- Keep scheduled jobs conservative until warehouse freshness and row counts are visible.
-- Store only metadata in `cloud_run_job_runs`; put large logs or artifacts in Cloud Storage if needed.
-
-## Streamlit Data Ops Compatibility
-
-Do not remove current Streamlit subprocess buttons yet.
-
-Streamlit now has a default-off Cloud Run Jobs preview and trigger panel in Data Ops.
-
-Feature flags:
-
-```text
-USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=false
-CLOUD_RUN_JOBS_ENABLED=true
-DATA_OPS_ALLOW_JOB_TRIGGER=false
+```powershell
+.\venv\Scripts\python.exe -m unittest tests.test_cloud_run_jobs
+.\venv\Scripts\python.exe -m unittest tests.test_job_runner
+.\venv\Scripts\python.exe scripts\check_deployment_safety.py
 ```
 
-Optional configuration:
+## Phase 14.7 Validate Warehouse Gate
 
-```text
-CLOUD_RUN_REGION=us-central1
-CLOUD_RUN_PROJECT=fantasy-football-498121
-CLOUD_RUN_JOB_SERVICE_ACCOUNT=<job-service-account>
-```
+Phase 14.7 produced a dry-run deployment preview for only `validate-warehouse`. Live deployment was not run because `ALLOW_VALIDATE_WAREHOUSE_CLOUD_RUN_TEST=true` was not set and `gcloud` was not installed locally.
 
-Behavior:
-
-- With the default flags, Streamlit shows configured jobs and dry-run previews only.
-- Actual triggering requires `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true` and `DATA_OPS_ALLOW_JOB_TRIGGER=true`.
-- The user must confirm the trigger in the dashboard before any job is started.
-- Unknown job names and unsupported args are rejected by `src/cloud_run_jobs.py`.
-- Trigger metadata is written to `cloud_run_job_runs`.
-- Secrets are refused as ad hoc environment overrides and are not logged.
-- Local subprocess controls remain available during rollout.
-
-The safe rollout guide lives in [data-ops-cloud-run-jobs-rollout.md](data-ops-cloud-run-jobs-rollout.md).
+See [phase-14-7-cloud-run-validate-warehouse-test.md](validation/phase-14-7-cloud-run-validate-warehouse-test.md).

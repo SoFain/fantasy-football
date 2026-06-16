@@ -4,6 +4,7 @@ import subprocess
 import html
 import logging
 import json
+import re
 import streamlit as st
 
 from src.compat_flags import (
@@ -12,6 +13,9 @@ from src.compat_flags import (
     USE_COMPAT_TRADE_ASSETS,
     USE_COMPAT_TRADE_PLAYER_HISTORY,
     USE_COMPAT_VIEWER_TEAM_CONTEXT,
+    USE_BACKTEST_DASHBOARD,
+    USE_CLAIM_LEDGER_UI,
+    USE_CONTENT_BRIEF_REVIEW_UI,
     compat_flag_enabled,
 )
 from src.cloud_run_jobs import (
@@ -61,6 +65,18 @@ def use_compat_trade_player_history():
 
 def use_compat_viewer_team_context():
     return compat_flag_enabled(USE_COMPAT_VIEWER_TEAM_CONTEXT)
+
+
+def use_backtest_dashboard():
+    return compat_flag_enabled(USE_BACKTEST_DASHBOARD)
+
+
+def use_claim_ledger_ui():
+    return compat_flag_enabled(USE_CLAIM_LEDGER_UI)
+
+
+def use_content_brief_review_ui():
+    return compat_flag_enabled(USE_CONTENT_BRIEF_REVIEW_UI)
 
 
 def use_cloud_run_jobs_for_data_ops():
@@ -758,7 +774,7 @@ def render_cloud_run_jobs_data_ops_panel():
     trigger_disabled = bool(preview_error) or not use_cloud_jobs or not trigger_allowed or not confirmed
     if st.button("Trigger Cloud Run Job", type="primary", disabled=trigger_disabled):
         try:
-            result = trigger_cloud_run_job(selected_job, args_payload, dry_run=False)
+            result = trigger_cloud_run_job(selected_job, args_payload, dry_run=False, confirmed=True)
             st.success(f"Cloud Run Job triggered: {result.get('execution_name') or selected_job}")
         except Exception as ex:
             st.error(f"Cloud Run Job trigger failed: {ex}")
@@ -802,6 +818,874 @@ def render_compat_metadata(df, label):
             metadata_parts.append(f"missing flags: `{flag_values[0][:240]}`")
     if metadata_parts:
         st.caption(f"{label} metadata: " + " | ".join(metadata_parts))
+
+
+def render_backtest_dashboard():
+    from src.backtest_readers import (
+        SORT_OPTIONS,
+        export_backtest_summary_markdown,
+        get_backtest_calibration,
+        get_backtest_leaderboard,
+        get_backtest_player_errors,
+        get_backtest_summary,
+        list_backtest_runs,
+    )
+
+    render_tab_bookmarks([
+        ("Latest Runs", "backtest-latest-runs"),
+        ("Summary", "backtest-summary"),
+        ("Player Errors", "backtest-player-errors"),
+        ("Calibration", "backtest-calibration"),
+        ("Job Preview", "backtest-job-preview"),
+    ])
+    render_data_path_status("Backtest Dashboard", True)
+    st.caption("Feature flag: `USE_BACKTEST_DASHBOARD=true`. This view reads only backtest output tables.")
+
+    render_section_header(
+        "Latest Backtest Runs",
+        "backtest-latest-runs",
+        "Recent backtest ledgers and model-run context.",
+        first=True,
+    )
+    try:
+        runs = list_backtest_runs(limit=50)
+    except Exception as ex:
+        st.warning(f"Backtest runs are unavailable: {ex}")
+        return
+
+    if not runs:
+        st.info("No backtest runs are available yet. Run backtests through the Cloud Run Job path before enabling this dashboard for review.")
+        return
+
+    st.dataframe(runs, hide_index=True, use_container_width=True)
+    run_options = [row.get("backtest_run_id") for row in runs if row.get("backtest_run_id")]
+    if not run_options:
+        st.info("Backtest run rows exist, but none have a usable backtest_run_id.")
+        return
+    selected_run_id = st.selectbox(
+        "Backtest run",
+        options=run_options,
+        format_func=lambda value: _backtest_run_label(value, runs),
+    )
+    selected_run = next((row for row in runs if row.get("backtest_run_id") == selected_run_id), {})
+
+    filter_cols = st.columns(6)
+    with filter_cols[0]:
+        position_value = st.selectbox("Position", ["All", "QB", "RB", "WR", "TE"])
+    with filter_cols[1]:
+        horizon_value = st.selectbox(
+            "Horizon",
+            ["All", "weekly", "ros", "dynasty"],
+            index=_select_index(["All", "weekly", "ros", "dynasty"], selected_run.get("projection_horizon")),
+        )
+    with filter_cols[2]:
+        scoring_value = st.text_input("Scoring", value=str(selected_run.get("scoring_profile_id") or ""))
+    with filter_cols[3]:
+        league_value = st.text_input("League", value=str(selected_run.get("league_type_id") or ""))
+    with filter_cols[4]:
+        roster_value = st.text_input("Roster", value=str(selected_run.get("roster_format_id") or ""))
+    with filter_cols[5]:
+        season_value = st.text_input("Season", value="")
+    week_value = st.text_input("Week", value="")
+
+    position_filter = None if position_value == "All" else position_value
+    horizon_filter = None if horizon_value == "All" else horizon_value
+    scoring_filter = scoring_value.strip() or None
+    league_filter = league_value.strip() or None
+    roster_filter = roster_value.strip() or None
+    season_filter = _optional_int(season_value)
+    week_filter = _optional_int(week_value)
+
+    render_section_header(
+        "Summary",
+        "backtest-summary",
+        "Accuracy, bias, rank error, hit rates, boom and bust precision, and calibration.",
+    )
+    try:
+        summary_rows = get_backtest_summary(
+            backtest_run_id=selected_run_id,
+            scoring_profile_id=scoring_filter,
+            league_type_id=league_filter,
+            roster_format_id=roster_filter,
+            position=position_filter,
+            projection_horizon=horizon_filter,
+            season=season_filter,
+            week=week_filter,
+        )
+        leaderboard_rows = get_backtest_leaderboard(
+            scoring_profile_id=scoring_filter,
+            league_type_id=league_filter,
+            roster_format_id=roster_filter,
+            projection_horizon=horizon_filter,
+            limit=25,
+        )
+    except Exception as ex:
+        st.warning(f"Backtest summary is unavailable: {ex}")
+        summary_rows = []
+        leaderboard_rows = []
+
+    if summary_rows:
+        overall = _backtest_overall_row(summary_rows)
+        metric_cols = st.columns(7)
+        metric_cols[0].metric("Sample", _metric_value(overall.get("player_count")))
+        metric_cols[1].metric("MAE", _metric_value(overall.get("mae")))
+        metric_cols[2].metric("RMSE", _metric_value(overall.get("rmse")))
+        metric_cols[3].metric("Bias", _metric_value(overall.get("mean_bias")))
+        metric_cols[4].metric("Rank Error", _metric_value(overall.get("rank_mae_overall")))
+        metric_cols[5].metric("Top 24 Hit", _percent_value(overall.get("top_24_hit_rate")))
+        metric_cols[6].metric("Calibration", _percent_value(overall.get("range_calibration_rate")))
+        st.dataframe(summary_rows, hide_index=True, use_container_width=True)
+    else:
+        st.info("No summary rows matched the selected filters.")
+
+    if leaderboard_rows:
+        with st.expander("Backtest leaderboard", expanded=False):
+            st.dataframe(leaderboard_rows, hide_index=True, use_container_width=True)
+
+    render_section_header(
+        "Player Errors",
+        "backtest-player-errors",
+        "Largest misses, best hits, and rank misses from player-week output rows.",
+    )
+    sort_by = st.selectbox("Sort player errors by", options=list(SORT_OPTIONS.keys()))
+    player_limit = st.number_input("Player row limit", min_value=1, max_value=500, value=100, step=25)
+    try:
+        player_errors = get_backtest_player_errors(
+            selected_run_id,
+            position=position_filter,
+            limit=int(player_limit),
+            sort_by=sort_by,
+        )
+    except Exception as ex:
+        st.warning(f"Backtest player errors are unavailable: {ex}")
+        player_errors = []
+
+    if player_errors:
+        st.dataframe(player_errors, hide_index=True, use_container_width=True)
+        missing_flags = sorted(
+            {
+                str(row.get("missing_data_flags"))
+                for row in player_errors
+                if row.get("missing_data_flags") not in (None, "", "[]")
+            }
+        )
+        if missing_flags:
+            st.caption(f"Missing-data warnings: `{missing_flags[0][:240]}`")
+    else:
+        st.info("No player error rows matched the selected run and filters.")
+
+    render_section_header(
+        "Calibration",
+        "backtest-calibration",
+        "Projected point buckets compared against actual outcomes.",
+    )
+    try:
+        calibration_rows = get_backtest_calibration(selected_run_id, position=position_filter)
+    except Exception as ex:
+        st.warning(f"Backtest calibration is unavailable: {ex}")
+        calibration_rows = []
+    if calibration_rows:
+        st.dataframe(calibration_rows, hide_index=True, use_container_width=True)
+    else:
+        st.info("No calibration rows are available for this run.")
+
+    st.caption(
+        "Backtest context: "
+        f"`model_run_id={selected_run.get('model_run_id') or 'unknown'}` | "
+        f"`backtest_run_id={selected_run_id}` | "
+        f"`source_freshness_snapshot_id={selected_run.get('source_freshness_snapshot_id') or 'unknown'}`"
+    )
+    if selected_run.get("error_message"):
+        st.warning(f"Run error: {selected_run['error_message']}")
+    if selected_run.get("notes"):
+        st.caption(f"Run notes: `{str(selected_run['notes'])[:500]}`")
+
+    markdown_export = export_backtest_summary_markdown(selected_run_id)
+    st.download_button(
+        "Download markdown summary",
+        data=markdown_export,
+        file_name=f"{selected_run_id}-backtest-summary.md",
+        mime="text/markdown",
+    )
+
+    render_section_header(
+        "Job Preview",
+        "backtest-job-preview",
+        "Dry-run preview for the Cloud Run backtest job. This does not execute a job.",
+    )
+    if use_cloud_run_jobs_for_data_ops():
+        preview_args = {
+            "season-start": selected_run.get("season_start") or 2024,
+            "season-end": selected_run.get("season_end") or selected_run.get("season_start") or 2024,
+            "week-start": selected_run.get("week_start") or 1,
+            "week-end": selected_run.get("week_end") or 18,
+            "horizon": selected_run.get("projection_horizon") or "weekly",
+            "scoring-profile": selected_run.get("scoring_profile_id") or "ppr",
+            "league-type": selected_run.get("league_type_id") or "redraft",
+            "roster-format": selected_run.get("roster_format_id") or "one_qb",
+        }
+        try:
+            preview = trigger_cloud_run_job("run-backtests", preview_args, dry_run=True)
+            st.code(preview["command_preview"], language="powershell")
+        except Exception as ex:
+            st.caption(f"Backtest job preview is unavailable: {ex}")
+    else:
+        st.caption("Cloud Run Job preview is hidden until `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`.")
+
+
+def _backtest_run_label(backtest_run_id, runs):
+    row = next((item for item in runs if item.get("backtest_run_id") == backtest_run_id), {})
+    return (
+        f"{backtest_run_id} | {row.get('status') or 'unknown'} | "
+        f"{row.get('projection_horizon') or 'unknown'} | {row.get('created_at') or ''}"
+    )
+
+
+def _backtest_overall_row(rows):
+    for row in rows:
+        if row.get("position") is None and row.get("season") is None and row.get("week") is None:
+            return row
+    return rows[0]
+
+
+def _metric_value(value):
+    if value in (None, ""):
+        return "n/a"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _percent_value(value):
+    if value in (None, ""):
+        return "n/a"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _optional_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _select_index(options, value):
+    try:
+        return options.index(value)
+    except ValueError:
+        return 0
+
+
+def render_content_brief_review_ui():
+    from src.content_brief_review import (
+        REVIEW_STATUS_VALUES,
+        build_content_brief_generation_preview_command,
+        export_content_brief_markdown,
+        get_content_brief_detail,
+        list_content_brief_runs,
+        list_content_briefs,
+        update_content_brief_review_status,
+    )
+    from src.content_briefs import SUPPORTED_BRIEF_TYPES
+
+    render_tab_bookmarks([
+        ("Brief Runs", "content-brief-runs"),
+        ("Brief List", "content-brief-list"),
+        ("Brief Detail", "content-brief-detail"),
+        ("Brief Items", "content-brief-items"),
+        ("Review Actions", "content-brief-actions"),
+        ("Generation Preview", "content-brief-generation-preview"),
+    ])
+    render_data_path_status("Content Brief Review", True)
+    st.caption("Feature flag: `USE_CONTENT_BRIEF_REVIEW_UI=true`. This view reads only content brief output tables and never calls an LLM.")
+
+    brief_type_options = ["All"] + sorted(SUPPORTED_BRIEF_TYPES)
+    review_status_options = ["All"] + sorted(REVIEW_STATUS_VALUES)
+    run_status_options = ["All", "created", "completed", "failed"]
+
+    render_section_header(
+        "Brief Runs",
+        "content-brief-runs",
+        "Recent deterministic content-brief generation runs and model-run context.",
+        first=True,
+    )
+    run_cols = st.columns(7)
+    with run_cols[0]:
+        run_brief_type = st.selectbox("Run brief type", brief_type_options, key="content_brief_run_type")
+    with run_cols[1]:
+        run_season = st.text_input("Run season", value="", key="content_brief_run_season")
+    with run_cols[2]:
+        run_week = st.text_input("Run week", value="", key="content_brief_run_week")
+    with run_cols[3]:
+        run_scoring = st.text_input("Run scoring", value="", key="content_brief_run_scoring")
+    with run_cols[4]:
+        run_league = st.text_input("Run league", value="", key="content_brief_run_league")
+    with run_cols[5]:
+        run_roster = st.text_input("Run roster", value="", key="content_brief_run_roster")
+    with run_cols[6]:
+        run_status = st.selectbox("Run status", run_status_options, key="content_brief_run_status")
+
+    try:
+        runs = list_content_brief_runs(
+            brief_type=None if run_brief_type == "All" else run_brief_type,
+            season=_optional_int(run_season),
+            week=_optional_int(run_week),
+            scoring_profile_id=run_scoring.strip() or None,
+            league_type_id=run_league.strip() or None,
+            roster_format_id=run_roster.strip() or None,
+            status=None if run_status == "All" else run_status,
+            limit=100,
+        )
+    except Exception as ex:
+        st.warning(f"Content brief runs are unavailable: {ex}")
+        runs = []
+
+    if runs:
+        st.dataframe(runs, hide_index=True, use_container_width=True)
+    else:
+        st.info("No content brief runs matched the selected filters.")
+
+    render_section_header(
+        "Brief List",
+        "content-brief-list",
+        "Draft, reviewed, approved, and archived content briefs ready for human review.",
+    )
+    brief_cols = st.columns(6)
+    with brief_cols[0]:
+        brief_type = st.selectbox("Brief type", brief_type_options, key="content_brief_list_type")
+    with brief_cols[1]:
+        review_status = st.selectbox("Review status", review_status_options, key="content_brief_list_review_status")
+    with brief_cols[2]:
+        brief_season = st.text_input("Brief season", value="", key="content_brief_list_season")
+    with brief_cols[3]:
+        brief_week = st.text_input("Brief week", value="", key="content_brief_list_week")
+    with brief_cols[4]:
+        model_run_id = st.text_input("Model run", value="", key="content_brief_list_model_run")
+    with brief_cols[5]:
+        brief_run_id = st.text_input("Brief run", value="", key="content_brief_list_run")
+
+    try:
+        briefs = list_content_briefs(
+            brief_type=None if brief_type == "All" else brief_type,
+            review_status=None if review_status == "All" else review_status,
+            season=_optional_int(brief_season),
+            week=_optional_int(brief_week),
+            model_run_id=model_run_id.strip() or None,
+            content_brief_run_id=brief_run_id.strip() or None,
+            limit=200,
+        )
+    except Exception as ex:
+        st.warning(f"Content briefs are unavailable: {ex}")
+        briefs = []
+
+    if briefs:
+        list_columns = [
+            "content_brief_id",
+            "title",
+            "brief_type",
+            "season",
+            "week",
+            "token_estimate",
+            "review_status",
+            "source_freshness_json",
+            "missing_data_flags",
+            "model_run_id",
+            "updated_at",
+        ]
+        st.dataframe(
+            [{key: row.get(key) for key in list_columns} for row in briefs],
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.info("No content briefs matched the selected filters.")
+
+    selected_brief_id = st.selectbox(
+        "Selected brief",
+        options=[row.get("content_brief_id") for row in briefs if row.get("content_brief_id")] or [""],
+        format_func=lambda value: _content_brief_label(value, briefs),
+        key="content_brief_selected_id",
+    )
+
+    render_section_header(
+        "Brief Detail",
+        "content-brief-detail",
+        "Review the deterministic brief text, structured JSON, freshness, and missing-data flags.",
+    )
+    detail = {"brief": None, "items": [], "empty": True}
+    if selected_brief_id:
+        try:
+            detail = get_content_brief_detail(selected_brief_id)
+        except Exception as ex:
+            st.warning(f"Content brief detail is unavailable: {ex}")
+
+    brief = detail.get("brief")
+    items = detail.get("items") or []
+    if brief:
+        brief_payload = _content_brief_json(brief.get("brief_json"))
+        ranking_version = brief_payload.get("ranking_version") if isinstance(brief_payload, dict) else None
+        meta_cols = st.columns(5)
+        meta_cols[0].metric("Tokens", _metric_value(brief.get("token_estimate")))
+        meta_cols[1].metric("Review", brief.get("review_status") or "unknown")
+        meta_cols[2].metric("Season", _metric_value(brief.get("season")))
+        meta_cols[3].metric("Week", _metric_value(brief.get("week")))
+        meta_cols[4].metric("Items", len(items))
+        st.caption(
+            "Brief context: "
+            f"`model_run_id={brief.get('model_run_id') or 'unknown'}` | "
+            f"`ranking_version={ranking_version or 'unknown'}` | "
+            f"`content_brief_run_id={brief.get('content_brief_run_id') or 'unknown'}` | "
+            f"`updated_at={brief.get('updated_at') or 'unknown'}`"
+        )
+        st.markdown("#### Brief Text")
+        st.markdown(str(brief.get("brief_text") or "_No brief text available._"))
+        with st.expander("Structured brief JSON", expanded=False):
+            st.json(brief_payload)
+        with st.expander("Freshness and missing-data flags", expanded=False):
+            st.json(
+                {
+                    "source_freshness_json": _content_brief_json(brief.get("source_freshness_json")),
+                    "missing_data_flags": _content_brief_json(brief.get("missing_data_flags"), default=[]),
+                }
+            )
+        prompt_payload = _content_brief_prompt_payload(brief)
+        if prompt_payload:
+            with st.expander("Copy show-writer prompt payload", expanded=False):
+                st.code(json.dumps(prompt_payload, indent=2, sort_keys=True, default=str), language="json")
+    else:
+        st.info("Select a content brief to inspect detail.")
+
+    render_section_header(
+        "Brief Items",
+        "content-brief-items",
+        "Linked players, claims, trades, evidence summaries, counterarguments, snark hooks, confidence, and missing flags.",
+    )
+    if items:
+        item_columns = [
+            "item_order",
+            "item_type",
+            "player_id_internal",
+            "claim_id",
+            "trade_review_id",
+            "packet_id",
+            "title",
+            "claim",
+            "evidence_summary",
+            "counterargument",
+            "snark_hook",
+            "confidence_score",
+            "missing_data_flags",
+        ]
+        st.dataframe(
+            [{key: row.get(key) for key in item_columns} for row in items],
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.info("No content brief items are available for the selected brief.")
+
+    render_section_header(
+        "Review Actions",
+        "content-brief-actions",
+        "Status changes are explicit. Reviewer notes are visible here but not persisted until the table schema supports them.",
+    )
+    if brief:
+        note_value = st.text_area("Reviewer notes", value="", height=90, key="content_brief_reviewer_notes")
+        action_cols = st.columns(5)
+        for index, status_value in enumerate(["draft", "reviewed", "approved", "archived"]):
+            with action_cols[index]:
+                if st.button(f"Mark {status_value}", key=f"content_brief_mark_{status_value}"):
+                    try:
+                        result = update_content_brief_review_status(
+                            selected_brief_id,
+                            status_value,
+                            reviewer_notes=note_value,
+                        )
+                        if result.get("reviewer_notes_ignored"):
+                            st.info("Review status updated. Reviewer notes were not saved because the warehouse schema does not support them yet.")
+                        else:
+                            st.success(f"Review status updated to {status_value}.")
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"Review status update failed: {ex}")
+        with action_cols[4]:
+            try:
+                markdown_export = export_content_brief_markdown(selected_brief_id)
+                st.download_button(
+                    "Export Markdown",
+                    data=markdown_export,
+                    file_name=f"{selected_brief_id}-content-brief.md",
+                    mime="text/markdown",
+                )
+            except Exception as ex:
+                st.caption(f"Markdown export is unavailable: {ex}")
+    else:
+        st.caption("Review actions are enabled after selecting a content brief.")
+
+    render_section_header(
+        "Generation Preview",
+        "content-brief-generation-preview",
+        "Dry-run command for deterministic brief generation. This does not execute generation in Streamlit.",
+    )
+    preview_cols = st.columns(6)
+    with preview_cols[0]:
+        preview_type = st.selectbox("Preview type", sorted(SUPPORTED_BRIEF_TYPES), key="content_brief_preview_type")
+    with preview_cols[1]:
+        preview_season = st.number_input("Preview season", min_value=1999, max_value=2050, value=2026, step=1)
+    with preview_cols[2]:
+        preview_week_text = st.text_input("Preview week", value="", key="content_brief_preview_week")
+    with preview_cols[3]:
+        preview_scoring = st.text_input("Preview scoring", value="ppr", key="content_brief_preview_scoring")
+    with preview_cols[4]:
+        preview_league = st.text_input("Preview league", value="redraft", key="content_brief_preview_league")
+    with preview_cols[5]:
+        preview_roster = st.text_input("Preview roster", value="one_qb", key="content_brief_preview_roster")
+    preview_model_run = st.text_input("Preview model run", value="", key="content_brief_preview_model_run")
+    preview_command = build_content_brief_generation_preview_command(
+        brief_type=preview_type,
+        season=int(preview_season),
+        week=_optional_int(preview_week_text),
+        scoring_profile_id=preview_scoring.strip() or "ppr",
+        league_type_id=preview_league.strip() or "redraft",
+        roster_format_id=preview_roster.strip() or "one_qb",
+        model_run_id=preview_model_run.strip() or None,
+    )
+    st.code(" ".join(preview_command), language="powershell")
+    if use_cloud_run_jobs_for_data_ops():
+        st.caption("Cloud Run Jobs are enabled for Data Ops. Use the Data Ops Cloud Run Jobs panel for any real trigger.")
+    else:
+        st.caption("Cloud Run Job triggering is hidden until `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`.")
+
+
+def _content_brief_label(content_brief_id, briefs):
+    if not content_brief_id:
+        return "No brief selected"
+    row = next((item for item in briefs if item.get("content_brief_id") == content_brief_id), {})
+    return f"{row.get('title') or content_brief_id} | {row.get('review_status') or 'unknown'} | {row.get('updated_at') or ''}"
+
+
+def _content_brief_json(value, default=None):
+    fallback = {} if default is None else default
+    if isinstance(value, (dict, list)):
+        return value
+    if value in (None, ""):
+        return fallback
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _content_brief_prompt_payload(brief):
+    brief_json = _content_brief_json((brief or {}).get("brief_json"))
+    payload = brief_json.get("llm_prompt_payload_json") if isinstance(brief_json, dict) else None
+    if isinstance(payload, str):
+        return _content_brief_json(payload)
+    return payload if isinstance(payload, dict) else None
+
+
+def render_claim_ledger_ui():
+    from src import claim_import, claim_ledger
+    from src.load import get_bigquery_client
+
+    render_tab_bookmarks([
+        ("Sources", "claim-sources"),
+        ("Manual Entry", "manual-claim-entry"),
+        ("CSV Import", "claim-csv-import"),
+        ("Review Board", "claim-review-board"),
+        ("Claim Detail", "claim-detail"),
+    ])
+    render_data_path_status("Claim Ledger", True)
+    st.caption("Feature flag: `USE_CLAIM_LEDGER_UI=true`. This workflow is manual-entry only: no scraping, no URL fetching, no LLM extraction.")
+
+    render_section_header(
+        "Claim Sources",
+        "claim-sources",
+        "Manage manual analyst, show, channel, article, and internal source metadata.",
+        first=True,
+    )
+    source_search = st.text_input("Search sources", value="", key="claim_source_search")
+    active_only = st.checkbox("Active sources only", value=False, key="claim_source_active_only")
+    sources = []
+    try:
+        sources = claim_import.list_claim_sources(search=source_search, active_only=active_only, limit=200)
+        if sources:
+            st.dataframe(sources, hide_index=True, use_container_width=True)
+        else:
+            st.info("No claim sources found yet.")
+    except Exception as ex:
+        st.warning(f"Claim sources are unavailable: {ex}")
+
+    with st.form("claim_source_form"):
+        st.markdown("#### Add or Update Source")
+        source_cols = st.columns(3)
+        with source_cols[0]:
+            source_id = st.text_input("Source ID", placeholder="e.g. analyst_x")
+            source_name = st.text_input("Source Name", placeholder="e.g. Analyst X")
+        with source_cols[1]:
+            source_type = st.selectbox("Source Type", sorted(claim_ledger.ALLOWED_SOURCE_TYPES))
+            person_name = st.text_input("Person Name", placeholder="optional")
+        with source_cols[2]:
+            show_name = st.text_input("Show Name", placeholder="optional")
+            source_active = st.checkbox("Active", value=True)
+        source_url = st.text_input("Source URL", placeholder="metadata only, not fetched")
+        source_notes = st.text_area("Source Notes", height=90)
+        save_source = st.form_submit_button("Save Source")
+    if save_source:
+        try:
+            result = claim_ledger.register_claim_source(
+                source_id=source_id,
+                source_name=source_name,
+                source_type=source_type,
+                person_name=person_name or None,
+                show_name=show_name or None,
+                source_url=source_url or None,
+                notes=source_notes or None,
+                active=source_active,
+            )
+            st.success(f"Source saved: {result['source']['source_id']}")
+        except Exception as ex:
+            st.error(f"Source save failed: {ex}")
+
+    render_section_header(
+        "Manual Claim Entry",
+        "manual-claim-entry",
+        "Create one manual claim with optional players, teams, rank, projection, value, and evaluation window.",
+    )
+    source_options = [row.get("source_id") for row in sources if row.get("source_id")]
+    with st.form("manual_claim_form"):
+        manual_cols = st.columns(3)
+        with manual_cols[0]:
+            selected_source_id = st.selectbox("Source", ["Manual new source"] + source_options)
+            manual_source_name = st.text_input("Source Name", value="" if selected_source_id != "Manual new source" else "")
+            manual_source_type = st.selectbox("Source Type", sorted(claim_ledger.ALLOWED_SOURCE_TYPES), key="manual_claim_source_type")
+        with manual_cols[1]:
+            manual_claim_type = st.selectbox("Claim Type", sorted(claim_ledger.ALLOWED_CLAIM_TYPES))
+            manual_claim_direction = st.selectbox("Claim Direction", [""] + sorted(claim_ledger.ALLOWED_DIRECTIONS))
+            manual_time_horizon = st.selectbox("Time Horizon", sorted(claim_ledger.ALLOWED_HORIZONS))
+        with manual_cols[2]:
+            manual_season = st.number_input("Season", min_value=1999, max_value=2050, value=2026, step=1)
+            manual_week = st.number_input("Week", min_value=0, max_value=18, value=0, step=1, help="Use 0 when the claim is not week-specific.")
+            manual_review_status = st.selectbox("Review Status", sorted(claim_ledger.ALLOWED_REVIEW_STATUSES), index=sorted(claim_ledger.ALLOWED_REVIEW_STATUSES).index("draft"))
+        manual_claim_text = st.text_area("Claim Text", height=120)
+        subject_cols = st.columns(2)
+        with subject_cols[0]:
+            manual_players = st.text_input("Player Subjects", placeholder="semicolon-separated")
+            manual_teams = st.text_input("Team Subjects", placeholder="semicolon-separated")
+        with subject_cols[1]:
+            manual_title = st.text_input("Episode or Video Title")
+            manual_url = st.text_input("Source URL", placeholder="metadata only, not fetched")
+        metric_cols = st.columns(3)
+        with metric_cols[0]:
+            manual_rank = st.text_input("Claimed Rank", placeholder="optional")
+        with metric_cols[1]:
+            manual_projection = st.text_input("Claimed Projection", placeholder="optional")
+        with metric_cols[2]:
+            manual_value = st.text_input("Claimed Value", placeholder="optional")
+        context_cols = st.columns(3)
+        with context_cols[0]:
+            manual_scoring = st.text_input("Scoring Profile", value="ppr")
+        with context_cols[1]:
+            manual_league = st.text_input("League Type", value="redraft")
+        with context_cols[2]:
+            manual_roster = st.text_input("Roster Format", value="one_qb")
+        manual_preview_only = st.checkbox("Preview only", value=True)
+        submit_manual_claim = st.form_submit_button("Create Manual Claim")
+    if submit_manual_claim:
+        try:
+            source_row = next((row for row in sources if row.get("source_id") == selected_source_id), {})
+            final_source_id = selected_source_id if selected_source_id != "Manual new source" else _claim_source_id_from_name(manual_source_name)
+            final_source_name = manual_source_name or source_row.get("source_name") or final_source_id
+            final_source_type = source_row.get("source_type") if selected_source_id != "Manual new source" else manual_source_type
+            final_source_type = final_source_type or "manual"
+            if not manual_preview_only:
+                claim_ledger.register_claim_source(
+                    source_id=final_source_id,
+                    source_name=final_source_name,
+                    source_type=final_source_type,
+                    source_url=manual_url or source_row.get("source_url"),
+                    active=True,
+                )
+            result = claim_ledger.create_fantasy_claim(
+                source_id=final_source_id,
+                source_name=final_source_name,
+                claim_source_type=final_source_type,
+                episode_or_video_title=manual_title or None,
+                source_url=manual_url or None,
+                claim_text=manual_claim_text,
+                claim_type=manual_claim_type,
+                claim_direction=manual_claim_direction or None,
+                time_horizon=manual_time_horizon,
+                season=int(manual_season),
+                week=None if int(manual_week) == 0 else int(manual_week),
+                scoring_profile_id=manual_scoring or None,
+                league_type_id=manual_league or None,
+                roster_format_id=manual_roster or None,
+                players=_claim_split_values(manual_players),
+                teams=_claim_split_values(manual_teams),
+                claimed_rank=_optional_int(manual_rank),
+                claimed_projection=_optional_float(manual_projection),
+                claimed_value=_optional_float(manual_value),
+                review_status=manual_review_status,
+                dry_run=manual_preview_only,
+            )
+            if manual_preview_only:
+                st.info("Manual claim preview generated. Uncheck Preview only to write it.")
+            else:
+                st.success(f"Manual claim created: {result['claim']['claim_id']}")
+            st.json(result)
+        except Exception as ex:
+            st.error(f"Manual claim entry failed: {ex}")
+
+    render_section_header(
+        "CSV Import",
+        "claim-csv-import",
+        "Upload the documented claim CSV, preview validation and player resolution, then write valid draft rows.",
+    )
+    st.caption("URLs in the CSV are stored as metadata only. They are not fetched or scraped.")
+    uploaded_claim_csv = st.file_uploader("Claim CSV", type=["csv"], key="claim_import_csv")
+    if uploaded_claim_csv is not None:
+        try:
+            bq_client = get_bigquery_client()
+            preview_rows = claim_import.build_claim_import_preview(
+                uploaded_claim_csv.getvalue(),
+                client=bq_client,
+            )
+        except Exception as ex:
+            st.error(f"CSV import preview failed: {ex}")
+            preview_rows = []
+        if preview_rows:
+            preview_table = claim_import.preview_rows_for_display(preview_rows)
+            st.dataframe(preview_table, hide_index=True, use_container_width=True)
+            invalid_count = sum(1 for row in preview_rows if not row.get("can_write"))
+            ambiguous_count = sum(1 for row in preview_rows if row.get("player_resolution_status") == "ambiguous")
+            unresolved_count = sum(1 for row in preview_rows if row.get("player_resolution_status") == "unresolved")
+            status_cols = st.columns(4)
+            status_cols[0].metric("Rows", len(preview_rows))
+            status_cols[1].metric("Invalid", invalid_count)
+            status_cols[2].metric("Ambiguous", ambiguous_count)
+            status_cols[3].metric("Unresolved", unresolved_count)
+            if invalid_count:
+                st.download_button(
+                    "Download import errors",
+                    data=claim_import.export_claim_import_errors(preview_rows),
+                    file_name="claim-import-errors.csv",
+                    mime="text/csv",
+                )
+            if st.button("Write Valid Claim Import Rows", type="secondary"):
+                try:
+                    write_result = claim_import.write_claim_import_rows(preview_rows, client=bq_client)
+                    st.success(f"Wrote {write_result['written_count']} claim rows. Skipped {write_result['skipped_count']}.")
+                except Exception as ex:
+                    st.error(f"Claim CSV write failed: {ex}")
+
+    render_section_header(
+        "Claim Review Board",
+        "claim-review-board",
+        "Browse draft, reviewed, ready, graded, and archived claims.",
+    )
+    board_cols = st.columns(4)
+    with board_cols[0]:
+        board_status = st.selectbox("Status", [""] + sorted(claim_ledger.ALLOWED_REVIEW_STATUSES), key="claim_board_status")
+    with board_cols[1]:
+        board_type = st.selectbox("Type", [""] + sorted(claim_ledger.ALLOWED_CLAIM_TYPES), key="claim_board_type")
+    with board_cols[2]:
+        board_season = st.text_input("Season", value="", key="claim_board_season")
+    with board_cols[3]:
+        board_source = st.text_input("Source ID", value="", key="claim_board_source")
+    try:
+        claims = claim_ledger.search_claims(
+            source_id=board_source or None,
+            review_status=board_status or None,
+            claim_type=board_type or None,
+            season=_optional_int(board_season),
+            limit=200,
+        )
+        if claims:
+            st.dataframe(claims, hide_index=True, use_container_width=True)
+        else:
+            st.info("No claims matched the selected filters.")
+    except Exception as ex:
+        claims = []
+        st.warning(f"Claim board is unavailable: {ex}")
+
+    render_section_header(
+        "Claim Detail",
+        "claim-detail",
+        "Inspect one claim, linked players, evaluation windows, and safe status actions.",
+    )
+    claim_options = [row.get("claim_id") for row in claims if row.get("claim_id")]
+    selected_claim_id = st.selectbox("Claim", claim_options) if claim_options else st.text_input("Claim ID", value="")
+    if selected_claim_id:
+        try:
+            detail = claim_import.get_claim_detail(selected_claim_id)
+            if detail["claim"]:
+                st.json(detail["claim"])
+                if detail["players"]:
+                    st.markdown("#### Linked Players")
+                    st.dataframe(detail["players"], hide_index=True, use_container_width=True)
+                if detail["evaluation_windows"]:
+                    st.markdown("#### Evaluation Windows")
+                    st.dataframe(detail["evaluation_windows"], hide_index=True, use_container_width=True)
+                action_cols = st.columns(4)
+                with action_cols[0]:
+                    if st.button("Mark Reviewed"):
+                        _claim_status_action(claim_ledger, selected_claim_id, "reviewed", detail)
+                with action_cols[1]:
+                    if st.button("Mark Ready"):
+                        _claim_status_action(claim_ledger, selected_claim_id, "ready_to_grade", detail)
+                with action_cols[2]:
+                    if st.button("Archive"):
+                        _claim_status_action(claim_ledger, selected_claim_id, "archived", detail)
+                with action_cols[3]:
+                    if st.button("Preview Grading Command"):
+                        st.code(
+                            f".\\venv\\Scripts\\python.exe -m src.claim_grading --claim-id {selected_claim_id} --dry-run",
+                            language="powershell",
+                        )
+            else:
+                st.info("Claim not found.")
+        except Exception as ex:
+            st.warning(f"Claim detail is unavailable: {ex}")
+
+
+def _claim_split_values(value):
+    if value in (None, ""):
+        return []
+    return [part.strip() for part in re.split(r"[;|\n]", str(value)) if part.strip()]
+
+
+def _optional_float(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _claim_source_id_from_name(value):
+    slug = re.sub(r"[^a-z0-9_]+", "_", str(value or "manual_source").strip().lower()).strip("_")
+    return slug or "manual_source"
+
+
+def _claim_status_action(claim_ledger_module, claim_id, status, detail):
+    try:
+        result = claim_ledger_module.update_claim_status(
+            claim_id,
+            status,
+            current_claim=detail["claim"],
+            claim_players=detail.get("players") or [],
+        )
+        st.success(f"Claim status updated to {result['review_status']}")
+    except Exception as ex:
+        st.error(f"Status update failed: {ex}")
 
 
 def _compat_json_value(value):
@@ -3530,8 +4414,12 @@ st.markdown(
 )
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
+backtest_dashboard_enabled = use_backtest_dashboard()
+claim_ledger_ui_enabled = use_claim_ledger_ui()
+content_brief_review_enabled = use_content_brief_review_ui()
+
 # Workflow Tabs
-tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_lab, tab_trade_lab, tab_data_ops = st.tabs([
+tab_labels = [
     "💬 Pigskin Studio",
     "🎙️ Show Prep",
     "👤 Player Profiles",
@@ -3539,7 +4427,24 @@ tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_l
     "🏈 Viewer Team Lab",
     "📊 Trade Lab",
     "🛠️ Data Ops",
-])
+]
+if backtest_dashboard_enabled:
+    tab_labels.append("📈 Backtesting")
+if claim_ledger_ui_enabled:
+    tab_labels.append("🧾 Claim Ledger")
+if content_brief_review_enabled:
+    tab_labels.append("📝 Content Briefs")
+
+tabs = st.tabs(tab_labels)
+tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_lab, tab_trade_lab, tab_data_ops = tabs[:7]
+next_extra_tab = 7
+tab_backtesting = tabs[next_extra_tab] if backtest_dashboard_enabled else None
+if backtest_dashboard_enabled:
+    next_extra_tab += 1
+tab_claim_ledger = tabs[next_extra_tab] if claim_ledger_ui_enabled else None
+if claim_ledger_ui_enabled:
+    next_extra_tab += 1
+tab_content_briefs = tabs[next_extra_tab] if content_brief_review_enabled else None
 
 # Subprocess Execution Logic with Live Streaming
 def run_subprocess_live(args, custom_env=None):
@@ -4257,6 +5162,18 @@ with tab_data_ops:
             except Exception as ex:
                 st.error(f"❌ Failed to parse CSV: {ex}")
 
+if tab_backtesting is not None:
+    with tab_backtesting:
+        render_backtest_dashboard()
+
+if tab_claim_ledger is not None:
+    with tab_claim_ledger:
+        render_claim_ledger_ui()
+
+if tab_content_briefs is not None:
+    with tab_content_briefs:
+        render_content_brief_review_ui()
+
 # --- SHOW PREP ---
 with tab_show_prep:
     st.markdown("### Show Prep")
@@ -4340,7 +5257,7 @@ st.markdown(
     """
     <footer style="margin-top: 3rem; padding: 1.25rem 0 0.5rem; border-top: 1px solid rgba(148, 163, 184, 0.22); text-align: center; font-size: 0.85rem; color: rgba(226, 232, 240, 0.72);">
         <a href="http://sputnikfx.com/" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none;">
-            &copy; 2026 Sputnik Digital
+            &copy; 2026 SputnikFX
         </a>
     </footer>
     """,

@@ -10,6 +10,7 @@ This phase adds:
 - `content_briefs`
 - `content_brief_items`
 - [src/content_briefs.py](../../src/content_briefs.py)
+- [src/content_brief_review.py](../../src/content_brief_review.py) behind `USE_CONTENT_BRIEF_REVIEW_UI`
 - Validation SQL for grains, required JSON keys, size bounds, freshness, and missing flags.
 
 This phase does not:
@@ -19,6 +20,8 @@ This phase does not:
 - Change Pigskin chat.
 - Add direct UI behavior.
 - Apply migrations automatically.
+
+Phase 13.5 adds a default-off Streamlit review UI for reading and approving content briefs. The UI does not generate briefs, call LLMs, publish content, or query raw/source tables.
 
 ## Allowed Inputs
 
@@ -97,25 +100,42 @@ Default item caps:
 Dry-run Fraud Watch:
 
 ```powershell
-python -m src.content_briefs --brief-type fraud_watch_show --season 2025 --week 7 --scoring-profile ppr --dry-run
+.\venv\Scripts\python.exe -m src.content_briefs --brief-type fraud_watch_show --season 2025 --week 7 --scoring-profile ppr --dry-run
 ```
 
 Dry-run full weekly prep:
 
 ```powershell
-python -m src.content_briefs --brief-type full_weekly_show_prep --season 2025 --week 7 --dry-run
+.\venv\Scripts\python.exe -m src.content_briefs --brief-type full_weekly_show_prep --season 2025 --week 7 --dry-run
 ```
 
-On Windows, prefer the repo venv:
+## Phase 14.6 Exercise
+
+On 2026-06-16, the packet tables were empty but `projection_rankings_current` contained 50 weekly projection rows for `2025` week `1`, `ppr`, `redraft`, and `one_qb`.
+
+A deterministic `weekly_streamers_show` brief was generated from those projection rows:
 
 ```powershell
-.\venv\Scripts\python.exe -m src.content_briefs --brief-type fraud_watch_show --season 2025 --week 7 --scoring-profile ppr --dry-run
+.\venv\Scripts\python.exe -m src.content_briefs --brief-type weekly_streamers_show --season 2025 --week 1 --scoring-profile ppr --league-type redraft --roster-format one_qb
 ```
+
+Generated row used for QA:
+
+- `content_brief_id`: `brief-weekly_streamers_show-2025-w1-20260616T131307Z-e7fd38e1`
+- `content_brief_run_id`: `weekly_streamers_show-2025-w1-20260616T131307Z-4b436599`
+- `review_status`: `draft`
+- `item_count`: 8
+- `missing_data_flags`: `[]`
+
+The ranking loader now dedupes ranking rows by internal player ID, with display name, position, and team as the fallback identity tuple.
+
+`save_content_brief()` now uses BigQuery load jobs when the client supports them. This avoids the streaming-buffer problem where a newly inserted brief cannot immediately be marked reviewed, approved, or archived.
+
+See [phase-14-6-content-brief-review-report.md](validation/phase-14-6-content-brief-review-report.md).
 
 ## Future Work
 
 1. Add Cloud Run Job wrappers for scheduled weekly brief generation.
-2. Add Streamlit review screens after the tables are applied.
-3. Add brief approval and archive workflow.
-4. Add writing-AI integration that consumes only `llm_prompt_payload_json`.
-5. Add more source adapters as curated packet tables mature.
+2. Add reviewer notes persistence once the `content_briefs` schema supports it.
+3. Add writing-AI integration that consumes only `llm_prompt_payload_json`.
+4. Add more source adapters as curated packet tables mature.

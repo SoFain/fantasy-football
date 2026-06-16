@@ -35,6 +35,7 @@ SOURCE_TABLE = "market_consensus_sources"
 SNAPSHOT_TABLE = "market_consensus_snapshots"
 PLAYER_VALUES_TABLE = "market_consensus_player_values"
 CURRENT_BASELINE_TABLE = "market_consensus_baseline_current"
+NON_PLAYER_MARKET_POSITIONS = {"PICK", "DRAFT_PICK", "ROOKIE_PICK"}
 
 ALLOWED_SOURCE_TYPES = {
     "adp",
@@ -248,16 +249,28 @@ def resolve_market_players(
     rows: list[dict[str, Any]],
     *,
     identity_rows: list[dict[str, Any]] | None = None,
+    alias_rows: list[dict[str, Any]] | None = None,
+    manual_override_rows: list[dict[str, Any]] | None = None,
     client: Any | None = None,
     dataset_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Attach canonical player IDs using the identity bridge first."""
 
     identity_rows = identity_rows if identity_rows is not None else load_identity_rows(client=client, dataset_id=dataset_id)
-    identity_maps = _build_identity_maps(identity_rows)
+    identity_maps = _build_identity_maps(
+        identity_rows,
+        alias_rows=alias_rows or [],
+        manual_override_rows=manual_override_rows or [],
+    )
     resolved = []
     for row in rows:
         output = dict(row)
+        if _is_non_player_market_asset(output):
+            output["match_method"] = output.get("match_method") or "non_player_asset"
+            _add_missing_flag(output, "non_player_market_asset")
+            _add_missing_flag(output, "player_identity_not_applicable")
+            resolved.append(output)
+            continue
         identity, match_method = _find_identity_match(output, identity_maps)
         if identity:
             output["player_id_internal"] = identity.get("player_id_internal")
@@ -267,11 +280,38 @@ def resolve_market_players(
             output["match_method"] = match_method
             if match_method in {"name_team_position", "name_position"}:
                 _add_missing_flag(output, "identity_name_fallback_match")
+            if match_method.startswith("alias_"):
+                _add_missing_flag(output, "identity_alias_match")
         else:
             output["match_method"] = "unmatched"
             _add_missing_flag(output, "missing_player_id_internal")
         resolved.append(output)
     return resolved
+
+
+def classify_non_player_market_assets(
+    *,
+    client: Any | None = None,
+    dataset_id: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Tag draft-pick market assets so player identity checks do not treat them as unresolved players."""
+
+    client = client or get_bigquery_client()
+    dataset_id = dataset_id or get_bigquery_dataset()
+    table_counts = {}
+    for table_name in (PLAYER_VALUES_TABLE, CURRENT_BASELINE_TABLE):
+        table_counts[table_name] = _count_non_player_assets_needing_flags(client, dataset_id, table_name)
+
+    result = {"dry_run": dry_run, "tables": table_counts}
+    if dry_run:
+        return result
+
+    updated_counts = {}
+    for table_name in (PLAYER_VALUES_TABLE, CURRENT_BASELINE_TABLE):
+        updated_counts[table_name] = _tag_non_player_assets(client, dataset_id, table_name)
+    result["updated"] = updated_counts
+    return result
 
 
 def ingest_market_consensus_csv(
@@ -677,10 +717,18 @@ def _market_comparison_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _build_identity_maps(identity_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_identity_maps(
+    identity_rows: list[dict[str, Any]],
+    *,
+    alias_rows: list[dict[str, Any]],
+    manual_override_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
     maps: dict[str, Any] = {
         "internal": {},
         "source": {},
+        "override": {},
+        "alias_name_team_position": {},
+        "alias_name_position": {},
         "name_team_position": {},
         "name_position": {},
     }
@@ -700,6 +748,26 @@ def _build_identity_maps(identity_rows: list[dict[str, Any]]) -> dict[str, Any]:
             maps["name_team_position"][(name, position, team)] = row
         if name and position:
             maps["name_position"].setdefault((name, position), []).append(row)
+    for row in manual_override_rows:
+        if row.get("active") is False:
+            continue
+        source = str(row.get("source") or "").strip().lower()
+        source_player_id = str(row.get("source_player_id") or "").strip()
+        internal = row.get("player_id_internal")
+        identity = maps["internal"].get(str(internal)) if internal else None
+        if source and source_player_id and identity:
+            maps["override"][(source, source_player_id)] = identity
+    for row in alias_rows:
+        identity = maps["internal"].get(str(row.get("player_id_internal") or ""))
+        if not identity:
+            continue
+        name = _normalize_name(row.get("alias_name") or row.get("source_player_name") or row.get("display_name"))
+        position = _upper_or_none(row.get("position") or identity.get("position"))
+        team = _upper_or_none(row.get("team") or row.get("current_team") or identity.get("current_team"))
+        if name and position and team:
+            maps["alias_name_team_position"][(name, position, team)] = identity
+        if name and position:
+            maps["alias_name_position"].setdefault((name, position), []).append(identity)
     return maps
 
 
@@ -708,11 +776,24 @@ def _find_identity_match(row: dict[str, Any], maps: dict[str, Any]) -> tuple[dic
     if internal and str(internal) in maps["internal"]:
         return maps["internal"][str(internal)], "player_id_internal"
     source_key = row.get("source_player_key")
+    source_id = str(row.get("source_id") or "").strip().lower()
+    if source_id and source_key:
+        identity = maps["override"].get((source_id, str(source_key)))
+        if identity:
+            return identity, "manual_override"
     if source_key and str(source_key) in maps["source"]:
         return maps["source"][str(source_key)], "source_player_key"
     name = _normalize_name(row.get("source_player_name") or row.get("display_name"))
     position = _upper_or_none(row.get("position"))
     team = _upper_or_none(row.get("team"))
+    if name and position and team:
+        identity = maps["alias_name_team_position"].get((name, position, team))
+        if identity:
+            return identity, "alias_name_team_position"
+    if name and position:
+        candidates = maps["alias_name_position"].get((name, position), [])
+        if len(candidates) == 1:
+            return candidates[0], "alias_name_position"
     if name and position and team:
         identity = maps["name_team_position"].get((name, position, team))
         if identity:
@@ -722,6 +803,10 @@ def _find_identity_match(row: dict[str, Any], maps: dict[str, Any]) -> tuple[dic
         if len(candidates) == 1:
             return candidates[0], "name_position"
     return None, "unmatched"
+
+
+def _is_non_player_market_asset(row: dict[str, Any]) -> bool:
+    return _upper_or_none(row.get("position")) in NON_PLAYER_MARKET_POSITIONS
 
 
 def _build_market_index(rows: list[dict[str, Any]]) -> dict[tuple[Any, ...], dict[str, Any]]:
@@ -787,6 +872,57 @@ def _insert_rows(client: Any, dataset_id: str, table_name: str, rows: list[dict[
     errors = client.insert_rows_json(_table_id(client.project, dataset_id, table_name), rows)
     if errors:
         raise RuntimeError(f"Failed to insert {table_name}: {errors}")
+
+
+def _count_non_player_assets_needing_flags(client: Any, dataset_id: str, table_name: str) -> int:
+    sql = f"""
+    SELECT COUNT(*) AS row_count
+    FROM `{_table_id(client.project, dataset_id, table_name)}`
+    WHERE player_id_internal IS NULL
+        AND UPPER(position) IN ({_non_player_position_sql()})
+        AND (
+            missing_data_flags IS NULL
+            OR NOT REGEXP_CONTAINS(missing_data_flags, r'"player_identity_not_applicable"')
+            OR REGEXP_CONTAINS(missing_data_flags, r'"missing_player_id_internal"')
+        )
+    """
+    rows = _query_rows(client, sql, _job_config([]))
+    return int(rows[0]["row_count"]) if rows else 0
+
+
+def _tag_non_player_assets(client: Any, dataset_id: str, table_name: str) -> int:
+    sql = f"""
+    UPDATE `{_table_id(client.project, dataset_id, table_name)}`
+    SET
+        match_method = IF(match_method IS NULL OR match_method = 'unmatched', 'non_player_asset', match_method),
+        missing_data_flags = TO_JSON_STRING(ARRAY(
+            SELECT DISTINCT flag
+            FROM UNNEST(ARRAY_CONCAT(
+                ARRAY(
+                    SELECT existing_flag
+                    FROM UNNEST(IFNULL(JSON_VALUE_ARRAY(missing_data_flags), [])) AS existing_flag
+                    WHERE existing_flag != 'missing_player_id_internal'
+                ),
+                ['non_player_market_asset', 'player_identity_not_applicable']
+            )) AS flag
+            WHERE flag IS NOT NULL
+            ORDER BY flag
+        ))
+    WHERE player_id_internal IS NULL
+        AND UPPER(position) IN ({_non_player_position_sql()})
+        AND (
+            missing_data_flags IS NULL
+            OR NOT REGEXP_CONTAINS(missing_data_flags, r'"player_identity_not_applicable"')
+            OR REGEXP_CONTAINS(missing_data_flags, r'"missing_player_id_internal"')
+        )
+    """
+    job = client.query(sql, job_config=_job_config([]))
+    job.result()
+    return int(job.num_dml_affected_rows or 0)
+
+
+def _non_player_position_sql() -> str:
+    return ", ".join(f"'{position}'" for position in sorted(NON_PLAYER_MARKET_POSITIONS))
 
 
 def _query_rows(client: Any, sql: str, job_config: bigquery.QueryJobConfig) -> list[dict[str, Any]]:
@@ -998,6 +1134,7 @@ def _precision(rows: list[dict[str, Any]], flag: str) -> float | None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manage source-agnostic market and consensus baselines.")
     parser.add_argument("--register-source", action="store_true")
+    parser.add_argument("--classify-non-player-assets", action="store_true")
     parser.add_argument("--source-id")
     parser.add_argument("--source-name")
     parser.add_argument("--source-type", default="manual")
@@ -1019,7 +1156,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    if args.register_source:
+    if args.classify_non_player_assets:
+        result = classify_non_player_market_assets(dry_run=args.dry_run)
+    elif args.register_source:
         _require(args.source_id, "--source-id is required")
         _require(args.source_name, "--source-name is required")
         result = register_market_source(
@@ -1048,7 +1187,7 @@ def main(argv: list[str] | None = None) -> None:
             dry_run=args.dry_run,
         )
     else:
-        raise SystemExit("Use --register-source or --ingest-csv.")
+        raise SystemExit("Use --classify-non-player-assets, --register-source, or --ingest-csv.")
     print(json.dumps(result, sort_keys=True, default=str))
 
 

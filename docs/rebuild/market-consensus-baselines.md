@@ -40,13 +40,13 @@ Not allowed:
 Register a source:
 
 ```powershell
-python -m src.market_consensus --register-source --source-id fantasypros_ecr_manual --source-name "FantasyPros ECR Manual" --source-type ecr --access-method csv --dry-run
+.\venv\Scripts\python.exe -m src.market_consensus --register-source --source-id fantasypros_ecr_manual --source-name "FantasyPros ECR Manual" --source-type ecr --access-method csv --dry-run
 ```
 
 Ingest a CSV:
 
 ```powershell
-python -m src.market_consensus --ingest-csv path/to/file.csv --source-id manual_adp --season 2025 --week 1 --scoring-profile ppr --dry-run
+.\venv\Scripts\python.exe -m src.market_consensus --ingest-csv path/to/file.csv --source-id manual_adp --season 2025 --week 1 --scoring-profile ppr --dry-run
 ```
 
 Common accepted CSV columns include:
@@ -67,12 +67,40 @@ The resolver uses `player_identity_bridge` first.
 Priority:
 
 1. Existing `player_id_internal`.
-2. Exact source IDs such as GSIS, Sleeper, FantasyPros, ESPN, Yahoo, PFR, or nflverse IDs.
-3. Normalized name plus team plus position.
-4. Normalized name plus position when unique.
-5. Retain unknown player with `missing_player_id_internal`.
+2. Non-player market assets such as draft picks are classified with `non_player_market_asset` and `player_identity_not_applicable`.
+3. Manual overrides by trusted source and player key.
+4. Exact source IDs such as GSIS, Sleeper, FantasyPros, ESPN, Yahoo, PFR, or nflverse IDs.
+5. Known aliases.
+6. Normalized name plus team plus position.
+7. Normalized name plus position when unique.
+8. Retain unknown player with `missing_player_id_internal`.
 
 Fallback name matches add `identity_name_fallback_match` to `missing_data_flags`.
+
+The resolver does not fabricate player IDs and does not use unsafe fuzzy auto-matching. Ambiguous rows should stay unresolved until a deterministic alias or manual override is added.
+
+## Phase 14.3 Identity Coverage
+
+Phase 13 reported 64 of 461 market baseline rows with null `player_id_internal`, an overall null rate of `0.13882863340563992`. Phase 14.3 found those rows are all `manual_market_values` draft-pick assets with `position = PICK`, not NFL players.
+
+Current coverage after classification:
+
+- Total market baseline rows: 461.
+- Player rows: 397.
+- Non-player market asset rows: 64.
+- Unresolved player rows: 0.
+- Unresolved non-player asset rows: 64.
+- Player identity missing rate: 0.0.
+- Overall identity null rate: `0.13882863340563992`, expected because draft picks do not receive player IDs.
+
+Classification workflow:
+
+```powershell
+.\venv\Scripts\python.exe -m src.market_consensus --classify-non-player-assets --dry-run
+.\venv\Scripts\python.exe -m src.market_consensus --classify-non-player-assets
+```
+
+Remaining null identities in the market baseline are valid only when rows are clearly non-player assets and carry both `non_player_market_asset` and `player_identity_not_applicable`. True unresolved players should use `player_identity_overrides` or a deterministic alias after review.
 
 ## Backtest Use
 

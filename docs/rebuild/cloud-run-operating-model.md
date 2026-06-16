@@ -38,8 +38,12 @@ Target job categories:
 - `run-backtests`
 - `validate-warehouse`
 - `verify-external-context`
+- `generate-content-briefs`
+- `grade-claims`
 
 Each job should be idempotent where possible, accept explicit project and dataset parameters, write status to BigQuery admin tables, and fail loudly when required inputs are missing.
+
+Warehouse validation jobs should follow [BigQuery Validation Process](bigquery-validation-process.md). The `validate-warehouse` job should call `scripts/run_bigquery_validations.py` with explicit patterns and should not trigger ingestion, materialization, Cloud Run production jobs, or LLM calls.
 
 ## BigQuery Responsibilities
 
@@ -72,6 +76,7 @@ Target scheduled triggers:
 - Pigskin ranking generation on explicit cadence.
 - Evidence packet generation for show prep.
 - Backtests and validation jobs.
+- Claim grading and content brief generation.
 - External verification refreshes with cost caps.
 
 Scheduler should trigger jobs through least-privilege service accounts.
@@ -152,6 +157,8 @@ Use short, action-first names:
 - `run-projections`
 - `run-backtests`
 - `validate-warehouse`
+- `generate-content-briefs`
+- `grade-claims`
 
 Use the same job name in:
 
