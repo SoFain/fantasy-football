@@ -6,6 +6,26 @@ This PR merges the rebuild branch for the AI vs. Meatbags fantasy football intel
 
 This PR does not deploy, apply migrations, trigger Cloud Run Jobs, create Firebase artifacts, scrape, or call LLMs.
 
+## Phase 16 Status
+
+Phase 16 final validation is `GO WITH WARNINGS`.
+
+- PR review readiness: `READY TO OPEN PR`.
+- Staging deploy: `STAGING DEPLOY PASS WITH WARNINGS`.
+- Trade History staging QA: `KEEP IN STAGING`.
+- Live `validate-warehouse` Cloud Run Job test: not authorized and deferred.
+- Real claim data: blocked pending operator-supplied exact source names and exact claim text.
+- Real segment packets: Fraud Watch historical packets were materialized from a bounded 2016 week 17 source slice; Trade Review and Meatbag Accountability remain blocked by missing real inputs.
+- Production readiness: `STAGING ONLY`.
+- Production is not authorized by this PR.
+
+Production defaults remain safe:
+
+- all compatibility flags false
+- all dashboard review flags false
+- Cloud Run Job trigger flags false
+- `USE_COMPAT_TRADE_PLAYER_HISTORY=true` remains staging-only
+
 ## Architecture
 
 The target operating model remains:
