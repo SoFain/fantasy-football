@@ -144,19 +144,25 @@ Preview claim grading:
 Dry-run all job deploy commands:
 
 ```powershell
-.\scripts\deploy_cloud_run_jobs.ps1 --dry-run --project fantasy-football-498121 --region us-central1 --image us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest
+$tag = .\venv\Scripts\python.exe scripts\build_image_tag.py --channel staging
+$image = "us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:$tag"
+.\scripts\deploy_cloud_run_jobs.ps1 --dry-run --project fantasy-football-498121 --region us-central1 --image $image
 ```
 
 Dry-run one job:
 
 ```powershell
-.\scripts\deploy_cloud_run_jobs.ps1 --dry-run --job-name validate-warehouse --project fantasy-football-498121 --region us-central1 --image us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest
+$tag = .\venv\Scripts\python.exe scripts\build_image_tag.py --channel staging
+$image = "us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:$tag"
+.\scripts\deploy_cloud_run_jobs.ps1 --dry-run --job-name validate-warehouse --project fantasy-football-498121 --region us-central1 --image $image
 ```
 
 Bash equivalent:
 
 ```bash
-scripts/deploy_cloud_run_jobs.sh --dry-run --job-name validate-warehouse --project fantasy-football-498121 --region us-central1 --image us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:latest
+TAG="$(./venv/Scripts/python.exe scripts/build_image_tag.py --channel staging)"
+IMAGE="us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app:${TAG}"
+scripts/deploy_cloud_run_jobs.sh --dry-run --job-name validate-warehouse --project fantasy-football-498121 --region us-central1 --image "${IMAGE}"
 ```
 
 The scripts:
