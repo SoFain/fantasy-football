@@ -3,7 +3,34 @@ import sys
 import subprocess
 import html
 import logging
+import json
 import streamlit as st
+
+from src.compat_flags import (
+    USE_COMPAT_PLAYER_PROFILES,
+    USE_COMPAT_SLEEPER_WATCH,
+    USE_COMPAT_TRADE_ASSETS,
+    USE_COMPAT_TRADE_PLAYER_HISTORY,
+    USE_COMPAT_VIEWER_TEAM_CONTEXT,
+    compat_flag_enabled,
+)
+from src.cloud_run_jobs import (
+    DATA_OPS_ALLOW_JOB_TRIGGER,
+    USE_CLOUD_RUN_JOBS_FOR_DATA_OPS,
+    build_job_overrides,
+    cloud_run_jobs_feature_enabled,
+    command_to_string,
+    data_ops_job_trigger_allowed,
+    get_recent_cloud_run_job_runs,
+    list_configured_jobs,
+    should_use_cloud_run_jobs_for_data_ops,
+    trigger_cloud_run_job,
+)
+from src.pigskin_chat_schema import render_pigskin_chat_schema
+from src.pigskin_context_tools import (
+    execute_pigskin_context_tool,
+    get_pigskin_context_tool_declarations,
+)
 
 DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
 BIGQUERY_PROJECT_ID = (
@@ -14,6 +41,30 @@ BIGQUERY_PROJECT_ID = (
 )
 os.environ.setdefault("BQ_PROJECT", BIGQUERY_PROJECT_ID)
 GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+
+
+def use_compat_player_profiles():
+    return compat_flag_enabled(USE_COMPAT_PLAYER_PROFILES)
+
+
+def use_compat_sleeper_watch():
+    return compat_flag_enabled(USE_COMPAT_SLEEPER_WATCH)
+
+
+def use_compat_trade_assets():
+    return compat_flag_enabled(USE_COMPAT_TRADE_ASSETS)
+
+
+def use_compat_trade_player_history():
+    return compat_flag_enabled(USE_COMPAT_TRADE_PLAYER_HISTORY)
+
+
+def use_compat_viewer_team_context():
+    return compat_flag_enabled(USE_COMPAT_VIEWER_TEAM_CONTEXT)
+
+
+def use_cloud_run_jobs_for_data_ops():
+    return should_use_cloud_run_jobs_for_data_ops()
 
 # Set Streamlit Page Configuration
 st.set_page_config(
@@ -498,26 +549,10 @@ def create_gemini_model(api_key, tools=None, system_instruction=None):
     if system_instruction:
         config_kwargs["system_instruction"] = system_instruction
     if tools:
-        config_kwargs["tools"] = [types.Tool(function_declarations=[get_bigquery_tool_declaration()])]
+        config_kwargs["tools"] = [types.Tool(function_declarations=tools)]
         config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(disable=True)
     config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
     return GeminiModel(create_gemini_client(api_key), GEMINI_MODEL_NAME, config)
-
-def get_bigquery_tool_declaration():
-    return {
-        "name": "execute_bigquery_sql",
-        "description": "Executes a BigQuery SQL query against the fantasy_football_brain dataset.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "sql_query": {
-                    "type": "string",
-                    "description": "A BigQuery Standard SQL query. Must explicitly select needed columns, use LIMIT 50, and filter by season/week when possible.",
-                },
-            },
-            "required": ["sql_query"],
-        },
-    }
 
 class GeminiModel:
     def __init__(self, client, model_name, config=None):
@@ -652,6 +687,93 @@ def render_runtime_status(active_tables, total_size_mb, app_version, cloud_run_r
         unsafe_allow_html=True,
     )
 
+
+def render_cloud_run_jobs_data_ops_panel():
+    use_cloud_jobs = use_cloud_run_jobs_for_data_ops()
+    trigger_allowed = data_ops_job_trigger_allowed()
+    cloud_jobs_enabled = cloud_run_jobs_feature_enabled()
+
+    status_cols = st.columns(3)
+    with status_cols[0]:
+        st.metric("Cloud Run path", "Enabled" if use_cloud_jobs else "Disabled")
+    with status_cols[1]:
+        st.metric("Trigger allow flag", "Enabled" if trigger_allowed else "Disabled")
+    with status_cols[2]:
+        st.metric("Configured jobs", len(list_configured_jobs()))
+
+    st.caption(
+        f"`{USE_CLOUD_RUN_JOBS_FOR_DATA_OPS}` is "
+        f"{'true' if use_cloud_jobs else 'false'}; `{DATA_OPS_ALLOW_JOB_TRIGGER}` is "
+        f"{'true' if trigger_allowed else 'false'}."
+    )
+    if not cloud_jobs_enabled:
+        st.info("Cloud Run Job execution is not active. The local subprocess controls below remain the active Data Ops path.")
+    elif not trigger_allowed:
+        st.warning("Cloud Run Job previews are enabled, but triggering is blocked until the explicit allow flag is set.")
+
+    jobs = list_configured_jobs()
+    st.dataframe(
+        [
+            {
+                "job_name": job["job_name"],
+                "required_args": ", ".join(job["required_args"]),
+                "allowed_args": ", ".join(job["allowed_args"]),
+                "description": job["description"],
+            }
+            for job in jobs
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    selected_job = st.selectbox(
+        "Cloud Run Job",
+        options=[job["job_name"] for job in jobs],
+        help="Choose a configured job. Unknown job names are rejected by the helper.",
+    )
+    args_text = st.text_area(
+        "Job args JSON",
+        value="{}",
+        key=f"cloud_run_job_args_{selected_job}",
+        help='Example: {"season": 2026, "week": 1}. Only the selected job allowed args are accepted.',
+    )
+
+    args_payload = {}
+    preview_error = None
+    try:
+        args_payload = json.loads(args_text.strip() or "{}")
+        if not isinstance(args_payload, dict):
+            raise ValueError("Job args JSON must be an object.")
+        build_job_overrides(selected_job, args_payload)
+        st.markdown("#### Dry-run command preview")
+        st.code(command_to_string(trigger_cloud_run_job(selected_job, args_payload, dry_run=True)["command"]), language="bash")
+    except Exception as ex:
+        preview_error = ex
+        st.warning(f"Cloud Run Job preview is unavailable: {ex}")
+
+    confirmed = st.checkbox(
+        "I understand this triggers a Cloud Run Job and may incur Cloud Run, BigQuery, API, or external data costs.",
+        value=False,
+    )
+    trigger_disabled = bool(preview_error) or not use_cloud_jobs or not trigger_allowed or not confirmed
+    if st.button("Trigger Cloud Run Job", type="primary", disabled=trigger_disabled):
+        try:
+            result = trigger_cloud_run_job(selected_job, args_payload, dry_run=False)
+            st.success(f"Cloud Run Job triggered: {result.get('execution_name') or selected_job}")
+        except Exception as ex:
+            st.error(f"Cloud Run Job trigger failed: {ex}")
+
+    with st.expander("Recent Cloud Run Job Runs", expanded=False):
+        try:
+            recent_runs = get_recent_cloud_run_job_runs(limit=25)
+            if recent_runs:
+                st.dataframe(recent_runs, hide_index=True, use_container_width=True)
+            else:
+                st.caption("No Cloud Run Job runs recorded yet.")
+        except Exception as ex:
+            st.caption(f"Recent job status is unavailable: {ex}")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def execute_bq_cached(sql_query: str):
     from google.cloud import bigquery
@@ -659,6 +781,265 @@ def execute_bq_cached(sql_query: str):
     query_job = bq_client.query(sql_query)
     df = query_job.result().to_dataframe()
     return df
+
+
+def render_data_path_status(label, using_compat):
+    mode = "compatibility contract path" if using_compat else "legacy warehouse path"
+    st.caption(f"Data path: {label} is using the {mode}.")
+
+
+def render_compat_metadata(df, label):
+    if df is None or df.empty:
+        return
+    metadata_parts = []
+    if "source_freshness_json" in df.columns:
+        freshness_values = [value for value in df["source_freshness_json"].dropna().astype(str).unique() if value]
+        if freshness_values:
+            metadata_parts.append(f"source freshness: `{freshness_values[0][:240]}`")
+    if "missing_data_flags" in df.columns:
+        flag_values = [value for value in df["missing_data_flags"].dropna().astype(str).unique() if value and value != "[]"]
+        if flag_values:
+            metadata_parts.append(f"missing flags: `{flag_values[0][:240]}`")
+    if metadata_parts:
+        st.caption(f"{label} metadata: " + " | ".join(metadata_parts))
+
+
+def _compat_json_value(value):
+    if value is None:
+        return {}
+    try:
+        if hasattr(value, "item"):
+            value = value.item()
+    except Exception:
+        pass
+    if isinstance(value, str) and not value.strip():
+        return {}
+    if isinstance(value, float) and value != value:
+        return {}
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return {}
+    if isinstance(parsed, str):
+        try:
+            parsed = json.loads(parsed)
+        except Exception:
+            return {}
+    return parsed if isinstance(parsed, (dict, list)) else {}
+
+
+def _compat_first_object(value):
+    parsed = _compat_json_value(value)
+    if isinstance(parsed, list):
+        return parsed[0] if parsed and isinstance(parsed[0], dict) else {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _compat_column(df, column_name, default=None):
+    import pandas as pd
+
+    if column_name in df.columns:
+        return df[column_name]
+    return pd.Series([default] * len(df), index=df.index)
+
+
+def _compat_json_field(df, column_name, field_name, default=None, first_object=False):
+    parser = _compat_first_object if first_object else _compat_json_value
+    return _compat_column(df, column_name).apply(
+        lambda value: parser(value).get(field_name, default)
+    )
+
+
+def normalize_compat_player_profiles_data(df):
+    import pandas as pd
+
+    if df.empty:
+        return df
+    out = pd.DataFrame(index=df.index)
+    player_id = _compat_column(df, "player_id_internal").combine_first(_compat_column(df, "source_player_key"))
+    out["player_id"] = player_id
+    out["player_name"] = _compat_column(df, "display_name")
+    out["player_display_name"] = _compat_column(df, "display_name")
+    out["position"] = _compat_column(df, "position")
+    out["team"] = _compat_column(df, "current_team")
+    out["birth_date"] = _compat_column(df, "birth_date")
+    out["height"] = None
+    out["weight"] = None
+    out["headshot"] = None
+    out["college_name"] = _compat_json_field(df, "college_summary_json", "college_team")
+    out["jersey_number"] = None
+    out["rookie_season"] = _compat_column(df, "rookie_year")
+    out["years_of_experience"] = None
+    out["draft_year"] = None
+    out["draft_round"] = None
+    out["draft_pick"] = None
+    out["draft_team"] = None
+
+    out["avg_ppr"] = _compat_column(df, "fantasy_points_per_game_current_season", 0.0).fillna(0.0)
+    out["total_targets"] = _compat_column(df, "targets_last_3", 0.0).fillna(0.0)
+    out["total_receptions"] = _compat_column(df, "receptions_last_3", 0.0).fillna(0.0)
+    out["total_receiving_yards"] = 0.0
+    out["total_receiving_tds"] = 0.0
+    out["total_carries"] = _compat_column(df, "carries_last_3", 0.0).fillna(0.0)
+    out["total_rushing_yards"] = 0.0
+    out["total_rushing_tds"] = 0.0
+    out["total_pass_attempts"] = 0.0
+    out["total_passing_yards"] = 0.0
+    out["total_passing_tds"] = 0.0
+    out["avg_target_share"] = _compat_column(df, "target_share_last_3", 0.0).fillna(0.0)
+    out["avg_wopr"] = _compat_json_field(df, "role_summary_json", "current_season_wopr", 0.0).fillna(
+        _compat_json_field(df, "role_summary_json", "wopr_last_3", 0.0)
+    )
+    out["avg_epa"] = _compat_json_field(df, "epa_summary_json", "avg_total_epa", 0.0).fillna(0.0)
+    out["avg_snap_share"] = _compat_column(df, "snap_share_last_3", 0.0).fillna(0.0)
+    out["avg_opportunity"] = _compat_json_field(df, "efficiency_summary_json", "avg_opportunity_score", 0.0).fillna(
+        _compat_json_field(df, "role_summary_json", "opportunity_score_last_3", 0.0)
+    )
+    out["avg_efficiency"] = _compat_json_field(df, "efficiency_summary_json", "avg_efficiency_score", 0.0).fillna(0.0)
+    out["avg_role_quality"] = _compat_json_field(df, "role_summary_json", "current_season_role_quality", 0.0).fillna(
+        _compat_json_field(df, "role_summary_json", "role_quality_score_last_3", 0.0)
+    )
+    out["avg_role_fragility"] = _compat_json_field(df, "role_summary_json", "current_season_role_fragility", 0.0).fillna(
+        _compat_json_field(df, "role_summary_json", "role_fragility_score_last_3", 0.0)
+    )
+    out["avg_grade"] = _compat_json_field(df, "efficiency_summary_json", "avg_analytical_grade", 0.0).fillna(0.0)
+    out["avg_carry_share"] = _compat_column(df, "rush_share_last_3", 0.0).fillna(0.0)
+    out["avg_player_run_opportunity_pct"] = _compat_column(df, "rush_share_last_3", 0.0).fillna(0.0)
+    out["avg_player_pass_opportunity_pct"] = _compat_column(df, "target_share_last_3", 0.0).fillna(0.0)
+
+    out["contract_value"] = _compat_json_field(df, "contract_summary_json", "contract_value")
+    out["contract_apy"] = _compat_json_field(df, "contract_summary_json", "contract_apy")
+    out["contract_guaranteed"] = _compat_json_field(df, "contract_summary_json", "contract_guaranteed")
+    out["contract_year_signed"] = _compat_json_field(df, "contract_summary_json", "contract_year_signed")
+    out["depth_position"] = _compat_json_field(df, "depth_chart_summary_json", "depth_position", first_object=True)
+    out["depth_rank"] = _compat_json_field(df, "depth_chart_summary_json", "depth_rank", first_object=True)
+    out["college_team"] = _compat_json_field(df, "college_summary_json", "college_team")
+    out["college_conf"] = _compat_json_field(df, "college_summary_json", "college_conference")
+    out["college_games"] = _compat_json_field(df, "college_summary_json", "college_games")
+    out["college_passing_yards"] = _compat_json_field(df, "college_summary_json", "college_passing_yards")
+    out["college_passing_tds"] = _compat_json_field(df, "college_summary_json", "college_passing_tds")
+    out["college_rushing_yards"] = _compat_json_field(df, "college_summary_json", "college_rushing_yards")
+    out["college_rushing_tds"] = _compat_json_field(df, "college_summary_json", "college_rushing_tds")
+    out["college_receptions"] = _compat_json_field(df, "college_summary_json", "college_receptions")
+    out["college_receiving_yards"] = _compat_json_field(df, "college_summary_json", "college_receiving_yards")
+    out["college_receiving_tds"] = _compat_json_field(df, "college_summary_json", "college_receiving_tds")
+    out["yards_after_contact_per_attempt"] = _compat_json_field(df, "rookie_scouting_summary_json", "yards_after_contact_per_attempt")
+    out["yards_per_route_run"] = _compat_json_field(df, "rookie_scouting_summary_json", "yards_per_route_run")
+    out["college_target_share"] = _compat_json_field(df, "rookie_scouting_summary_json", "college_target_share")
+    out["catch_radius_grade"] = _compat_json_field(df, "rookie_scouting_summary_json", "catch_radius_grade")
+    out["success_rate_vs_man"] = _compat_json_field(df, "rookie_scouting_summary_json", "success_rate_vs_man")
+    out["success_rate_vs_zone"] = _compat_json_field(df, "rookie_scouting_summary_json", "success_rate_vs_zone")
+    out["success_rate_vs_press"] = _compat_json_field(df, "rookie_scouting_summary_json", "success_rate_vs_press")
+    out["avg_separation_inches"] = _compat_json_field(df, "rookie_scouting_summary_json", "avg_separation_inches")
+    out["scouting_source"] = _compat_json_field(df, "rookie_scouting_summary_json", "scouting_source")
+    out["pos_rank"] = _compat_column(df, "pigskin_rank_position").combine_first(_compat_column(df, "position_rank_by_profile"))
+    out["source_freshness_json"] = _compat_column(df, "source_freshness_json")
+    out["missing_data_flags"] = _compat_column(df, "missing_data_flags")
+    return out
+
+
+def fetch_compat_player_profiles_data():
+    import pandas as pd
+    from src.player_profiles import list_player_profiles
+
+    rows = list_player_profiles(limit=5000)
+    if not rows:
+        return pd.DataFrame()
+    return normalize_compat_player_profiles_data(pd.DataFrame(rows))
+
+
+def normalize_compat_sleeper_watch_data(rows):
+    import pandas as pd
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    out = pd.DataFrame(index=df.index)
+    out["player_name"] = _compat_column(df, "display_name")
+    out["position"] = _compat_column(df, "position")
+    out["team"] = _compat_column(df, "team")
+    out["opponent_team"] = _compat_column(df, "opponent")
+    out["roster_pct"] = _compat_column(df, "rostered_rate", 0.0).fillna(0.0)
+    out["rolling_3_week_ppr"] = _compat_column(df, "fantasy_points_last_3", 0.0).fillna(0.0) / 3.0
+    out["snap_share"] = _compat_column(df, "snap_share_last_3", 0.0).fillna(0.0)
+    out["targets_3w"] = _compat_column(df, "targets_last_3", 0.0).fillna(0.0) / 3.0
+    out["carries_3w"] = _compat_column(df, "carries_last_3", 0.0).fillna(0.0) / 3.0
+    out["wopr"] = _compat_column(df, "target_share_last_3", 0.0).fillna(0.0)
+    out["epa"] = _compat_column(df, "expected_vs_actual_signal", 0.0).fillna(0.0)
+    out["opp_def_rank"] = _compat_column(df, "matchup_score", 0.0).fillna(0.0)
+    out["sleeper_score"] = _compat_column(df, "streamer_score", 0.0).fillna(0.0)
+    out["source_freshness_json"] = _compat_column(df, "source_freshness_json")
+    out["missing_data_flags"] = _compat_column(df, "missing_data_flags")
+    return out
+
+
+def fetch_compat_sleeper_watch_candidates_data():
+    from src.sleeper_watch import get_sleeper_watch_candidates
+
+    rows = get_sleeper_watch_candidates(limit=250)
+    return normalize_compat_sleeper_watch_data(rows)
+
+
+def load_compat_trade_assets():
+    import pandas as pd
+    from src.trade_assets import get_trade_assets
+
+    rows = get_trade_assets(limit=250)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    out = pd.DataFrame(index=df.index)
+    out["player_display_name"] = _compat_column(df, "display_name")
+    out["position"] = _compat_column(df, "position")
+    out["team"] = _compat_column(df, "team")
+    out["market_value"] = _compat_column(df, "market_value").combine_first(_compat_column(df, "risk_adjusted_trade_value"))
+    out["overall_rank"] = _compat_column(df, "market_value_rank_overall")
+    out["position_rank"] = _compat_column(df, "market_value_rank_position")
+    out["redraft_value"] = _compat_column(df, "redraft_value_placeholder").combine_first(out["market_value"])
+    out["tier"] = _compat_column(df, "market_tier").combine_first(_compat_column(df, "pigskin_tier"))
+    out["age"] = _compat_column(df, "age")
+    out["source_freshness_json"] = _compat_column(df, "source_freshness_json")
+    out["missing_data_flags"] = _compat_column(df, "missing_data_flags")
+    out["_data_path"] = "compat"
+    return out
+
+
+def query_compat_trade_player_history(name):
+    from src.trade_history import get_trade_player_history
+
+    return get_trade_player_history(player_name=name, limit=10)
+
+
+def get_compat_sleeper_viewer_team_context(console_context):
+    from src.viewer_team_context import get_viewer_team_context
+
+    roster_id = console_context.get("roster_id") or None
+    manager_id = console_context.get("manager_id") or None
+    if not roster_id and not manager_id:
+        return (
+            "Viewer-team compatibility context is unavailable.\n"
+            "Reason: compat_viewer_team_context requires roster_id or manager_id to avoid selecting the wrong team.\n"
+            "Reload the viewer team with a roster ID, or disable USE_COMPAT_VIEWER_TEAM_CONTEXT to use the legacy lookup path."
+        )
+
+    context = get_viewer_team_context(
+        console_context["league_id"],
+        roster_id=roster_id,
+        manager_id=manager_id,
+    )
+    if context.get("unavailable"):
+        return (
+            "Viewer-team compatibility context is unavailable.\n"
+            f"Reason: {context.get('reason', 'unknown')}\n"
+            "No legacy viewer-team context was mixed into this flagged path."
+        )
+    metadata = (
+        f"Source freshness: {context.get('source_freshness_json') or 'unknown'}\n"
+        f"Missing data flags: {context.get('missing_data_flags') or '[]'}"
+    )
+    return f"{context.get('packet_text') or 'Viewer-team packet text is empty.'}\n\n{metadata}"
 
 def repair_generated_sql(sql_query: str) -> str:
     import re
@@ -794,135 +1175,49 @@ def render_sleeper_watch_segment():
     st.markdown(
         "100% data-driven sleepers and streamers ranked by role, recent volume, efficiency, and opponent defensive matchups."
     )
-
-    # Ingestion or data availability check
-    sql_query = f"""
-    WITH latest_week AS (
-        SELECT MAX(season) AS max_season, MAX(week) AS max_week
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth`
-    ),
-    latest_snapshot AS (
-        SELECT MAX(snapshot_at) AS max_snapshot
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_rosters`
-    ),
-    def_points_allowed AS (
-        SELECT
-            m.opponent_team AS def_team,
-            m.position,
-            SUM(m.fantasy_points_ppr) AS total_points,
-            COUNT(DISTINCT CONCAT(m.season, '_', m.week)) AS games_played
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.weekly_metrics` m, latest_week lw
-        WHERE m.season = lw.max_season AND m.season_type = 'REG'
-          AND m.position IN ('QB', 'RB', 'WR', 'TE')
-        GROUP BY def_team, m.position
-    ),
-    def_avg AS (
-        SELECT
-            def_team,
-            position,
-            total_points / games_played AS avg_points_allowed
-        FROM def_points_allowed
-    ),
-    ranked_def AS (
-        SELECT
-            def_team,
-            position,
-            avg_points_allowed,
-            RANK() OVER(PARTITION BY position ORDER BY avg_points_allowed ASC) AS defensive_rank
-        FROM def_avg
-    ),
-    player_leagues AS (
-        SELECT
-            LOWER(player_name) AS clean_player_name,
-            position,
-            COUNT(DISTINCT league_id) AS rostered_leagues_count
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_roster_players`
-        WHERE snapshot_at = (SELECT max_snapshot FROM latest_snapshot)
-        GROUP BY clean_player_name, position
-    ),
-    total_leagues AS (
-        SELECT COUNT(DISTINCT league_id) AS total_leagues_count
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.sleeper_rosters`
-        WHERE snapshot_at = (SELECT max_snapshot FROM latest_snapshot)
-    ),
-    latest_player_truth AS (
-        SELECT
-            t.season,
-            t.week,
-            t.player_id,
-            t.player_name,
-            t.player_display_name,
-            t.position,
-            t.team,
-            t.opponent_team,
-            t.fantasy_points_ppr,
-            t.targets,
-            t.carries,
-            t.target_share,
-            t.wopr,
-            t.total_epa,
-            t.red_zone_touches,
-            t.offense_pct,
-            t.avg_separation,
-            t.rolling_3_week_ppr,
-            t.rolling_3_week_targets,
-            t.rolling_3_week_carries,
-            t.rolling_3_week_opportunities,
-            ROW_NUMBER() OVER(PARTITION BY t.player_id ORDER BY t.season DESC, t.week DESC) as rn
-        FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_player_weekly_truth` t, latest_week lw
-        WHERE t.season = lw.max_season AND t.week = lw.max_week AND t.position IN ('QB', 'RB', 'WR', 'TE')
-    )
-    SELECT
-        t.player_display_name AS player_name,
-        t.position,
-        t.team,
-        t.opponent_team,
-        SAFE_DIVIDE(COALESCE(pl.rostered_leagues_count, 0), COALESCE((SELECT total_leagues_count FROM total_leagues), 1)) AS roster_pct,
-        COALESCE(t.rolling_3_week_ppr, 0.0) AS rolling_3_week_ppr,
-        COALESCE(t.offense_pct, 0.0) AS snap_share,
-        COALESCE(t.rolling_3_week_targets, 0.0) AS targets_3w,
-        COALESCE(t.rolling_3_week_carries, 0.0) AS carries_3w,
-        COALESCE(t.wopr, 0.0) AS wopr,
-        COALESCE(t.total_epa, 0.0) AS epa,
-        COALESCE(rd.defensive_rank, 16) AS opp_def_rank,
-        ROUND(
-            CASE
-                WHEN t.position = 'QB' THEN
-                    0.35 * COALESCE(t.rolling_3_week_ppr, 0) +
-                    0.25 * COALESCE(t.rolling_3_week_opportunities * 3, 0) +
-                    0.20 * COALESCE(t.total_epa, 0) +
-                    0.20 * COALESCE(rd.defensive_rank, 16)
-                WHEN t.position = 'RB' THEN
-                    0.30 * COALESCE(t.rolling_3_week_ppr, 0) +
-                    0.25 * COALESCE(t.rolling_3_week_carries * 3, 0) +
-                    0.15 * COALESCE(t.rolling_3_week_targets * 10, 0) +
-                    0.15 * COALESCE(t.offense_pct * 100, 0) +
-                    0.15 * COALESCE(rd.defensive_rank, 16)
-                WHEN t.position IN ('WR', 'TE') THEN
-                    0.30 * COALESCE(t.rolling_3_week_ppr, 0) +
-                    0.20 * COALESCE(t.rolling_3_week_targets * 10, 0) +
-                    0.20 * COALESCE(t.wopr * 100, 0) +
-                    0.15 * COALESCE(t.offense_pct * 100, 0) +
-                    0.15 * COALESCE(rd.defensive_rank, 16)
-                ELSE 0.0
-            END,
-            2
-        ) AS sleeper_score
-    FROM latest_player_truth t
-    LEFT JOIN player_leagues pl ON LOWER(t.player_display_name) = pl.clean_player_name AND t.position = pl.position
-    LEFT JOIN ranked_def rd ON t.opponent_team = rd.def_team AND t.position = rd.position
-    WHERE t.rn = 1
-    """
+    using_compat_sleeper_watch = use_compat_sleeper_watch()
+    render_data_path_status("Sleeper Watch", using_compat_sleeper_watch)
 
     try:
-        df = execute_bq_cached(sql_query)
+        if using_compat_sleeper_watch:
+            df = fetch_compat_sleeper_watch_candidates_data()
+        else:
+            # Ingestion or data availability check
+            sql_query = f"""
+            WITH latest_week AS (
+                SELECT MAX(season) AS max_season, MAX(week) AS max_week
+                FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.compat_sleeper_watch_candidates`
+            )
+            SELECT
+                display_name AS player_name,
+                position,
+                team,
+                opponent AS opponent_team,
+                rostered_rate AS roster_pct,
+                COALESCE(rolling_3_week_ppr, 0.0) AS rolling_3_week_ppr,
+                COALESCE(snap_share_last_3, 0.0) AS snap_share,
+                COALESCE(targets_last_3, 0.0) / 3.0 AS targets_3w,
+                COALESCE(carries_last_3, 0.0) / 3.0 AS carries_3w,
+                COALESCE(target_share_last_3, 0.0) AS wopr,
+                COALESCE(expected_vs_actual_signal, 0.0) AS epa,
+                CAST(COALESCE(matchup_score, 0.0) AS INT64) AS opp_def_rank,
+                COALESCE(streamer_score, 0.0) AS sleeper_score
+            FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.compat_sleeper_watch_candidates` c, latest_week lw
+            WHERE c.season = lw.max_season AND c.week = lw.max_week
+            """
+            df = execute_bq_cached(sql_query)
     except Exception as e:
-        st.info(f"Sleeper Watch data is not materialized yet: {e}")
+        st.info(f"Sleeper Watch data is not materialized yet or the selected data path failed: {e}")
         return
 
     if df.empty:
-        st.info("Sleeper Watch has no candidates for the latest loaded week.")
+        if using_compat_sleeper_watch:
+            st.info("Sleeper Watch compatibility candidates are unavailable or empty. Disable USE_COMPAT_SLEEPER_WATCH to use the legacy warehouse path.")
+        else:
+            st.info("Sleeper Watch has no candidates for the latest loaded week.")
         return
+    if using_compat_sleeper_watch:
+        render_compat_metadata(df, "Sleeper Watch")
 
     # Add interactive settings in columns
     col_pct, col_pos, col_limit = st.columns(3)
@@ -1088,6 +1383,9 @@ def render_sleeper_watch_segment():
 
 @st.cache_data(ttl=3600, show_spinner="Loading player profiles database...")
 def fetch_player_profiles_data():
+    if use_compat_player_profiles():
+        return fetch_compat_player_profiles_data()
+
     from google.cloud import bigquery
     sql_query = f"""
     WITH latest_roster_season AS (
@@ -1480,6 +1778,8 @@ def render_player_profiles_tab():
     st.markdown(
         "Player profiles directory and scouting profiles powered by advanced metrics, contracts, and Pigskin AI analysis."
     )
+    using_compat_profiles = use_compat_player_profiles()
+    render_data_path_status("Player Profiles", using_compat_profiles)
 
     try:
         df = fetch_player_profiles_data()
@@ -1488,8 +1788,13 @@ def render_player_profiles_tab():
         return
 
     if df.empty:
+        if using_compat_profiles:
+            st.warning("Player Profiles compatibility data is unavailable or empty. Disable USE_COMPAT_PLAYER_PROFILES to use the legacy warehouse path.")
+            return
         st.warning("No player profile metrics found in the data warehouse.")
         return
+    if using_compat_profiles:
+        render_compat_metadata(df, "Player Profiles")
 
     rankings_df = fetch_pigskin_rankings_data()
     if not rankings_df.empty:
@@ -2077,6 +2382,8 @@ def render_versus_finder_tab():
     st.markdown(
         "Compare two players side-by-side on volume, efficiency, physical profile, opportunity share, and financial contracts, with a Pigskin AI synthesis."
     )
+    using_compat_profiles = use_compat_player_profiles()
+    render_data_path_status("Versus Finder profiles", using_compat_profiles)
 
     try:
         df = fetch_player_profiles_data()
@@ -2085,8 +2392,13 @@ def render_versus_finder_tab():
         return
 
     if df.empty:
+        if using_compat_profiles:
+            st.warning("Player Profiles compatibility data is unavailable or empty. Disable USE_COMPAT_PLAYER_PROFILES to use the legacy warehouse path.")
+            return
         st.warning("No player profiles found in the data warehouse.")
         return
+    if using_compat_profiles:
+        render_compat_metadata(df, "Versus Finder profiles")
 
     # Select box options
     all_player_names = sorted([name for name in df["player_display_name"].unique() if isinstance(name, str) and name])
@@ -2521,19 +2833,21 @@ def render_ai_cohost():
             st.session_state.pop("chat_session", None)
             st.session_state.chat_session_script_mode = script_mode
 
-        # Define the BigQuery tool
-        def execute_bigquery_sql(sql_query: str) -> str:
-            """Executes a BigQuery SQL query against the fantasy_football_brain dataset.
-
-            MANDATORY CONSTRAINTS:
-            1. You must use a `LIMIT 50` on every query.
-            2. Do NOT use `SELECT *`. You must explicitly select the columns you need.
-            3. You must filter by partitioning keys (`season` and `week`) whenever possible.
-            4. For player analysis, select `current_team`, `team_changed_since_stats`, and `roster_status` when available.
-            """
-            pass # We will execute this manually
-
         active_project_id = BIGQUERY_PROJECT_ID
+        pigskin_context_tools = get_pigskin_context_tool_declarations()
+        pigskin_context_tool_names = {tool["name"] for tool in pigskin_context_tools}
+        context_tool_protocol = """
+
+    ### Context Tool Protocol ###
+    You must use only the provided parameterized context tools for warehouse-backed evidence.
+    You cannot write or execute SQL, request table access, invent table names, or describe unavailable warehouse tables as usable data.
+    Use curated packets, marts, rankings, history, Fraud Watch candidates, trade history, comparison packets, and context leads through tools.
+    If a tool fails, stop and say the curated context tool failed instead of giving a fake data-backed take.
+    If curated data is unavailable or a tool returns no rows, say the curated data is unavailable and name the missing packet, identity match, ranking, or materialization needed.
+    Do not invent stats, injury claims, rankings, transactions, source freshness, or evidence.
+    Treat stored external context and search results as leads, not verified truth, unless the linked source clearly supports the claim.
+    Prefer `model_run_id`, `ranking_version`, `source_freshness_json`, and `missing_data_flags` when a tool provides them.
+    """
         script_mode_instruction = """
 
     ### Script Mode Output Contract ###
@@ -2576,148 +2890,23 @@ def render_ai_cohost():
     {script_mode_instruction}
 
     The active BigQuery project ID is '{active_project_id}' and the dataset is 'fantasy_football_brain'.
-    Prefer dataset-qualified table names such as `fantasy_football_brain.analytics_player_weekly_truth` unless an explicit project ID is provided.
-
-    Here is the database schema description:
-
-    - Table: `fantasy_football_brain.analytics_player_weekly_truth` (PRIMARY TABLE)
-      Description: Derived AI vs Vibes player truth table with fantasy output, usage, red-zone role, EPA, recent trend, opportunity scoring, efficiency scoring, and criticism-ready flags.
-      Columns include: `season`, `week`, `player_id`, `player_name`, `player_full_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, `rushing_epa`, `receiving_epa`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, `points_outran_role`, `thin_role_big_week`, `fragile_role`, `role_backed_production`, and `analytical_verdict`.
-      `team` is the historical team for that stat week. `current_team` is the latest known roster team. If `team_changed_since_stats` is true, do not describe the player as currently on `team`.
-      *PRIORITIZE THIS TABLE for almost all player analysis.*
-
-    - Table: `fantasy_football_brain.analytics_pigskin_rankings`
-      Description: Canonical active Pigskin rankings used by Player Profiles and chat. This table is written by a Gemini/Pigskin adjudication pass over curated BigQuery candidate evidence. This is the source of truth for Pigskin-owned 2026 player ranks.
-      Columns include: `ranking_version`, `generated_at`, `adjudicated_at`, `season`, `ranking_phase`, `format`, `position`, `rank`, `tier`, `player_id`, `player_name`, `current_team`, `roster_status`, `sleeper_player_id`, `sleeper_team`, `sleeper_active`, `sleeper_status`, `sleeper_depth_chart_position`, `sleeper_depth_chart_order`, `ranking_eligibility`, `candidate_rank`, `candidate_ranking_score`, `raw_ranking_score`, `depth_chart_penalty`, `ranking_score`, `rank_source`, `avg_ppr`, `avg_opportunity`, `avg_efficiency`, `avg_total_epa`, `season_total_epa`, `avg_epa_per_opportunity`, `avg_passing_epa`, `season_passing_epa`, `avg_rushing_epa`, `season_rushing_epa`, `avg_receiving_epa`, `season_receiving_epa`, `avg_role_quality`, `avg_role_fragility`, `avg_grade`, `avg_wopr`, `avg_target_share`, `avg_carry_share`, `latest_season_wopr`, `previous_season_wopr`, `two_years_ago_wopr`, `latest_season_target_share`, `previous_season_target_share`, `latest_season_carry_share`, `previous_season_carry_share`, `confidence_score`, `pigskin_verdict`, `rank_rationale`, `risk_flags`, `what_would_change_mind`, `model_name`, `prompt_version`, `data_snapshot_label`, and `is_active`.
-      If this table says a player is ranked at a position, that is Pigskin's current owned ranking. Do not deny it. Defend it, critique the risk, or explain what would change it. Backup QBs are penalized through `depth_chart_penalty`; do not describe a QB with `sleeper_depth_chart_order > 1` as a normal QB1 projection.
-
-    - Table: `fantasy_football_brain.analytics_pigskin_rankings_candidates`
-      Description: SQL-generated candidate evidence board used as the input to Pigskin's LLM adjudication pass. This is evidence, not the final ranking.
-      Columns mostly match `analytics_pigskin_rankings`, but `rank` and `ranking_score` are candidate values before Pigskin's final LLM judgment.
-
-    - Table: `fantasy_football_brain.analytics_pigskin_rankings_history`
-      Description: Append-only history of Pigskin ranking publications. Use it when the user asks how a ranking changed across versions or asks about an older call.
-      Columns match `analytics_pigskin_rankings`, with one snapshot per `ranking_version`.
-
-    - Table: `fantasy_football_brain.analytics_fraud_watch`
-      Description: First AI vs Vibes show segment table. Use it to identify fantasy box scores that outran the player's actual role quality.
-      Columns include: `season`, `week`, `player_name`, `position`, `team`, `current_team`, `fantasy_points_ppr`, `skill_player_opportunities`, `target_share`, `wopr`, `offense_pct`, `touchdowns`, `touchdown_dependency_rate`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `fraud_score`, `fraud_label`, `fraud_case`, and `what_would_change_mind`.
-
-    - Table: `fantasy_football_brain.weekly_metrics` (also accessible as `historical_player_metrics`)
-      Columns:
-    - `season` (INT64) - The NFL season year (e.g. 2024).
-    - `week` (INT64) - The NFL week (e.g. 1 to 18).
-    - `player_name` (STRING) - The name of the player.
-    - `position` (STRING) - Player's position (e.g. 'QB', 'RB', 'WR', 'TE').
-    - `team` (STRING) - Team abbreviation (e.g. 'KC', 'BUF').
-    - `target_share` (FLOAT64) - Share of team targets.
-    - `passing_epa` (FLOAT64) - Passing Expected Points Added.
-    - `rushing_epa` (FLOAT64) - Rushing Expected Points Added.
-    - `receiving_epa` (FLOAT64) - Receiving Expected Points Added.
-    - `rushing_yards` (FLOAT64) - Rushing yards gained.
-    - `targets` (FLOAT64) - Number of pass targets.
-    - `receptions` (FLOAT64) - Number of pass catches.
-    - `fantasy_points` (FLOAT64) - Standard fantasy points.
-    - `fantasy_points_ppr` (FLOAT64) - PPR fantasy points.
-
-    - Table: `fantasy_football_brain.active_league_rosters`
-      Columns:
-    - `username` (STRING)
-    - `sleeper_id` (STRING)
-    - `player_name` (STRING)
-    - `position` (STRING)
-
-    - Table: `fantasy_football_brain.play_by_play`
-      Columns:
-    - `season` (INT64)
-    - `week` (INT64)
-    - `play_type` (STRING)
-    - `yards_gained` (FLOAT64)
-    - `epa` (FLOAT64)
-
-    - Table: `fantasy_football_brain.ngs_passing`
-      Columns: Includes `player_display_name` (the player's name column, NOT `player_name`), `player_gsis_id`, and metrics like `avg_time_to_throw`, `avg_completed_air_yards`, `aggressiveness`.
-
-    - Table: `fantasy_football_brain.realtime_player_news`
-      Columns: `player_id` (STRING), `gsis_id` (STRING), `player_name` (STRING), `position` (STRING), `team` (STRING), `trend_type` (STRING, 'ADD' or 'DROP'), `trend_count` (INT64).
-      Description: Real-time trending Sleeper data for tracking recent add/drop volume.
-    - Table: `fantasy_football_brain.sleeper_players_current`
-      Description: Current Sleeper global NFL player map used for active fantasy eligibility, team, status, and depth chart context. This is not a viewer league roster.
-      Columns include: `snapshot_at`, `sleeper_player_id`, `gsis_id`, `player_name`, `position`, `team`, `active`, `status`, `injury_status`, `fantasy_positions_json`, `depth_chart_position`, `depth_chart_order`, `search_rank`, and `years_exp`.
-    - Table: `fantasy_football_brain.sleeper_viewer_team_snapshots`
-      Description: On-demand viewer team snapshot from Sleeper for YouTube team reviews.
-      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `viewer_roster_id`, `viewer_owner_id`, `viewer_username`, `viewer_display_name`, `viewer_team_name`, `matchup_id`, `points`, `starters_json`, and `players_json`.
-    - Table: `fantasy_football_brain.sleeper_roster_players`
-      Description: Current rostered players for every team in a loaded Sleeper league snapshot.
-      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id`, `player_name`, `position`, `team`, `gsis_id`, `status`, `injury_status`, `is_starter`, `is_taxi`, and `is_reserve`.
-    - Table: `fantasy_football_brain.sleeper_lineups`
-      Description: Week-specific matchup lineup/player points for loaded Sleeper league snapshots.
-      Columns include: `snapshot_at`, `league_id`, `season`, `week`, `roster_id`, `matchup_id`, `owner_id`, `is_viewer_team`, `sleeper_player_id`, `player_name`, `position`, `team`, `gsis_id`, `is_starter`, and `points`.
-    - Table: `fantasy_football_brain.sleeper_rosters`, `fantasy_football_brain.sleeper_matchups`, `fantasy_football_brain.sleeper_league_users`, and `fantasy_football_brain.sleeper_leagues`
-      Description: Sleeper league metadata, users, standings, matchup ids, scoring settings, roster positions, and raw league settings for loaded viewer-team snapshots.
-    - Table: `fantasy_football_brain.analytics_player_qb_splits`
-      Description: Season-level receiver-by-QB split table. Use this before making claims about QB-driven receiver changes.
-      Columns include: `season`, `posteam`, `player_id`, `player_name`, `qb_id`, `qb_name`, `weeks_with_targets`, `first_week_with_qb`, `last_week_with_qb`, `targets`, `receptions`, `catch_rate`, `receiving_yards`, `yards_per_target`, `adot`, `touchdowns`, `red_zone_targets`, `total_epa`, `epa_per_target`, `target_share_from_qb`, `team_target_share`, and `sample_label`.
-    - Table: `fantasy_football_brain.analytics_player_qb_weekly`
-      Description: Weekly receiver-by-QB split table. Use this to test before/after QB changes, injury effects, and whether a receiver's role changed or only target quality changed.
-      Columns include: `season`, `week`, `posteam`, `defteam`, `player_id`, `player_name`, `qb_id`, `qb_name`, `targets`, `receptions`, `catch_rate`, `receiving_yards`, `yards_per_target`, `adot`, `touchdowns`, `red_zone_targets`, `total_epa`, `epa_per_target`, `target_share_from_qb`, and `team_target_share`.
-    - Table: `fantasy_football_brain.analytics_context_events`
-      Description: Curated event ledger for causal context such as QB injuries, QB changes, offensive line injuries, coaching/play-caller changes, training camp reports/reps, offseason/preseason usage split trends, weather, and other fantasy-relevant situational events.
-      Columns include: `event_id`, `season`, `start_week`, `end_week`, `team`, `event_type`, `subject_player_id`, `subject_name`, `subject_position`, `affected_player_id`, `affected_player_name`, `affected_unit`, `causal_status`, `confidence_score`, `source_type`, `source_label`, `source_url`, `summary`, `analysis_instruction`, and `active`.
-    - Table: `fantasy_football_brain.analytics_external_context_search_results`
-      Description: On-demand external verification search results for player-specific outside verification. Use these results as leads, not as confirmed facts, unless the linked source clearly supports the claim.
-      Columns include: `searched_at`, `player_name`, `query`, `result_rank`, `title`, `link`, `display_link`, `snippet`, `source_type`, `provider`, and `source_name`.
-    - Table: `fantasy_football_brain.analytics_game_environment`
-      Description: One row per regular-season game with stadium, roof, surface, temperature, wind, weather text, and fantasy-relevant environment flags.
-      Columns include: `season`, `week`, `game_id`, `game_date`, `home_team`, `away_team`, `stadium`, `historical_stadium_name`, `stadium_id`, `roof`, `surface`, `temp_f`, `wind_mph`, `weather_text`, `is_indoor_or_closed`, `roof_category`, `surface_category`, `precipitation_or_storm_flag`, `snow_or_freezing_flag`, `temperature_bucket`, `wind_bucket`, `environment_risk_level`, and `fantasy_environment_note`.
-    - Table: `fantasy_football_brain.ngs_rushing`
-      Columns: Includes `player_display_name` (the player's name column, NOT `player_name`), `player_gsis_id`, and metrics like `efficiency`, `percent_attempts_gte_eight_defenders`, `avg_time_to_los`.
-    - Table: `fantasy_football_brain.ngs_receiving`
-      Columns: Includes `player_display_name` (the player's name column, NOT `player_name`), `player_gsis_id`, and metrics like `avg_cushion`, `avg_separation`, `avg_yac_above_expectation`.
-    - Table: `fantasy_football_brain.ftn_charting`
-      Columns: Includes FTN premium charting play-by-play data like is_no_huddle, is_play_action, is_screen_pass, is_interception_worthy.
-    - Table: `fantasy_football_brain.weekly_snap_counts`
-      Columns: Includes weekly player snap metrics like `offense_snaps`, `offense_pct`, `defense_pct`, `st_pct`, and `player` (the player's name column, NOT `player_name`).
-    - Table: `fantasy_football_brain.injury_reports`
-      Columns: Includes weekly injury data like `report_primary_injury`, `report_status`, `practice_status`, and `full_name` (the player's name column, NOT `player_name`).
-
-    - Table: `fantasy_football_brain.team_descriptions`
-      Columns:
-    - `team_abbr` (STRING)
-    - `team_name` (STRING)
-
-    - Table: `fantasy_football_brain.rookie_scouting_metrics`
-      Description: Advanced player tracking and profiling metrics for rookies (e.g. yards after contact, Yards Per Route Run, separation, success rates against coverage), imported from custom scouting imports.
-      Columns include: `season` (draft/rookie season), `player_name`, `position`, `college`, `yards_after_contact_per_attempt`, `yards_per_route_run`, `college_target_share`, `catch_radius_grade`, `success_rate_vs_man`, `success_rate_vs_zone`, `success_rate_vs_press`, `avg_separation_inches`, and `data_source`.
-
-    - Table: `fantasy_football_brain.college_player_stats`
-      Description: Season-level statistics for college players (passing, rushing, receiving totals), imported from CollegeFootballData (CFBD) API.
-      Columns include: `season`, `player_name`, `position`, `team` (college team), `conference`, `games`, `passing_yards`, `passing_tds`, `rushing_yards`, `rushing_tds`, `receptions`, `receiving_yards`, and `receiving_tds`.
+    Do not expose project internals to the user unless needed to explain a missing-data problem.
+    {context_tool_protocol}
+    {render_pigskin_chat_schema()}
 
     ### The Analytical Filter Protocol ###
-    You are mandated to follow a strict query protocol when analyzing players.
-    For any question about rankings, positional rank, projections, draft price, Player Profiles, "why did you rank", "defend your ranking", or 2026 rank disagreements, query `analytics_pigskin_rankings` first.
-    If the active ranking table contains the player, acknowledge the rank directly. Never say "I did not rank him there" when `analytics_pigskin_rankings` says Pigskin did.
-    When `rank_source = 'llm_pigskin_adjudicated'`, treat the row as Pigskin's model-authored ranking. Use `analytics_pigskin_rankings_candidates` only to explain the evidence behind the adjudication, not to override the final rank.
-    If the user asks about an older or prior ranking call, query `analytics_pigskin_rankings_history` and compare ranking versions before answering.
-    For non-ranking player analysis, default to using the `analytics_player_weekly_truth` table first. Only fallback to `play_by_play` if highly specific situational context is requested.
-    Always use your `execute_bigquery_sql` tool to fetch data before answering analytical questions.
-    For player-name filters in `analytics_player_weekly_truth`, use `LOWER(player_full_name) LIKE '%full name%'` when the user gives a normal full name. The raw `player_name` field may be abbreviated, like `D.Jones`.
-    Never query `epa_per_play`; that column does not exist. Use `analytics_player_weekly_truth.total_epa` for total EPA and `analytics_player_weekly_truth.passing_epa`, `analytics_player_weekly_truth.rushing_epa`, and `analytics_player_weekly_truth.receiving_epa` for split EPA.
-    When criticizing a take, cite the metrics that make the take strong, weak, stale, box-score driven, or contradicted by role.
-    For Fraud Watch analysis, use `analytics_fraud_watch` first, then inspect `analytics_player_weekly_truth` for the detailed player row.
-    For rookie analysis, prospect profiling, or college career evaluations, query `rookie_scouting_metrics` and `college_player_stats`. Join them on player name and season where appropriate. Cite the specific tracking details (e.g. success rate vs press/man, yards after contact, separation) and label the data source.
-    For viewer team analysis, first query the latest `sleeper_viewer_team_snapshots` row for the requested `league_id`, `viewer_roster_id`, username, or team name. Then query `sleeper_roster_players` and `sleeper_lineups` with `is_viewer_team = TRUE`. Join to `analytics_player_weekly_truth` by `gsis_id` when available and fallback to player name plus team when needed.
-    For viewer roster criticism, separate roster construction from weekly start/sit. Identify fragile starters, bench upside, bye/injury exposure, thin positions, duplicate archetypes, tradeable surplus, and waiver needs.
-    For offseason or 2026 roster context, use `current_team` and `roster_status`; use `team` only when discussing historical stat weeks.
-    For any player question about "this season", "right now", "current", "2026", rankings, draft price, or team fit, your first player query MUST select `current_team`, `team_changed_since_stats`, and `roster_status`. Never describe `team` as the player's current team.
-    If a query fails, do not answer from memory. Stop and say the warehouse query failed.
-    If a player query returns zero rows, try one alternate name query using `LOWER(player_name) LIKE` or `LOWER(player_display_name) LIKE` before giving up.
-    For receiver analysis, check `analytics_player_qb_splits` or `analytics_player_qb_weekly` before blaming the player. Separate player role from QB environment.
-    For game-specific or matchup-specific projections, check `analytics_game_environment`. Indoor or closed-roof games should not get weather downgrades. Outdoor high-wind, freezing, snow, or storm games can materially change passing, kicking, and efficiency assumptions.
-    Do not pretend long-range weather is known. For future games outside a reliable forecast window, use stadium/roof/surface as stable context and label weather as unknown until game week.
-    For any causal claim involving injuries, coaching, play-calling, offensive line, weather, benching, training camp reports, usage splits, or transaction intent, query `analytics_context_events` first.
-    If context events are missing or user asks for outside verification, query `analytics_external_context_search_results` for stored external verification leads before making a claim.
+    You are mandated to use curated context tools before making player, ranking, trade, projection, roster, or causal claims.
+    For any question about rankings, positional rank, projections, draft price, Player Profiles, "why did you rank", "defend your ranking", or rank disagreements, call `get_rankings_slice`, `get_player_context_packet`, or `search_players` first.
+    If active ranking context contains the player, acknowledge the rank directly. Never say "I did not rank him there" when the curated Pigskin ranking context says Pigskin did.
+    For non-ranking player analysis, prefer `get_player_context_packet`, `compare_players`, and `get_trade_player_history`.
+    For Fraud Watch analysis, use `get_fraud_watch_candidates` before making the take.
+    For player-name ambiguity, use `search_players` rather than guessing.
+    For viewer roster criticism, use available curated packets and clearly state when viewer-team context is not materialized yet.
+    For offseason or current roster context, use current team and roster-status fields from the tools. Never describe a historical stat-week team as a player's current team.
+    For receiver analysis, use available QB split or packet context before blaming the player. Separate player role from QB environment.
+    For game-specific or matchup-specific projections, use available game-environment context. Indoor or closed-roof games should not get weather downgrades. Future weather outside a reliable forecast window is unknown.
+    For any causal claim involving injuries, coaching, play-calling, offensive line, weather, benching, training camp reports, usage splits, or transaction intent, call `get_context_event_leads` first.
+    If context events are missing or user asks for outside verification, treat stored external leads as leads and clearly label them until source support is verified.
 
     ### Causal Claim Protocol ###
     Never invent motives, transaction logic, injury explanations, coaching decisions, or play-calling changes from statistical splits alone.
@@ -2736,7 +2925,7 @@ def render_ai_cohost():
         if "chat_session" not in st.session_state:
             model = create_gemini_model(
                 active_gemini_key,
-                tools=[execute_bigquery_sql],
+                tools=pigskin_context_tools,
                 system_instruction=system_prompt
             )
             st.session_state.chat_session = model.start_chat()
@@ -2749,7 +2938,7 @@ def render_ai_cohost():
                     state=msg.get("state", "complete"),
                     expanded=msg.get("expanded", False),
                 ):
-                    st.code(msg["code"], language="sql")
+                    st.code(msg["code"], language=msg.get("language", "text"))
                     if msg.get("error"):
                         st.error(msg["error"])
             else:
@@ -2779,58 +2968,62 @@ def render_ai_cohost():
                     # Manual tool calling loop
                     fc = get_fc(response)
                     while fc:
-                        if fc.name == "execute_bigquery_sql":
-                            sql_to_run = repair_generated_sql(fc.args["sql_query"])
-
-                            tool_message = {
-                                "role": "tool_status",
-                                "status_msg": "🤖 AI Co-Host is analyzing the warehouse...",
-                                "code": sql_to_run,
-                                "state": "running",
-                                "expanded": True,
-                            }
-                            st.session_state.messages.append(tool_message)
-                            with st.status("🤖 AI Co-Host is analyzing the warehouse...", expanded=True) as status:
-                                st.code(sql_to_run, language="sql")
-                                try:
-                                    df = execute_bq_cached(sql_to_run)
-                                    status.update(label=f"🤖 Analysis complete! ({len(df)} rows retrieved)", state="complete")
-                                    result_str = df.to_csv(index=False) if not df.empty else "0 rows returned."
-                                except Exception as e:
-                                    error_text = str(e)
-                                    status.update(label="❌ Query failed", state="error", expanded=True)
-                                    st.error(error_text)
-                                    tool_message.update({
-                                        "status_msg": "❌ Query failed",
-                                        "state": "error",
-                                        "expanded": True,
-                                        "error": error_text,
-                                    })
-                                    failure_text = (
-                                        "I've got a problem: Pigskin tried to query BigQuery, but the warehouse query failed. "
-                                        "I am stopping here instead of giving you a fake data-backed take. "
-                                        "The failed SQL and error are shown above."
-                                    )
-                                    st.error(failure_text)
-                                    st.session_state.messages.append({"role": "assistant", "content": failure_text})
-                                    return
-
-                            tool_message.update({
-                                "status_msg": f"🤖 Analysis complete! ({len(df)} rows retrieved)",
-                                "state": "complete",
-                                "expanded": False,
-                            })
-
-                            from google.genai import types
-                            tool_response = types.Part.from_function_response(
-                                name="execute_bigquery_sql",
-                                response={"result": result_str},
-                            )
-                            # Get next response (could be another tool, or text)
-                            response = st.session_state.chat_session.send_message(tool_response)
-                            fc = get_fc(response)
-                        else:
+                        if fc.name not in pigskin_context_tool_names:
                             break
+                        tool_args = dict(fc.args or {})
+                        tool_payload = {
+                            "tool_name": fc.name,
+                            "args": tool_args,
+                        }
+                        tool_message = {
+                            "role": "tool_status",
+                            "status_msg": f"🤖 Pigskin is loading curated context with `{fc.name}`...",
+                            "code": json.dumps(tool_payload, indent=2, sort_keys=True, default=str),
+                            "language": "json",
+                            "state": "running",
+                            "expanded": True,
+                        }
+                        st.session_state.messages.append(tool_message)
+                        with st.status(tool_message["status_msg"], expanded=True) as status:
+                            st.code(tool_message["code"], language="json")
+                            try:
+                                tool_result = execute_pigskin_context_tool(fc.name, tool_args)
+                                result = tool_result.get("result", {})
+                                row_count = result.get("row_count")
+                                row_label = f" ({row_count} rows retrieved)" if row_count is not None else ""
+                                status.update(label=f"🤖 Curated context loaded{row_label}", state="complete")
+                            except Exception as e:
+                                error_text = str(e)
+                                status.update(label="❌ Context tool failed", state="error", expanded=True)
+                                st.error(error_text)
+                                tool_message.update({
+                                    "status_msg": "❌ Context tool failed",
+                                    "state": "error",
+                                    "expanded": True,
+                                    "error": error_text,
+                                })
+                                failure_text = (
+                                    "I've got a problem: Pigskin's curated context tool failed. "
+                                    "I am stopping here instead of giving you a fake data-backed take. "
+                                    "The failed tool call and error are shown above."
+                                )
+                                st.error(failure_text)
+                                st.session_state.messages.append({"role": "assistant", "content": failure_text})
+                                return
+
+                        tool_message.update({
+                            "status_msg": "🤖 Curated context loaded",
+                            "state": "complete",
+                            "expanded": False,
+                        })
+
+                        from google.genai import types
+                        tool_response = types.Part.from_function_response(
+                            name=fc.name,
+                            response=tool_result,
+                        )
+                        response = st.session_state.chat_session.send_message(tool_response)
+                        fc = get_fc(response)
 
                     # Final text response stream
                     def stream_generator(resp):
@@ -2874,6 +3067,15 @@ def render_value_analyzer():
     # Load market players from BQ
     @st.cache_data(ttl=600, show_spinner=False)
     def load_market_players():
+        if use_compat_trade_assets():
+            try:
+                compat_df = load_compat_trade_assets()
+                if compat_df is not None and not compat_df.empty:
+                    return compat_df
+                st.warning("Trade Assets compatibility data is unavailable or empty. Falling back to the legacy warehouse path.")
+            except Exception as compat_error:
+                st.warning(f"Trade Assets compatibility path failed. Falling back to the legacy warehouse path. Error: {compat_error}")
+
         try:
             query = f"""
                 SELECT player_display_name, position, team, market_value, overall_rank, position_rank, redraft_value, tier, age
@@ -2900,6 +3102,12 @@ def render_value_analyzer():
     if market_df is None or market_df.empty:
         st.info("⚠️ No market value data found in BigQuery. Please run the ingestion pipeline or check the database.")
         return
+    using_compat_trade_assets = "_data_path" in market_df.columns and (market_df["_data_path"] == "compat").any()
+    render_data_path_status("Trade Assets", using_compat_trade_assets)
+    if use_compat_trade_assets() and not using_compat_trade_assets:
+        st.caption("Trade Assets compatibility flag is enabled, but this view is using the documented legacy fallback.")
+    if using_compat_trade_assets and "source_freshness_json" in market_df.columns:
+        render_compat_metadata(market_df, "Trade Assets")
 
     # Prepare selection list
     player_options = []
@@ -3130,6 +3338,7 @@ def render_value_analyzer():
     # Deep AI Outlook using Gemini
     st.markdown(f"#### 🧠 AI {projection_years}-Year Outlook Analysis")
     st.markdown(f"Use Gemini to analyze their metrics and crawl recent team news for {projection_years}-year outlook projections.")
+    render_data_path_status("Trade Player History", use_compat_trade_player_history())
 
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not active_gemini_key:
@@ -3145,6 +3354,12 @@ def render_value_analyzer():
                     bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
 
                     def query_player_history(name):
+                        if use_compat_trade_player_history():
+                            try:
+                                return query_compat_trade_player_history(name)
+                            except Exception as compat_error:
+                                st.warning(f"Trade Player History compatibility path failed. Falling back to the legacy warehouse path. Error: {compat_error}")
+
                         q = f"""
                             SELECT season, week, rushing_yards, rushing_tds, receiving_yards, receiving_tds, receptions, targets, fantasy_points_ppr
                             FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.weekly_metrics`
@@ -3388,6 +3603,9 @@ def run_subprocess_live(args, custom_env=None):
         return None
 
 def get_sleeper_viewer_team_context(console_context):
+    if use_compat_viewer_team_context():
+        return get_compat_sleeper_viewer_team_context(console_context)
+
     from google.cloud import bigquery
 
     client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
@@ -3624,6 +3842,7 @@ def render_sleeper_viewer_console():
     st.caption(
         f"Context: league `{console_context['league_id']}`, week `{console_context['week']}`"
     )
+    render_data_path_status("Viewer Team Context", use_compat_viewer_team_context())
 
     messages = st.session_state.setdefault("sleeper_viewer_console_messages", [
         {
@@ -3743,6 +3962,7 @@ def render_sleeper_viewer_team_analysis():
 with tab_data_ops:
     render_tab_bookmarks([
         ("Runtime", "runtime-status"),
+        ("Cloud Jobs", "cloud-run-jobs"),
         ("Safe Checks", "safe-checks"),
         ("External API", "external-api"),
         ("Warehouse Writes", "warehouse-writes"),
@@ -3755,6 +3975,14 @@ with tab_data_ops:
         first=True,
     )
     render_runtime_status(active_tables, total_size_mb, app_version, cloud_run_revision, app_commit)
+
+    render_section_header(
+        "Cloud Run Jobs",
+        "cloud-run-jobs",
+        "Preview and optionally trigger Cloud Run Jobs while local subprocess controls remain available.",
+    )
+    with st.container(border=True):
+        render_cloud_run_jobs_data_ops_panel()
 
     render_section_header(
         "Safe Checks",
