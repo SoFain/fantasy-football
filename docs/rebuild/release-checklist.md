@@ -119,6 +119,42 @@ Current status:
 
 Do not enable live job triggers during merge.
 
+## Immutable Image Tagging
+
+Current rule:
+
+- Do not deploy `latest`.
+- Build one immutable tag per release artifact.
+- Record the image tag, image digest, Cloud Run service, revision, region, project, and rollback target in the phase report.
+
+Approved tag formats:
+
+```text
+staging-<short_sha>-<timestamp>
+prod-candidate-<short_sha>-<timestamp>
+prod-<short_sha>-<release_id>
+```
+
+Generate tags with:
+
+```powershell
+.\venv\Scripts\python.exe scripts\build_image_tag.py --channel staging
+.\venv\Scripts\python.exe scripts\build_image_tag.py --channel prod-candidate
+.\venv\Scripts\python.exe scripts\build_image_tag.py --channel prod --release-id <release_id>
+```
+
+Build with Cloud Build:
+
+```powershell
+$tag = .\venv\Scripts\python.exe scripts\build_image_tag.py --channel staging
+$shortSha = (git rev-parse --short=12 HEAD).Trim()
+gcloud builds submit `
+  --config cloudbuild.yaml `
+  --substitutions "_IMAGE_TAG=$tag,_COMMIT_HASH=$shortSha,_VERSION_LABEL=$tag"
+```
+
+Deploy only the recorded immutable tag. Do not promote a staging tag to production. Use a separate `prod-candidate-*` or `prod-*` tag after approval.
+
 ## Known Warnings
 
 1. Live `validate-warehouse` Cloud Run Job path is not cleared from this local environment.
@@ -167,7 +203,7 @@ Before production:
 
 1. Complete staging QA.
 2. Confirm rollback has been tested.
-3. Confirm Cloud Run service image and env vars are reviewed.
+3. Confirm Cloud Run service image uses an immutable `prod-candidate-*` or `prod-*` tag.
 4. Confirm Secret Manager bindings.
 5. Confirm IAM grants.
 6. Confirm no pending migrations.

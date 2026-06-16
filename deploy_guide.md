@@ -44,11 +44,46 @@ gcloud artifacts repositories create nfl-studio-repo \
 ---
 
 ## 3. Build & Publish Using Google Cloud Build
-Google Cloud Build will package your code using the local `Dockerfile` (optimized for Streamlit) and push it directly to your Artifact Registry repository:
-```bash
-gcloud builds submit --tag us-central1-docker.pkg.dev/YOUR_PROJECT_ID/nfl-studio-repo/nfl-studio-app:latest
+Google Cloud Build packages the local `Dockerfile` and pushes one immutable Artifact Registry tag. Do not deploy `latest`; production and staging releases must use explicit tags.
+
+Generate a staging tag:
+
+```powershell
+$tag = .\venv\Scripts\python.exe scripts\build_image_tag.py --channel staging
+$shortSha = (git rev-parse --short=12 HEAD).Trim()
+gcloud builds submit `
+    --config cloudbuild.yaml `
+    --substitutions "_IMAGE_TAG=$tag,_COMMIT_HASH=$shortSha,_VERSION_LABEL=$tag"
 ```
-*(Make sure to replace `YOUR_PROJECT_ID` with your actual Google Cloud Project ID).*
+
+Generate a production candidate tag:
+
+```powershell
+$tag = .\venv\Scripts\python.exe scripts\build_image_tag.py --channel prod-candidate
+$shortSha = (git rev-parse --short=12 HEAD).Trim()
+gcloud builds submit `
+    --config cloudbuild.yaml `
+    --substitutions "_IMAGE_TAG=$tag,_COMMIT_HASH=$shortSha,_VERSION_LABEL=$tag"
+```
+
+Generate a production release tag only after the production release is approved:
+
+```powershell
+$releaseId = "r2026.06.16"
+$tag = .\venv\Scripts\python.exe scripts\build_image_tag.py --channel prod --release-id $releaseId
+$shortSha = (git rev-parse --short=12 HEAD).Trim()
+gcloud builds submit `
+    --config cloudbuild.yaml `
+    --substitutions "_IMAGE_TAG=$tag,_COMMIT_HASH=$shortSha,_VERSION_LABEL=$tag"
+```
+
+Tag patterns:
+
+- Staging: `staging-<short_sha>-<timestamp>`
+- Production candidate: `prod-candidate-<short_sha>-<timestamp>`
+- Production release: `prod-<short_sha>-<release_id>`
+
+The `cloudbuild.yaml` file no longer tags or pushes `latest`.
 
 ---
 
@@ -91,7 +126,7 @@ By default, Cloud Run uses the Compute Engine default service account. However, 
 Deploy the compiled container to Cloud Run, attaching the newly configured service account, wiring the Gemini secret into environment variables, pinning the BigQuery project, setting conservative external verification limits, and restricting access to authenticated users:
 ```bash
 gcloud run deploy nfl-studio-dashboard \
-    --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/nfl-studio-repo/nfl-studio-app:latest \
+    --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/nfl-studio-repo/nfl-studio-app:YOUR_IMMUTABLE_TAG \
     --region=us-central1 \
     --service-account=nfl-studio-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
     --set-env-vars=BQ_PROJECT=YOUR_PROJECT_ID,EXTERNAL_SEARCH_PROVIDER=vertex_ai_search,EXTERNAL_SEARCH_DAILY_LIMIT=25,EXTERNAL_SEARCH_MAX_RESULTS=3,VERTEX_AI_SEARCH_ENGINE_ID=YOUR_VERTEX_SEARCH_ENGINE_ID \
@@ -104,7 +139,7 @@ gcloud run deploy nfl-studio-dashboard \
 - `--image`: The location of your Docker image in Artifact Registry.
 - `--service-account`: Links the IAM roles (BigQuery Admin) directly to the running container instance (enabling passwordless, fileless BigQuery access).
 - `--set-env-vars`: Pins the warehouse project, selects Vertex AI Search, caps external verification at 25 requests per UTC day, and limits each search to 3 stored results. You can provide `VERTEX_AI_SEARCH_SERVING_CONFIG` instead of `VERTEX_AI_SEARCH_ENGINE_ID` if you want to pass the full serving config resource name.
-- `--set-secrets`: Injects Secret Manager values without storing keys in code or the container image.
+- `--set-secrets`: Injects Secret Manager values without storing keys in code or the container image. `GEMINI_API_KEY:latest` refers to a Secret Manager version, not a container image tag.
 - `--port=8501`: Sets the container ingress port to align with Streamlit's default port.
 - `--no-allow-unauthenticated`: Restricts access so only authenticated IAM users in your GCP project can access the dashboard. (Change this to `--allow-unauthenticated` if you want to make it publicly accessible).
 

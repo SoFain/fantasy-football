@@ -157,3 +157,12 @@ Before that production candidate:
 7. Clean or close the old dry-run Cloud Run job metadata artifact if mutation becomes safe.
 8. Continue one-flag-at-a-time compatibility rollout after staging QA evidence is captured.
 
+## Phase 17.3 Image Tagging Addendum
+
+Phase 17.3 closes the shared `latest` warning by making Cloud Build publish only the explicit `_IMAGE_TAG` image. The release process now requires immutable tags:
+
+- Staging: `staging-<short_sha>-<timestamp>`
+- Production candidate: `prod-candidate-<short_sha>-<timestamp>`
+- Production release: `prod-<short_sha>-<release_id>`
+
+Production remains unauthorized by this addendum. Future production work must build and deploy a reviewed immutable production candidate or production release tag, not a mutable staging or `latest` tag.
