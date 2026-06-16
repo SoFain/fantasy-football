@@ -13,6 +13,14 @@ __pycache__/
 # IDE configs
 .vscode/
 .idea/
+.env
+.env.*
+cbs-league-history/.env.local
+.codex-remote-attachments/
+.codex-tools/
+diff_app.txt
+migration_error.log
+validations.log
 
 # Google Cloud credentials keys
 *.json

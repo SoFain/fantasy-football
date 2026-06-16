@@ -1,0 +1,283 @@
+# Phase 12 Validation Report
+
+Date: 2026-06-16
+
+Scope:
+
+- Streamlit compatibility wiring
+- Backtesting framework
+- Market and consensus baselines
+- Meatbag Claim Ledger
+- Claim grading
+- Content briefs
+- Data Ops Cloud Run Jobs integration
+
+## Final Decision
+
+GO WITH WARNINGS
+
+## Blockers
+
+None found in the code validation scope.
+
+No hard NO-GO condition was observed:
+
+- Pigskin arbitrary SQL is not model-visible.
+- Raw/source tables are not exposed to Pigskin.
+- `app.py` compiles.
+- Full tests pass under the repo virtual environment.
+- No Firebase artifacts were introduced.
+- Cloud Run Jobs do not trigger by default.
+- No tracked service account JSON or private key file was found.
+- Pending Phase 12 migrations do not contain destructive DDL.
+
+## Warnings
+
+1. The plain `python` command resolves to `C:\Python314\python.exe`, which does not have repo dependencies installed. `python -m unittest discover tests` fails there with missing `google-cloud-bigquery` and `pandas`. The repo venv test run passes.
+2. Live warehouse validation for Phase 12 output tables fails because migrations `0020` through `0024` are still pending and were not applied during this validation.
+3. The current Streamlit legacy paths still contain direct raw/source table reads. The new compatibility helpers read compatibility/output objects, and all related flags default false, but the old paths remain until rollout.
+4. `validate --pattern market` also surfaced an existing `044_compat_trade_assets_current_recent_market_snapshot.sql` failure because the query returned one row with a max snapshot timestamp of `2026-06-13 21:34:01.004000+00:00`.
+5. Live Cloud Run Job triggering currently depends on `gcloud` being available in the runtime. Dry-run previews work without live credentials, and triggering remains gated by flags and confirmation.
+
+## Architecture Status
+
+Status: PASS WITH WARNINGS
+
+Reviewed documents exist:
+
+- `docs/rebuild/validation/phase-8-11-final-green-gate.md`
+- `docs/rebuild/streamlit-compat-rollout.md`
+- `docs/rebuild/backtesting-v1.md`
+- `docs/rebuild/market-consensus-baselines.md`
+- `docs/rebuild/meatbag-claim-ledger.md`
+- `docs/rebuild/claim-grading-v1.md`
+- `docs/rebuild/content-brief-orchestrator.md`
+- `docs/rebuild/data-ops-cloud-run-jobs-rollout.md`
+- `docs/rebuild/cloud-run-operating-model.md`
+
+The target architecture remains Cloud Run service, Cloud Run Jobs, BigQuery, Cloud Scheduler, Cloud Storage, and Secret Manager. No Firebase target architecture was reintroduced.
+
+## Repo Status
+
+Command: `git status --short`
+
+Result: dirty working tree. Key tracked modifications:
+
+- `.gitignore`
+- `Launch_Studio.bat`
+- `app.py`
+- `src/generate_pigskin_rankings.py`
+
+There are many untracked rebuild files under `bigquery/`, `docs/`, `scripts/`, `src/`, and `tests/`. This is expected for the rebuild branch but should be reviewed before merge.
+
+Command: `git diff --stat`
+
+Tracked diff summary:
+
+```text
+.gitignore                       |   3 +
+Launch_Studio.bat                |   8 +-
+app.py                           | 916 ++++++++++++++++++++++++---------------
+src/generate_pigskin_rankings.py | 202 ++++++++-
+4 files changed, 756 insertions(+), 373 deletions(-)
+```
+
+Git reported CRLF normalization warnings only.
+
+## Secrets And Firebase Status
+
+Status: PASS
+
+Checks performed:
+
+- `git ls-files` search for service account, credential, secret, private key, `.pem`, `.p12`, and `.json` patterns returned no tracked credential files.
+- Source scan found no `BEGIN PRIVATE KEY`, `private_key`, `client_email.*gserviceaccount`, or the previously shared password string.
+- `GEMINI_API_KEY`, `CFBD_API_KEY`, and `GOOGLE_APPLICATION_CREDENTIALS` references are environment lookups, docs, tests with dummy values, or Streamlit inputs. No live key value was found.
+- Firebase artifact scan found no `firebase.json`, `.firebaserc`, Firestore rules, or `functions/` app artifacts. Matches were limited to historical validation docs and `AGENTS.md` wording.
+
+## Compile Status
+
+Status: PASS
+
+Commands:
+
+- `python -m py_compile app.py`: pass
+- `python -m compileall -q src scripts`: pass
+- `.\venv\Scripts\python.exe -m py_compile app.py src\cloud_run_jobs.py`: pass
+
+## Test Status
+
+Status: PASS WITH ENVIRONMENT WARNING
+
+Command:
+
+```powershell
+python -m unittest discover tests
+```
+
+Result: FAIL under `C:\Python314\python.exe`.
+
+Reason: the plain interpreter does not have repo dependencies installed. Failures were import errors for `google.cloud.bigquery` and `pandas`.
+
+Command:
+
+```powershell
+.\venv\Scripts\python.exe -m unittest discover tests
+```
+
+Result:
+
+```text
+Ran 214 tests in 0.037s
+OK
+```
+
+Focused Cloud Run Jobs tests also pass:
+
+```text
+Ran 9 tests
+OK
+```
+
+## Migration Status
+
+Status: PASS WITH WAREHOUSE PENDING WARNING
+
+Command:
+
+```powershell
+.\venv\Scripts\python.exe scripts\run_bigquery_migrations.py --dry-run
+```
+
+Result: pass. No migrations applied.
+
+Command:
+
+```powershell
+.\venv\Scripts\python.exe scripts\run_bigquery_migrations.py --list-pending
+```
+
+Result: live BigQuery access worked. Pending migrations:
+
+- `0020: create backtest framework`
+- `0021: create market consensus baselines`
+- `0022: create meatbag claim ledger`
+- `0023: create claim grading`
+- `0024: create content briefs`
+
+Destructive DDL check on pending migration files:
+
+- No `DROP`
+- No `TRUNCATE`
+- No `DELETE`
+- No `ALTER TABLE ... DROP`
+- No `CREATE OR REPLACE TABLE`
+
+## Validation SQL Status
+
+Status: MIXED
+
+Command:
+
+```powershell
+.\venv\Scripts\python.exe scripts\run_bigquery_validations.py --dry-run
+```
+
+Result: pass. The runner discovered `138` validation files.
+
+Live validation patterns:
+
+| Pattern | Result |
+| --- | --- |
+| `backtest` | 0 passed, 8 failed |
+| `market` | 1 passed, 8 failed |
+| `claim` | 0 passed, 13 failed |
+| `content_brief` | 0 passed, 7 failed |
+| `cloud_run_job` | 8 passed, 0 failed |
+
+Failure interpretation:
+
+- `backtest`, `claim`, and `content_brief` failures are table-not-found errors for Phase 12 objects whose migrations are still pending.
+- `market` has the same pending-table failures for market consensus tables, plus one existing `compat_trade_assets_current` freshness validation failure.
+- `cloud_run_job` validations pass against the existing `cloud_run_job_runs` table.
+
+No migrations were applied during validation.
+
+## Static Safety Status
+
+Status: PASS WITH LEGACY UI WARNING
+
+Pigskin arbitrary SQL:
+
+- `execute_bigquery_sql` is not present in live `app.py` or `src/` tool declarations.
+- Matches are limited to docs and tests that document or assert removal.
+- `app.py` now passes declared tools through `function_declarations=tools`, not a hardcoded SQL tool.
+
+Pigskin raw/source exposure:
+
+- `src/pigskin_chat_schema.py` keeps raw/source table names in `PIGSKIN_CHAT_BLOCKED_TABLES`.
+- Rendering the schema returns no blocked raw/source table names.
+- `tests/test_pigskin_chat_schema.py` and `tests/test_pigskin_context_tools.py` pass under the repo venv.
+
+Compatibility helpers:
+
+- `src/player_profiles.py` reads `compat_player_profiles_current`.
+- `src/sleeper_watch.py` reads `compat_sleeper_watch_candidates`.
+- `src/trade_assets.py` reads `compat_trade_assets_current`.
+- `src/trade_history.py` reads `compat_trade_player_history`.
+- `src/viewer_team_context.py` reads `compat_viewer_team_context`.
+- `src/llm_context_packets.py` reads `llm_player_context_packet`.
+
+Legacy UI warning:
+
+- `app.py` still has legacy direct reads of raw/source tables such as `player_rosters`, `player_contracts`, `depth_charts`, `market_values`, `weekly_metrics`, and Sleeper viewer-team tables.
+- This is expected from the default-off compatibility rollout, but it remains migration debt.
+
+Cloud Run Jobs:
+
+- `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS` defaults false.
+- `DATA_OPS_ALLOW_JOB_TRIGGER` defaults false.
+- Triggering requires both flags plus a user confirmation checkbox.
+- Unknown job names are rejected.
+- Secrets in env overrides are refused or redacted.
+- No production Cloud Run Jobs were triggered during validation.
+
+## Feature Flag Status
+
+Status: PASS
+
+Empty environment check:
+
+```text
+USE_COMPAT_PLAYER_PROFILES=False
+USE_COMPAT_SLEEPER_WATCH=False
+USE_COMPAT_TRADE_ASSETS=False
+USE_COMPAT_TRADE_PLAYER_HISTORY=False
+USE_COMPAT_VIEWER_TEAM_CONTEXT=False
+USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=False
+```
+
+## Dry-Run Smoke Status
+
+Status: PASS
+
+Commands:
+
+- `.\venv\Scripts\python.exe -m src.backtesting --help`: exit 0
+- `.\venv\Scripts\python.exe -m src.market_consensus --help`: exit 0
+- `.\venv\Scripts\python.exe -m src.claim_ledger --help`: exit 0
+- `.\venv\Scripts\python.exe -m src.claim_grading --help`: exit 0
+- `.\venv\Scripts\python.exe -m src.content_briefs --help`: exit 0
+- `.\venv\Scripts\python.exe -m src.job_runner --help`: exit 0
+
+No LLM calls were made.
+
+## Recommendation
+
+Proceed with the next code phase, but do not declare Phase 12 warehouse outputs live until:
+
+1. Migrations `0020` through `0024` are applied in an authorized migration run.
+2. Validation SQL for `backtest`, `market`, `claim`, and `content_brief` is rerun and passes or has documented data-seeding expectations.
+3. The `044_compat_trade_assets_current_recent_market_snapshot.sql` freshness warning is resolved or reclassified.
+4. The default shell `python` path is aligned with the repo venv or future validation commands explicitly use `.\venv\Scripts\python.exe`.
+5. Legacy Streamlit raw/source reads are retired behind compatibility objects.

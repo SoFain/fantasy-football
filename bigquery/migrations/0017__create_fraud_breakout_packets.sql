@@ -1,0 +1,78 @@
+-- Deterministic Fraud Watch and Sleeper Breakout segment packet tables.
+-- Additive schema-only migration. Data is written by src/segment_packets.py.
+
+CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.fraud_watch_packets` (
+    packet_id STRING NOT NULL,
+    model_run_id STRING,
+    ranking_version STRING,
+    player_id_internal STRING,
+    source_player_key STRING,
+    display_name STRING,
+    position STRING,
+    team STRING,
+    season INT64 NOT NULL,
+    week INT64 NOT NULL,
+    scoring_profile_id STRING NOT NULL,
+    league_type_id STRING NOT NULL,
+    roster_format_id STRING NOT NULL,
+    fraud_score FLOAT64,
+    confidence_score FLOAT64,
+    actual_points_recent FLOAT64,
+    expected_points_recent FLOAT64,
+    points_over_expected_recent FLOAT64,
+    usage_score FLOAT64,
+    role_stability_score FLOAT64,
+    td_dependency_score FLOAT64,
+    efficiency_outlier_score FLOAT64,
+    market_hype_score FLOAT64,
+    rank_vs_value_gap FLOAT64,
+    recommended_take STRING,
+    packet_json STRING,
+    packet_text STRING,
+    snark_hooks_json STRING,
+    counterargument STRING,
+    source_freshness_json STRING,
+    missing_data_flags STRING,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+)
+PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(1999, 2050, 1))
+CLUSTER BY player_id_internal, position, scoring_profile_id, week;
+
+CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.sleeper_breakout_packets` (
+    packet_id STRING NOT NULL,
+    model_run_id STRING,
+    ranking_version STRING,
+    player_id_internal STRING,
+    source_player_key STRING,
+    display_name STRING,
+    position STRING,
+    team STRING,
+    opponent STRING,
+    season INT64 NOT NULL,
+    week INT64 NOT NULL,
+    scoring_profile_id STRING NOT NULL,
+    league_type_id STRING NOT NULL,
+    roster_format_id STRING NOT NULL,
+    breakout_score FLOAT64,
+    confidence_score FLOAT64,
+    role_growth_score FLOAT64,
+    usage_trend_score FLOAT64,
+    opportunity_score FLOAT64,
+    underperformance_signal FLOAT64,
+    rostered_rate FLOAT64,
+    availability_score FLOAT64,
+    matchup_score FLOAT64,
+    market_discount_score FLOAT64,
+    recommended_take STRING,
+    packet_json STRING,
+    packet_text STRING,
+    snark_hooks_json STRING,
+    counterargument STRING,
+    source_freshness_json STRING,
+    missing_data_flags STRING,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+)
+PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(1999, 2050, 1))
+CLUSTER BY player_id_internal, position, scoring_profile_id, week;

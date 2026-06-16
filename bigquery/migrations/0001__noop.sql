@@ -1,0 +1,3 @@
+-- No-op baseline migration.
+-- Purpose: prove that the migration runner can discover and record migrations
+-- without changing warehouse data or schema.
