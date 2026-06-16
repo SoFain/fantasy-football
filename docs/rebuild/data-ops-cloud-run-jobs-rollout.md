@@ -199,3 +199,31 @@ Result:
 - Local `gcloud` was not installed, so a future live test must run from an environment with `gcloud` or move the trigger path to a Cloud Run Jobs client library.
 
 See [phase-14-7-cloud-run-validate-warehouse-test.md](validation/phase-14-7-cloud-run-validate-warehouse-test.md).
+
+## Phase 15.1 Cleanup Note
+
+The local dry-run Data Ops metadata row `validate-warehouse-20260616T133114Z-5e7c51a8` remains a known cleanup warning.
+
+Phase 15.1 confirmed:
+
+- the row is a dry-run metadata artifact;
+- no Cloud Run execution name exists;
+- no live Cloud Run Job was triggered;
+- cleanup is still blocked by BigQuery streaming-buffer mutation limits.
+
+Keep live triggers gated by `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`, `DATA_OPS_ALLOW_JOB_TRIGGER=true`, and explicit user confirmation.
+
+## Phase 15.4 Validate Warehouse Live-Test Result
+
+Phase 15.4 did not deploy or trigger a live Cloud Run Job.
+
+Blocking gates:
+
+- `ALLOW_VALIDATE_WAREHOUSE_CLOUD_RUN_TEST=true` was not set.
+- `CLOUD_RUN_JOBS_IMAGE` was not set.
+- `CLOUD_RUN_JOB_SERVICE_ACCOUNT` was not set.
+- `gcloud` was not installed in the local shell.
+
+Dry-run preview remained available and produced the expected `validate-warehouse` deploy command shape. `cloud_run_job` validations passed after the attempt.
+
+Live trigger rollout remains blocked until those gates are satisfied. See [phase-15-4-live-validate-warehouse-job-report.md](validation/phase-15-4-live-validate-warehouse-job-report.md).

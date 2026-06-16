@@ -59,6 +59,8 @@ When enabled, it supports source management, manual claim entry, CSV import prev
 
 CSV imports are validated before writing and use [src/claim_import.py](../../src/claim_import.py), which writes through the existing `src.claim_ledger` helper functions.
 
+Phase 14.5 added a small draft-only demo import set for workflow testing. See [phase-14-5-claim-ledger-sample-report.md](validation/phase-14-5-claim-ledger-sample-report.md).
+
 ## Status Workflow
 
 1. `draft`: quick manual entry. Only basic fields are required.

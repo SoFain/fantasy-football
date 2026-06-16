@@ -241,3 +241,38 @@ Run:
 Phase 14.7 produced a dry-run deployment preview for only `validate-warehouse`. Live deployment was not run because `ALLOW_VALIDATE_WAREHOUSE_CLOUD_RUN_TEST=true` was not set and `gcloud` was not installed locally.
 
 See [phase-14-7-cloud-run-validate-warehouse-test.md](validation/phase-14-7-cloud-run-validate-warehouse-test.md).
+
+## Phase 15.1 Cleanup Note
+
+Phase 15.1 rechecked local dry-run metadata row `validate-warehouse-20260616T133114Z-5e7c51a8`.
+
+Findings:
+
+- `status` is still `running`.
+- `cloud_run_execution_name` is null.
+- `metadata_json` contains `"dry_run": true`.
+- The row is not a live Cloud Run execution.
+
+A guarded cleanup update was attempted with all of those predicates, but BigQuery rejected it because the row is still in the streaming buffer. No force cleanup was attempted. Retry only after the row becomes mutable.
+
+## Phase 15.4 Validate Warehouse Live-Test Gate
+
+Phase 15.4 attempted the authorized live path for only `validate-warehouse`.
+
+Result:
+
+- Safety checks passed.
+- Tests and compile checks passed.
+- `gcloud` was not installed in the local shell.
+- `ALLOW_VALIDATE_WAREHOUSE_CLOUD_RUN_TEST=true` was not set.
+- `CLOUD_RUN_JOBS_IMAGE` was not set.
+- `CLOUD_RUN_JOB_SERVICE_ACCOUNT` was not set.
+- A dry-run deployment command preview was produced with a placeholder image.
+- No Cloud Run Job was deployed.
+- No Cloud Run Job was triggered.
+- No scheduler jobs were created.
+- `cloud_run_job` validations passed after the attempt.
+
+Live path classification: NO-GO from this local environment until the missing authorization and tooling gates are satisfied.
+
+See [phase-15-4-live-validate-warehouse-job-report.md](validation/phase-15-4-live-validate-warehouse-job-report.md).

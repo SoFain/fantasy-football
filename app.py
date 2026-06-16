@@ -4222,7 +4222,10 @@ def render_value_analyzer():
     # Deep AI Outlook using Gemini
     st.markdown(f"#### 🧠 AI {projection_years}-Year Outlook Analysis")
     st.markdown(f"Use Gemini to analyze their metrics and crawl recent team news for {projection_years}-year outlook projections.")
-    render_data_path_status("Trade Player History", use_compat_trade_player_history())
+    trade_history_uses_compat = use_compat_trade_player_history()
+    render_data_path_status("Trade Player History", trade_history_uses_compat)
+    if trade_history_uses_compat:
+        st.caption("Trade player history source: compat_trade_player_history")
 
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not active_gemini_key:
@@ -4238,7 +4241,7 @@ def render_value_analyzer():
                     bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
 
                     def query_player_history(name):
-                        if use_compat_trade_player_history():
+                        if trade_history_uses_compat:
                             try:
                                 return query_compat_trade_player_history(name)
                             except Exception as compat_error:
@@ -4278,6 +4281,8 @@ def render_value_analyzer():
                     for a in assets_A:
                         name = a['player_display_name']
                         hist = query_player_history(name) if not pd.isna(a['position']) else pd.DataFrame()
+                        if trade_history_uses_compat:
+                            render_compat_metadata(hist, f"{name} trade history")
                         news = get_stored_news(name) if not pd.isna(a['position']) else ""
                         assets_a_details.append(
                             f"- **{name}** ({a['position'] if not pd.isna(a['position']) else 'Pick'})\n"
@@ -4291,6 +4296,8 @@ def render_value_analyzer():
                     for b in assets_B:
                         name = b['player_display_name']
                         hist = query_player_history(name) if not pd.isna(b['position']) else pd.DataFrame()
+                        if trade_history_uses_compat:
+                            render_compat_metadata(hist, f"{name} trade history")
                         news = get_stored_news(name) if not pd.isna(b['position']) else ""
                         assets_b_details.append(
                             f"- **{name}** ({b['position'] if not pd.isna(b['position']) else 'Pick'})\n"

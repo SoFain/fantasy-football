@@ -101,3 +101,9 @@ Use:
 .\venv\Scripts\python.exe scripts\run_bigquery_validations.py --dry-run
 .\venv\Scripts\python.exe scripts\run_bigquery_validations.py --run --pattern claim_ledger_ui
 ```
+
+## Phase 14.5 Sample Data
+
+Phase 14.5 added draft-only demo claims so the Claim Ledger UI and import workflow can be exercised without production claims, scraping, or LLM calls.
+
+See [phase-14-5-claim-ledger-sample-report.md](validation/phase-14-5-claim-ledger-sample-report.md).

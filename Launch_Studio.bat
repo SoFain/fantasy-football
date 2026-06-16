@@ -19,6 +19,8 @@ if exist "%~dp0venv\Scripts\activate.bat" (
 
 echo.
 set "BQ_PROJECT=fantasy-football-498121"
+REM Staging or local QA only. Leave disabled by default.
+REM set "USE_COMPAT_TRADE_PLAYER_HISTORY=true"
 echo [INFO] Using Application Default Credentials or the active Google environment.
 echo [INFO] For local auth, run: gcloud auth application-default login
 

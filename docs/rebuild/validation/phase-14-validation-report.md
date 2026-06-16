@@ -321,3 +321,21 @@ Status: pass.
 GO WITH WARNINGS.
 
 There are no hard blockers. The warnings are operational and documentation cleanup items, not architecture, safety, test, migration, Pigskin, or data-integrity blockers.
+
+## Phase 15.1 Cleanup Addendum
+
+Phase 15.1 closed documentation and cleanup-only warnings.
+
+Results:
+
+- Created `docs/rebuild/validation/phase-14-5-claim-ledger-sample-report.md`.
+- Confirmed 3 demo claims, 3 draft demo claims, 0 non-draft demo claims, 3 claim-player rows, and 1 intentionally unresolved draft-only demo row.
+- Confirmed no scraping, no LLM calls, and no production claims fabricated.
+- Confirmed `validate-warehouse-20260616T133114Z-5e7c51a8` is a local dry-run metadata artifact with `cloud_run_execution_name` null and `metadata_json` containing `"dry_run": true`.
+- Attempted guarded Cloud Run metadata cleanup, but BigQuery still rejected the update because the row remains in the streaming buffer.
+- Marked partial projection model run `weekly_projection-2025-1-20260616T113848Z-f07a0ccb` as `failed`.
+- Confirmed seeded backtest `backtest-weekly-2025-2025-20260616T114527Z-2093e839` remains valid and still points to complete model run `weekly_projection-2025-1-20260616T114422Z-a25a92c1`.
+
+Remaining warning:
+
+- The local dry-run `validate-warehouse` metadata row still needs status cleanup after BigQuery allows mutation.

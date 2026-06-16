@@ -108,6 +108,8 @@ Run each item with all flags unset first, then enable one flag at a time.
    - Confirm the asset selector loads with the default legacy path.
    - Enable `USE_COMPAT_TRADE_PLAYER_HISTORY=true` first.
    - Select two known players and confirm recent history loads through the helper path.
+   - Confirm the Trade Lab displays `Trade player history source: compat_trade_player_history`.
+   - Confirm source freshness or missing-data flags display when the compat rows provide them.
    - Confirm AI trade outlook still receives player history context.
    - Disable `USE_COMPAT_TRADE_PLAYER_HISTORY` and confirm the legacy `weekly_metrics` path still works.
    - Enable `USE_COMPAT_TRADE_ASSETS=true`.

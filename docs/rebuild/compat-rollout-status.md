@@ -133,6 +133,24 @@ Result:
 - Trade Assets stayed on the legacy warehouse path.
 - Ja'Marr Chase and Justin Jefferson were visible in the Trade Lab selectors.
 - `src.trade_history` returned 10 bounded recent-history rows for both players.
+
+## Phase 15.3 Staging Promotion
+
+Phase 15.3 keeps production defaults unchanged and documents staging-only enablement for `USE_COMPAT_TRADE_PLAYER_HISTORY=true`.
+
+Staging command:
+
+```powershell
+gcloud run services update <staging-service-name> --region <region> --set-env-vars USE_COMPAT_TRADE_PLAYER_HISTORY=true
+```
+
+Rollback:
+
+```powershell
+gcloud run services update <staging-service-name> --region <region> --remove-env-vars USE_COMPAT_TRADE_PLAYER_HISTORY
+```
+
+Do not enable any other `USE_COMPAT_*` flag during this promotion. The Trade Lab UI now shows `Trade player history source: compat_trade_player_history` when this flag is active, and uses available source freshness or missing-data metadata from the compatibility rows.
 - The helper SQL used `compat_trade_player_history` and did not reference `weekly_metrics`.
 - Local Gemini was not configured, so the AI outlook button was not run.
 - Rollback was verified by restarting Streamlit with all compatibility flags unset. Trade Player History returned to the legacy warehouse path.
