@@ -130,6 +130,24 @@ Metadata:
 
 Because the current `market_values` ingestion recreates the table and does not store per-row snapshot timestamps, the materializer uses BigQuery table metadata for `market_snapshot_timestamp` by default.
 
+Refresh cadence:
+
+- August through January: refresh daily, or within 48 hours before current market analysis.
+- February through July: refresh manually or weekly when trade-market context is being used.
+- Offseason snapshots older than 14 days are warning-level freshness issues, not schema blockers.
+
+Validation `044_compat_trade_assets_current_recent_market_snapshot.sql` follows that policy. It returns no rows when the snapshot is within the expected window. If the snapshot is stale, it returns a review row that the validation runner reports as a warning instead of a hard failure.
+
+Refresh commands:
+
+```powershell
+.\venv\Scripts\python.exe -m src.materialize_trade_assets --dry-run
+.\venv\Scripts\python.exe -m src.fetch_market_values --dataset fantasy_football_brain
+.\venv\Scripts\python.exe -m src.materialize_trade_assets
+```
+
+The `fetch_market_values` command calls the external FantasyCalc API. Do not run it from validation unless source refresh has been explicitly authorized.
+
 ## Missing Data Flags
 
 The materializer emits JSON array text in `missing_data_flags`.

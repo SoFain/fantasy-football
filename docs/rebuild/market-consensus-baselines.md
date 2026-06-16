@@ -96,6 +96,29 @@ A negative `model_vs_market_mae_delta` means the model had lower MAE than the ma
 - Prop lines are stored but not yet translated into player fantasy projections.
 - Consensus source licensing must be reviewed before automation.
 
+## Market Refresh Cadence
+
+Trade market values used by `compat_trade_assets_current` currently come from FantasyCalc through [src/fetch_market_values.py](../../src/fetch_market_values.py), then [src/materialize_trade_assets.py](../../src/materialize_trade_assets.py) stamps the mart with the BigQuery `market_values` table metadata timestamp. The current ingestion recreates `market_values`, so the table modified timestamp is the source freshness proxy until provider snapshot timestamps are stored per row.
+
+Recommended cadence:
+
+- August through January: refresh daily, or at least within 48 hours before show, rankings, trade, or waiver content.
+- February through July: refresh manually or weekly when market context is being used.
+- Offseason snapshots older than 14 days should be reviewed, but they are warning-level unless the UI is actively presenting current trade-market claims.
+
+Dry-run materialization check:
+
+```powershell
+.\venv\Scripts\python.exe -m src.materialize_trade_assets --dry-run
+```
+
+Live source refresh calls the FantasyCalc API and should be run only when external API access is intended:
+
+```powershell
+.\venv\Scripts\python.exe -m src.fetch_market_values --dataset fantasy_football_brain
+.\venv\Scripts\python.exe -m src.materialize_trade_assets
+```
+
 ## Future API Adapters
 
 Future adapters should be isolated per source and must:
