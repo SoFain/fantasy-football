@@ -95,6 +95,10 @@ class StreamlitCompatRolloutTests(unittest.TestCase):
         self.assertIn("compatibility context is unavailable", APP_SOURCE)
         self.assertIn("No legacy viewer-team context was mixed into this flagged path.", APP_SOURCE)
 
+    def test_trade_history_staging_marker_is_visible(self):
+        self.assertIn("Trade player history source: compat_trade_player_history", APP_SOURCE)
+        self.assertIn("render_compat_metadata(hist", APP_SOURCE)
+
     def test_player_profiles_list_query_uses_compat_view(self):
         sql, job_config = build_player_profiles_list_query(
             project_id="fantasy-football-498121",

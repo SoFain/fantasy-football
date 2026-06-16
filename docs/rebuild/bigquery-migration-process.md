@@ -10,6 +10,7 @@ This process does not change `src/load.py`, `src/materialize.py`, `src/pipeline.
 - Migrations: [bigquery/migrations](../../bigquery/migrations)
 - Views and compatibility placeholders: [bigquery/views](../../bigquery/views)
 - Validation SQL helpers: [bigquery/validations](../../bigquery/validations)
+- Validation process: [docs/rebuild/bigquery-validation-process.md](bigquery-validation-process.md)
 - Compatibility contracts: [bigquery/contracts](../../bigquery/contracts)
 
 ## Configuration
@@ -34,7 +35,7 @@ The default keeps migrations pointed at the current dataset unless explicitly ov
 
 ## Commands
 
-Dry run, local only, no BigQuery connection:
+Dry run, local only, no BigQuery connection. This lists discovered migration files without consulting the live `schema_migrations` ledger:
 
 ```powershell
 python scripts/run_bigquery_migrations.py --dry-run
@@ -46,7 +47,7 @@ On Windows, prefer the repo venv so dependencies match the application image:
 .\venv\Scripts\python.exe scripts/run_bigquery_migrations.py --dry-run
 ```
 
-List pending migrations by checking the ledger table:
+List pending migrations by checking the live ledger table. Use this as the authoritative pending-state command:
 
 ```powershell
 python scripts/run_bigquery_migrations.py --list-pending
@@ -74,6 +75,22 @@ Live commands such as `--list-pending`, `--apply`, and `--record` require Google
 
 - Project-level `roles/bigquery.jobUser` on `fantasy-football-498121`.
 - Dataset-level BigQuery permissions on `fantasy_football_brain`, usually `roles/bigquery.dataEditor` for applying migrations or `roles/bigquery.dataViewer` for read-only inspection.
+
+## Interpreting Dry Run Versus Pending State
+
+`--dry-run` is intentionally ledger-unaware. It is an offline discovery mode for local files and should print:
+
+```text
+Dry run mode: local discovery only. This does not connect to BigQuery or read the schema_migrations ledger.
+Use --list-pending for ledger-aware pending migration status.
+Discovered migration files:
+```
+
+If `--dry-run` lists migration files but `--list-pending` says `No pending migrations.`, the warehouse ledger is current. In that case there is no migration work to apply.
+
+`--list-pending` is ledger-aware. It connects to BigQuery, ensures the ledger exists, reads `schema_migrations`, and prints only migrations that are not recorded in the ledger.
+
+`--apply` is also ledger-aware. It applies only migrations missing from `schema_migrations` and records each applied migration after successful execution.
 
 ## Migration Ledger
 
@@ -152,7 +169,7 @@ Scoring-profile materialization is a callable job, not a migration backfill:
 
 ## Validation SQL
 
-Validation helpers live in `bigquery/validations/`.
+Validation helpers live in `bigquery/validations/`. The operating process is documented in [BigQuery Validation Process](bigquery-validation-process.md).
 
 The initial helper checks for the migration ledger table:
 
@@ -185,7 +202,7 @@ The initial helper checks for the migration ledger table:
 - `134_content_briefs_source_freshness_exists.sql`
 - `135_content_briefs_missing_flags_exist.sql`
 
-Validation SQL files are not automatically run by the migration runner yet. They are tracked here so future PRs can add explicit checks without mixing validation and migration execution.
+Validation SQL files are not automatically run by the migration runner. Run them with [scripts/run_bigquery_validations.py](../../scripts/run_bigquery_validations.py) after migrations or materialization jobs.
 
 ## Safety Notes
 
@@ -197,8 +214,8 @@ Validation SQL files are not automatically run by the migration runner yet. They
 
 ## Prioritized Migration-Debt List
 
-1. Add a validation runner for `bigquery/validations`.
-2. Apply `0004` and keep Pigskin ranking generation writing `model_run_id`.
-3. Add `player_identity_bridge` before wiring Player Profiles to compatibility views.
-4. Convert compatibility placeholder views into production views or tables in small PRs.
-5. Replace arbitrary Pigskin SQL execution with allowlisted context APIs after `llm_player_context_packet` is production-ready.
+1. Keep Pigskin ranking generation writing `model_run_id`.
+2. Continue replacing legacy Streamlit raw/source reads with compatibility objects behind default-off feature flags.
+3. Convert remaining compatibility placeholder views into production views or tables in small PRs.
+4. Materialize Phase 13 outputs, then run the matching validation patterns.
+5. Keep arbitrary Pigskin SQL removed and expand allowlisted context APIs only through packet tables.

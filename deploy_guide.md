@@ -108,6 +108,25 @@ gcloud run deploy nfl-studio-dashboard \
 - `--port=8501`: Sets the container ingress port to align with Streamlit's default port.
 - `--no-allow-unauthenticated`: Restricts access so only authenticated IAM users in your GCP project can access the dashboard. (Change this to `--allow-unauthenticated` if you want to make it publicly accessible).
 
+### Staging-Only Compatibility Flag
+Phase 15.3 promotes only Trade Lab player history to staging. Production defaults remain unchanged.
+
+Enable it on the staging Cloud Run service only:
+
+```powershell
+gcloud run services update <staging-service-name> `
+    --region <region> `
+    --set-env-vars USE_COMPAT_TRADE_PLAYER_HISTORY=true
+```
+
+Do not set the other `USE_COMPAT_*` flags until their staged QA reports explicitly approve promotion. Roll back the staging flag with:
+
+```powershell
+gcloud run services update <staging-service-name> `
+    --region <region> `
+    --remove-env-vars USE_COMPAT_TRADE_PLAYER_HISTORY
+```
+
 ### External Verification Cost Controls
 - Default app cap: 25 external search requests per UTC day.
 - Absolute hard cap in code: 99 external search requests per UTC day.

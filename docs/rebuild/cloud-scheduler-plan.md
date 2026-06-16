@@ -5,51 +5,31 @@ This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does 
 ## Scheduler Principles
 
 - Trigger Cloud Run Jobs, not Streamlit request handlers.
-- Use least-privilege service accounts.
-- Keep early schedules conservative.
+- Use `scheduler-invoker-sa` or an equivalent least-privilege invoker identity.
+- Keep schedules disabled by default during rollout.
 - Prefer explicit job args over hidden defaults.
 - Record all job status in `cloud_run_job_runs`.
-- Add tighter cost caps before increasing frequency.
+- Add cost caps before increasing frequency.
 
-## Suggested Cadence
+## Proposed Schedules
 
-| Job | Suggested cadence | Notes |
-| --- | --- | --- |
-| `ingest-sleeper-news` | daily, more often during active season | Keep Sleeper calls below API safety limits. |
-| `ingest-nflverse` | after game days | Run by explicit season. Avoid repeated full truncation during live show prep unless intended. |
-| `materialize-analytics` | after successful ingestion | Use after source tables are refreshed. |
-| `generate-pigskin-rankings` | explicit cadence | Start manual or weekly. Do not overrun Gemini budget. |
-| `generate-evidence-packets` | after rankings and projections | Use for show prep and segment packets. |
-| `validate-warehouse` | after materialization | Use a validation pattern when checking a narrow sprint. |
-| `run-projections` | weekly or daily during active season | Start with weekly projection horizon, then add ROS and dynasty cadence. |
-| `run-backtests` | weekly or after projection changes | Start manual or narrow. Use dry-run first and keep season windows bounded. |
-| `verify-external-context` | manual or queued by player | Keep quota use explicit and auditable. |
+| Job | Cadence | Seasonality | Triggering identity | Dependencies | Cost caution | Retry policy | Rollout |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `ingest-sleeper-news` | daily, then every 2 to 4 hours in active season if needed | active season higher frequency | `scheduler-invoker-sa` | Sleeper API available | API quota and rate limit | 2 retries, exponential backoff | disabled by default |
+| `ingest-nflverse` | after game days | active season plus manual offseason refresh | `scheduler-invoker-sa` | nflverse source refresh | BigQuery load cost | 1 retry | disabled by default |
+| `materialize-analytics` | after successful ingestion | active season daily or weekly | `scheduler-invoker-sa` | source tables refreshed | BigQuery processing | 1 retry | disabled by default |
+| `generate-pigskin-rankings` | weekly or manual | active draft and season windows | `scheduler-invoker-sa` | analytics materialized, Gemini secret available | LLM cost | no automatic retry until quality gates exist | disabled by default |
+| `generate-evidence-packets` | after rankings and projections | show prep days | `scheduler-invoker-sa` | rankings and projections current | BigQuery processing | 1 retry | disabled by default |
+| `run-projections` | weekly, then daily during active season | active season | `scheduler-invoker-sa` | analytics current | BigQuery processing | 1 retry | disabled by default |
+| `run-backtests` | manual or weekly after model changes | all season windows but bounded | `scheduler-invoker-sa` | projections and actuals available | can be expensive over large windows | no automatic retry for large windows | disabled by default |
+| `validate-warehouse` | after materialization and daily in active season | all year | `scheduler-invoker-sa` | migrations applied | low to moderate, depends on pattern | 2 retries | first candidate for enablement |
+| `grade-claims` | weekly after games | active season and offseason review batches | `scheduler-invoker-sa` | claim ledger and actuals current | BigQuery processing | 1 retry | disabled by default |
+| `generate-content-briefs` | show prep days | active season and draft season | `scheduler-invoker-sa` | evidence packets, rankings, claims current | BigQuery processing, no LLM by default | 1 retry | disabled by default |
+| `verify-external-context` | manual or queued only | player-specific | `scheduler-invoker-sa` | external provider configured | external search cost and quota | no automatic retry | disabled by default |
 
 ## Example Commands
 
-Create a daily Sleeper news refresh trigger:
-
-```powershell
-gcloud scheduler jobs create http ingest-sleeper-news-daily `
-  --location us-central1 `
-  --schedule "0 8 * * *" `
-  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/ingest-sleeper-news:run" `
-  --http-method POST `
-  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
-```
-
-Create an after-game-day nflverse trigger:
-
-```powershell
-gcloud scheduler jobs create http ingest-nflverse-weekly `
-  --location us-central1 `
-  --schedule "0 9 * * MON,TUE" `
-  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/ingest-nflverse:run" `
-  --http-method POST `
-  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
-```
-
-Create a post-materialization validation trigger:
+Create a disabled daily validation trigger:
 
 ```powershell
 gcloud scheduler jobs create http validate-warehouse-daily `
@@ -57,36 +37,56 @@ gcloud scheduler jobs create http validate-warehouse-daily `
   --schedule "30 9 * * *" `
   --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/validate-warehouse:run" `
   --http-method POST `
-  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
+  --oauth-service-account-email scheduler-invoker-sa@fantasy-football-498121.iam.gserviceaccount.com `
+  --attempt-deadline 1800s
 ```
+
+Pause immediately after creation during rollout:
+
+```powershell
+gcloud scheduler jobs pause validate-warehouse-daily --location us-central1
+```
+
+Create a disabled Sleeper news trigger:
+
+```powershell
+gcloud scheduler jobs create http ingest-sleeper-news-daily `
+  --location us-central1 `
+  --schedule "0 8 * * *" `
+  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/ingest-sleeper-news:run" `
+  --http-method POST `
+  --oauth-service-account-email scheduler-invoker-sa@fantasy-football-498121.iam.gserviceaccount.com
+```
+
+Do not create or unpause scheduler jobs until a live rollout is explicitly authorized.
 
 ## Staged Rollout
 
-1. Create Cloud Run Job definitions manually.
-2. Run each job manually with `--dry-run` or tight `--limit` where supported.
-3. Apply the `cloud_run_job_runs` migration.
-4. Run one manual non-dry execution per job type.
-5. Verify `cloud_run_job_runs` status rows.
-6. Enable the lowest-risk schedules first: `validate-warehouse`, then `ingest-sleeper-news`.
-7. Add materialization and projection schedules after validation is stable.
-8. Keep ranking generation manual until LLM cost and output quality are understood.
+1. Deploy Cloud Run Job definitions with dry-run script previews first.
+2. Run `validate-warehouse` manually with a narrow pattern.
+3. Run one low-risk non-dry job manually and verify `cloud_run_job_runs`.
+4. Create Scheduler jobs paused.
+5. Unpause only `validate-warehouse` first.
+6. Add Sleeper news only after API limits are confirmed.
+7. Add materialization and projections after validation is stable.
+8. Keep ranking generation, external verification, backtests, claim grading, and content briefs manual until cost and quality gates are stable.
 
 ## Cost Controls
 
-- Start with daily or weekly schedules, not hourly.
-- Use job-specific `--limit` in test jobs.
+- Start daily or weekly, not hourly.
+- Use narrow validation patterns during rollout.
 - Keep external verification manual until quotas are visible.
-- Store large logs in Cloud Storage only when needed.
-- Review `cloud_run_job_runs` weekly for failures, duration spikes, and repeated reruns.
+- Keep backtest windows bounded.
+- Review `cloud_run_job_runs` weekly for repeated failures and duration spikes.
+- Do not schedule LLM-backed jobs until budget controls and review gates are in place.
 
-## Deferred Streamlit Wiring
+## Rollback
 
-The Streamlit Data Ops buttons stay in place for now.
-
-Future UI triggering should be guarded by:
+Pause or delete Scheduler jobs first. Then disable Streamlit trigger flags:
 
 ```text
 USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=false
+DATA_OPS_ALLOW_JOB_TRIGGER=false
 ```
 
-When enabled, Streamlit should call a narrow job trigger helper and display recent `cloud_run_job_runs` rows instead of waiting for long subprocesses.
+Local subprocess controls remain available while the scheduler path is paused.

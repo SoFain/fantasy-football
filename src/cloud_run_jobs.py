@@ -78,10 +78,20 @@ CONFIGURED_JOBS: dict[str, DataOpsJob] = {
             "team-name": JobArgSpec(),
         },
     ),
+    "ingest-context-events": DataOpsJob(
+        "ingest-context-events",
+        "Load curated context event CSV rows.",
+        {"csv": JobArgSpec()},
+    ),
     "ingest-market-values": DataOpsJob(
         "ingest-market-values",
         "Refresh market value baselines.",
         {"league-type": JobArgSpec(choices=("redraft", "dynasty"))},
+    ),
+    "ingest-college-stats": DataOpsJob(
+        "ingest-college-stats",
+        "Refresh college player stats and prospect context.",
+        {"season": JobArgSpec("int", required=True)},
     ),
     "materialize-analytics": DataOpsJob(
         "materialize-analytics",
@@ -158,14 +168,50 @@ CONFIGURED_JOBS: dict[str, DataOpsJob] = {
             "max-results": JobArgSpec("int"),
         },
     ),
+    "generate-content-briefs": DataOpsJob(
+        "generate-content-briefs",
+        "Build deterministic show content briefs from curated packets.",
+        {
+            "brief-type": JobArgSpec(
+                required=True,
+                choices=(
+                    "fraud_watch_show",
+                    "sleeper_breakout_show",
+                    "trade_review_show",
+                    "rankings_debate_show",
+                    "meatbag_accountability_show",
+                    "weekly_streamers_show",
+                    "dynasty_value_show",
+                    "full_weekly_show_prep",
+                ),
+            ),
+            "season": JobArgSpec("int", required=True),
+            "week": JobArgSpec("int"),
+            **COMMON_CONTEXT_ARGS,
+        },
+    ),
+    "grade-claims": DataOpsJob(
+        "grade-claims",
+        "Run deterministic claim grading and source scorecards.",
+        {
+            "claim-id": JobArgSpec(),
+            "season": JobArgSpec("int"),
+            "week": JobArgSpec("int"),
+            **COMMON_CONTEXT_ARGS,
+        },
+    ),
 }
 
 DATA_OPS_ACTION_TO_JOB = {
     "statistics_ingestion": "ingest-nflverse",
     "realtime_news": "ingest-sleeper-news",
     "sleeper_viewer_team": "ingest-sleeper-league",
+    "context_events": "ingest-context-events",
     "market_values": "ingest-market-values",
+    "college_stats": "ingest-college-stats",
     "pigskin_rankings": "generate-pigskin-rankings",
+    "content_briefs": "generate-content-briefs",
+    "claim_grading": "grade-claims",
     "validation_sweep": "validate-warehouse",
     "player_context_verification": "verify-external-context",
 }
@@ -243,6 +289,7 @@ def build_job_overrides(
     normalized_args = validate_job_args(job_name, args or {})
     safe_env = validate_env_overrides(env_overrides or {})
     container_args = ["--job-name", job_name]
+    container_args.extend(["--project", get_cloud_run_project(), "--dataset", get_bigquery_dataset()])
     for key, value in normalized_args.items():
         if value in (None, ""):
             continue
@@ -268,6 +315,7 @@ def trigger_cloud_run_job(
     *,
     client: Any | None = None,
     allow_trigger: bool | None = None,
+    confirmed: bool = False,
 ) -> dict[str, Any]:
     """Preview or explicitly trigger a Cloud Run Job through gcloud."""
 
@@ -288,8 +336,11 @@ def trigger_cloud_run_job(
             "Cloud Run Job triggering requires USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true "
             "and DATA_OPS_ALLOW_JOB_TRIGGER=true."
         )
-    if shutil.which("gcloud") is None:
-        raise RuntimeError("gcloud is required for live Cloud Run Job triggers in this deployment path.")
+    if not confirmed:
+        raise PermissionError("Cloud Run Job triggering requires explicit user confirmation.")
+    gcloud_path = verify_gcloud_available()
+    if not gcloud_path:
+        raise RuntimeError("gcloud is required for live Cloud Run Job triggers in this deployment path. Dry-run previews remain available.")
 
     bq = get_bigquery_module()
     client = client or bq.Client(project=get_cloud_run_project())
@@ -411,7 +462,17 @@ def record_cloud_run_job_trigger(
             "source": "streamlit_data_ops",
         }, sort_keys=True),
     }
-    errors = client.insert_rows_json(bigquery_table_id(client.project, dataset_id, JOB_RUNS_TABLE), [row])
+    table_id = bigquery_table_id(client.project, dataset_id, JOB_RUNS_TABLE)
+    if hasattr(client, "load_table_from_json") and hasattr(bq, "LoadJobConfig"):
+        job_config = bq.LoadJobConfig(write_disposition=bq.WriteDisposition.WRITE_APPEND)
+        job = client.load_table_from_json([row], table_id, job_config=job_config)
+        job.result()
+        errors = getattr(job, "errors", None)
+        if errors:
+            raise RuntimeError(f"Failed to record Cloud Run Job trigger: {errors}")
+        return job_run_id
+
+    errors = client.insert_rows_json(table_id, [row])
     if errors:
         raise RuntimeError(f"Failed to record Cloud Run Job trigger: {errors}")
     return job_run_id
@@ -533,6 +594,11 @@ def coerce_arg_value(key: str, value: Any, spec: JobArgSpec) -> Any:
 
 
 def build_gcloud_execute_command(overrides: Mapping[str, Any]) -> list[str]:
+    project = get_cloud_run_project()
+    region = get_cloud_run_region()
+    _validate_cloud_resource_name(str(overrides["cloud_run_job_name"]), "cloud_run_job_name")
+    _validate_cloud_project(project)
+    _validate_cloud_region(region)
     command = [
         "gcloud",
         "run",
@@ -540,9 +606,9 @@ def build_gcloud_execute_command(overrides: Mapping[str, Any]) -> list[str]:
         "execute",
         str(overrides["cloud_run_job_name"]),
         "--region",
-        get_cloud_run_region(),
+        region,
         "--project",
-        get_cloud_run_project(),
+        project,
         "--format=json",
     ]
     container_args = [str(value) for value in overrides["container_args"]]
@@ -586,7 +652,9 @@ def parse_execution_name(stdout: str) -> str | None:
 
 def cloud_run_job_name(job_name: str) -> str:
     prefix = os.environ.get("CLOUD_RUN_JOB_PREFIX", "")
-    return f"{prefix}{job_name}"
+    name = f"{prefix}{job_name}"
+    _validate_cloud_resource_name(name, "cloud_run_job_name")
+    return name
 
 
 def get_cloud_run_project() -> str:
@@ -618,9 +686,36 @@ def bigquery_table_id(project_id: str, dataset_id: str, table_name: str) -> str:
     return f"{project_id}.{dataset_id}.{table_name}"
 
 
+def verify_gcloud_available() -> str | None:
+    return shutil.which("gcloud")
+
+
+def cloud_run_jobs_client_available() -> bool:
+    try:
+        import google.cloud.run_v2  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def _validate_bigquery_identifier(value: str, label: str) -> None:
     if not value.replace("_", "A").isalnum() or "." in value:
         raise ValueError(f"Invalid BigQuery {label}: {value!r}")
+
+
+def _validate_cloud_resource_name(value: str, label: str) -> None:
+    if not re.match(r"^[a-z][a-z0-9-]{0,62}$", value):
+        raise ValueError(f"Invalid Cloud Run {label}: {value!r}")
+
+
+def _validate_cloud_region(value: str) -> None:
+    if not re.match(r"^[a-z]+-[a-z]+[0-9]$", value):
+        raise ValueError(f"Invalid Cloud Run region: {value!r}")
+
+
+def _validate_cloud_project(value: str) -> None:
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9:.-]*[A-Za-z0-9]$", value):
+        raise ValueError(f"Invalid Cloud Run project: {value!r}")
 
 
 def _truthy(value: Any) -> bool:

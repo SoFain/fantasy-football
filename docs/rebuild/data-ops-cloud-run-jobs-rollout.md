@@ -44,9 +44,11 @@ Cloud Run Jobs path:
 - Uses `src/cloud_run_jobs.py` to validate the job and allowed args.
 - Builds a `gcloud run jobs execute` command.
 - Requires `gcloud` to be available for live triggers in the current wrapper path.
+- Returns a clear error when `gcloud` is missing.
 - Records trigger metadata in `cloud_run_job_runs`.
 - Reads recent status from `cloud_run_job_runs`.
 - Refuses unknown job names and ad hoc secret env overrides.
+- Writes trigger metadata with BigQuery load jobs when available so immediate status updates are not blocked by streaming buffers.
 
 ## Exposed Jobs
 
@@ -55,7 +57,9 @@ The Data Ops Cloud Run panel exposes:
 - `ingest-nflverse`
 - `ingest-sleeper-news`
 - `ingest-sleeper-league`
+- `ingest-context-events`
 - `ingest-market-values`
+- `ingest-college-stats`
 - `materialize-analytics`
 - `generate-pigskin-rankings`
 - `generate-evidence-packets`
@@ -63,6 +67,8 @@ The Data Ops Cloud Run panel exposes:
 - `run-backtests`
 - `validate-warehouse`
 - `verify-external-context`
+- `generate-content-briefs`
+- `grade-claims`
 
 ## Expected Job Args
 
@@ -80,7 +86,17 @@ Use JSON in the dashboard input. Examples:
 {"season-start": 2023, "season-end": 2025, "week-start": 1, "week-end": 17, "horizon": "weekly"}
 ```
 
+```json
+{"brief-type": "fraud_watch_show", "season": 2026, "week": 1}
+```
+
+```json
+{"season": 2026, "week": 1, "claim-id": "claim-123"}
+```
+
 The helper rejects args that are not listed for the selected job.
+
+For `validate-warehouse`, use the process in [BigQuery Validation Process](bigquery-validation-process.md). Prefer narrow `--pattern` arguments during rollout and do not combine validation with ingestion, materialization, or LLM calls.
 
 ## IAM Requirements
 
@@ -136,6 +152,8 @@ Every actual trigger records:
 
 Secrets and sensitive env names are redacted or refused.
 
+New metadata rows should be created through load jobs when the real BigQuery client supports it. Streaming inserts can leave rows in a buffer that cannot be updated immediately, which breaks the start-to-finish status lifecycle.
+
 ## Manual QA Checklist
 
 - Data Ops local subprocess buttons remain visible with flags false.
@@ -143,5 +161,69 @@ Secrets and sensitive env names are redacted or refused.
 - Invalid job args show a clear warning.
 - Dry-run command preview renders without live Cloud Run credentials.
 - Trigger button is disabled unless both flags are true and the checkbox is checked.
+- Live trigger reports missing `gcloud` clearly if the runtime cannot execute the command.
 - Recent job status fails gracefully if IAM is missing.
 - No Firebase artifacts are created.
+
+## Deployment Safety Check
+
+Before enabling live job triggers in an environment, run:
+
+```powershell
+.\venv\Scripts\python.exe scripts\check_deployment_safety.py
+```
+
+The checker verifies the local hardening prerequisites:
+
+- no tracked Firebase artifacts
+- no tracked secret or service account files
+- `app.py`, `src`, and `scripts` compile
+- deploy scripts exist
+- Secret Manager, IAM, and scheduler plans exist
+- live Cloud Run Data Ops feature flags default off
+- Pigskin arbitrary SQL tooling remains removed
+
+## Phase 14.7 Validate Warehouse Dry Run
+
+Phase 14.7 tested only the `validate-warehouse` rollout path.
+
+Result:
+
+- Safety checks passed.
+- Full tests passed.
+- Dry-run deployment preview passed.
+- Dry-run Data Ops trigger preview passed.
+- Live deployment was not run because `ALLOW_VALIDATE_WAREHOUSE_CLOUD_RUN_TEST=true` was not set.
+- Live trigger was not run.
+- No scheduler jobs were created.
+- Local `gcloud` was not installed, so a future live test must run from an environment with `gcloud` or move the trigger path to a Cloud Run Jobs client library.
+
+See [phase-14-7-cloud-run-validate-warehouse-test.md](validation/phase-14-7-cloud-run-validate-warehouse-test.md).
+
+## Phase 15.1 Cleanup Note
+
+The local dry-run Data Ops metadata row `validate-warehouse-20260616T133114Z-5e7c51a8` remains a known cleanup warning.
+
+Phase 15.1 confirmed:
+
+- the row is a dry-run metadata artifact;
+- no Cloud Run execution name exists;
+- no live Cloud Run Job was triggered;
+- cleanup is still blocked by BigQuery streaming-buffer mutation limits.
+
+Keep live triggers gated by `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`, `DATA_OPS_ALLOW_JOB_TRIGGER=true`, and explicit user confirmation.
+
+## Phase 15.4 Validate Warehouse Live-Test Result
+
+Phase 15.4 did not deploy or trigger a live Cloud Run Job.
+
+Blocking gates:
+
+- `ALLOW_VALIDATE_WAREHOUSE_CLOUD_RUN_TEST=true` was not set.
+- `CLOUD_RUN_JOBS_IMAGE` was not set.
+- `CLOUD_RUN_JOB_SERVICE_ACCOUNT` was not set.
+- `gcloud` was not installed in the local shell.
+
+Dry-run preview remained available and produced the expected `validate-warehouse` deploy command shape. `cloud_run_job` validations passed after the attempt.
+
+Live trigger rollout remains blocked until those gates are satisfied. See [phase-15-4-live-validate-warehouse-job-report.md](validation/phase-15-4-live-validate-warehouse-job-report.md).

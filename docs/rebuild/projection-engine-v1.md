@@ -112,3 +112,17 @@ python -m src.projection_engine --horizon weekly --season 2025 --week 7 --scorin
 python -m src.projection_engine --horizon ros --season 2025 --week 7 --scoring-profile ppr --league-type redraft --roster-format one_qb --dry-run
 python -m src.projection_engine --horizon dynasty --season 2025 --week 7 --scoring-profile ppr --league-type dynasty --roster-format superflex --dry-run
 ```
+
+## Phase 15.1 Cleanup Note
+
+Phase 14.2 left a partial projection model run after a BigQuery streaming-buffer update failure:
+
+- `weekly_projection-2025-1-20260616T113848Z-f07a0ccb`
+
+Phase 15.1 marked that model run `failed` without deleting projection rows.
+
+The seeded backtest remains valid and uses the separate complete model run:
+
+- `weekly_projection-2025-1-20260616T114422Z-a25a92c1`
+
+No destructive cleanup was performed.

@@ -69,12 +69,13 @@ class ModelRunHelperTests(unittest.TestCase):
         )
 
         self.assertEqual(model_run_id, "run-123")
-        self.assertEqual(client.insert_calls[0][0], "test-project.test_dataset.model_runs")
-        row = client.insert_calls[0][1][0]
-        self.assertEqual(row["status"], "running")
-        self.assertEqual(row["model_run_id"], "run-123")
-        self.assertEqual(row["model_version"], "v1")
-        self.assertEqual(row["scoring_profile_id"], "ppr")
+        sql, job_config = client.query_calls[0]
+        self.assertIn("INSERT INTO `test-project.test_dataset.model_runs`", sql)
+        self.assertIn("'running'", sql)
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["model_run_id"], "run-123")
+        self.assertEqual(params["model_version"], "v1")
+        self.assertEqual(params["scoring_profile_id"], "ppr")
 
     def test_mark_model_run_complete_sets_status_and_completed_at(self):
         client = FakeClient()

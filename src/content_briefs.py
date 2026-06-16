@@ -913,6 +913,10 @@ def _load_ranking_rows(client: Any | None, dataset_id: str | None, horizon: str,
     SELECT *, TO_JSON_STRING(STRUCT(model_run_id, created_at, rank_source)) AS source_freshness_json
     FROM `{_table_id(client.project, dataset_id, "projection_rankings_current")}`
     WHERE {" AND ".join(where)}
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY COALESCE(player_id_internal, CONCAT(display_name, '|', position, '|', team))
+        ORDER BY created_at DESC, rank_overall ASC
+    ) = 1
     ORDER BY COALESCE(confidence_score, 0) DESC, COALESCE(risk_score, 0) DESC, rank_overall ASC
     LIMIT @limit
     """
@@ -1009,7 +1013,17 @@ def _validate_brief_type(value: str) -> str:
 def _insert_rows(client: Any, dataset_id: str, table_name: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
-    errors = client.insert_rows_json(_table_id(client.project, dataset_id, table_name), rows)
+    table_id = _table_id(client.project, dataset_id, table_name)
+    if hasattr(client, "load_table_from_json"):
+        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND)
+        job = client.load_table_from_json(rows, table_id, job_config=job_config)
+        job.result()
+        errors = getattr(job, "errors", None)
+        if errors:
+            raise RuntimeError(f"Failed to load {table_name}: {errors}")
+        return
+
+    errors = client.insert_rows_json(table_id, rows)
     if errors:
         raise RuntimeError(f"Failed to insert {table_name}: {errors}")
 

@@ -10,6 +10,8 @@ from src import job_runner
 
 
 class FakeJob:
+    errors = None
+
     def result(self):
         return []
 
@@ -30,6 +32,16 @@ class FakeClient:
         self.query_calls.append((sql, job_config))
         if self.query_error:
             raise self.query_error
+        return FakeJob()
+
+
+class FakeLoadClient(FakeClient):
+    def __init__(self, *, query_error: Exception | None = None):
+        super().__init__(query_error=query_error)
+        self.load_calls = []
+
+    def load_table_from_json(self, rows, table_id, job_config=None):
+        self.load_calls.append((table_id, rows, job_config))
         return FakeJob()
 
 
@@ -144,6 +156,21 @@ class JobRunnerTests(unittest.TestCase):
         self.assertEqual(params["status"], "success")
         self.assertEqual(params["row_count"], 5)
         self.assertEqual(params["model_run_id"], "model-1")
+
+    def test_records_start_metadata_with_load_job_when_available(self):
+        client = FakeLoadClient()
+        args = parse("--job-run-id", "job-load")
+
+        job_runner.run_job(
+            args,
+            client=client,
+            dispatchers={"run-backtests": lambda _args, _client: {"row_count": 1}},
+        )
+
+        self.assertEqual(len(client.load_calls), 1)
+        self.assertEqual(client.load_calls[0][0], "test-project.test_dataset.cloud_run_job_runs")
+        self.assertEqual(client.insert_calls, [])
+        self.assertEqual(len(client.query_calls), 1)
 
     def test_records_failure_metadata_and_reraises(self):
         client = FakeClient()
@@ -286,6 +313,42 @@ class JobRunnerTests(unittest.TestCase):
         self.assertIn("--pattern", cmd)
         self.assertIn("^096_", cmd)
         self.assertEqual(result["pattern"], "^096_")
+
+    def test_generate_content_briefs_dry_run_does_not_call_builder(self):
+        args = parse("--season", "2026", "--brief-type", "fraud_watch_show", "--dry-run")
+        args.job_name = "generate-content-briefs"
+
+        with patch("src.job_runner._call_module_main") as call_module:
+            result = job_runner.dispatch_generate_content_briefs(args, FakeClient())
+
+        call_module.assert_not_called()
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["brief_type"], "fraud_watch_show")
+        self.assertEqual(result["season"], 2026)
+
+    def test_grade_claims_dispatch_passes_context(self):
+        args = parse("--season", "2026", "--week", "3", "--claim-id", "claim-1", "--dry-run")
+        args.job_name = "grade-claims"
+
+        with patch("src.claim_grading.run_claim_grading", return_value={
+            "run": {"claim_grading_run_id": "grade-run-1"},
+            "grade_count": 3,
+            "scorecard_count": 2,
+        }) as run_claim_grading:
+            result = job_runner.dispatch_grade_claims(args, FakeClient())
+
+        run_claim_grading.assert_called_once()
+        call_kwargs = run_claim_grading.call_args.kwargs
+        self.assertEqual(call_kwargs["claim_id"], "claim-1")
+        self.assertEqual(call_kwargs["season"], 2026)
+        self.assertEqual(call_kwargs["week"], 3)
+        self.assertEqual(call_kwargs["scoring_profile_id"], "ppr")
+        self.assertEqual(call_kwargs["league_type_id"], "redraft")
+        self.assertEqual(call_kwargs["roster_format_id"], "one_qb")
+        self.assertTrue(call_kwargs["dry_run"])
+        self.assertEqual(call_kwargs["dataset_id"], "test_dataset")
+        self.assertEqual(result["row_count"], 3)
+        self.assertEqual(result["claim_grading_run_id"], "grade-run-1")
 
     def test_no_disallowed_platform_artifacts_added(self):
         touched_paths = [

@@ -6,6 +6,26 @@ This document defines the first projection-evaluation framework for AI vs. Meatb
 
 The framework is standalone in [src/backtesting.py](../../src/backtesting.py). It does not change Streamlit runtime behavior and does not call an LLM.
 
+## Phase 14.2 Seed Status
+
+Report: [Phase 14.2 Backtest Seed Report](validation/phase-14-2-backtest-seed-report.md)
+
+A bounded seed backtest now exists for `weekly`, `2025` week `1`, `ppr`, `redraft`, and `one_qb`.
+
+Seeded identifiers:
+
+- `model_run_id = weekly_projection-2025-1-20260616T114422Z-a25a92c1`
+- `backtest_run_id = backtest-weekly-2025-2025-20260616T114527Z-2093e839`
+
+Seeded output:
+
+- `backtest_runs = 1`
+- `backtest_result_player_week = 25`
+- `backtest_result_summary = 6`
+- `backtest_calibration_bins = 16`
+
+One failed partial projection attempt remains temporarily visible under `weekly_projection-2025-1-20260616T113848Z-f07a0ccb`. It should be cleaned up with targeted DML after BigQuery releases those rows from the streaming buffer.
+
 ## Outputs
 
 - `backtest_runs`
@@ -14,6 +34,16 @@ The framework is standalone in [src/backtesting.py](../../src/backtesting.py). I
 - `backtest_calibration_bins`
 
 Migration: [bigquery/migrations/0020__create_backtest_framework.sql](../../bigquery/migrations/0020__create_backtest_framework.sql)
+
+## Phase 13.3 Dashboard Read Path
+
+Read helper: [src/backtest_readers.py](../../src/backtest_readers.py)
+
+Dashboard doc: [backtest-dashboard.md](backtest-dashboard.md)
+
+The Streamlit dashboard is behind `USE_BACKTEST_DASHBOARD=false` by default. When enabled, it reads only the four backtest output tables listed above. It does not query `weekly_metrics`, raw play-by-play, NGS, FTN, snap, injury, roster, contract, market, or raw Sleeper tables.
+
+The dashboard can show a dry-run Cloud Run Job command preview when `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`, but it does not execute backtests from request-time Streamlit code.
 
 ## Inputs
 
@@ -65,15 +95,15 @@ Market, ADP, and consensus baselines now have a first normalized layer in [marke
 ## CLI
 
 ```powershell
-python -m src.backtesting --model-run-id <id> --horizon weekly --season-start 2024 --season-end 2024 --scoring-profile ppr --league-type redraft --roster-format one_qb --dry-run
-python -m src.backtesting --horizon weekly --season-start 2023 --season-end 2024 --scoring-profile half_ppr --league-type redraft --roster-format superflex --dry-run
-python -m src.backtesting --horizon weekly --season-start 2024 --season-end 2024 --scoring-profile ppr --league-type redraft --roster-format one_qb --market-source-id manual_ecr --dry-run
+.\venv\Scripts\python.exe -m src.backtesting --model-run-id <id> --horizon weekly --season-start 2024 --season-end 2024 --scoring-profile ppr --league-type redraft --roster-format one_qb --dry-run
+.\venv\Scripts\python.exe -m src.backtesting --horizon weekly --season-start 2023 --season-end 2024 --scoring-profile half_ppr --league-type redraft --roster-format superflex --dry-run
+.\venv\Scripts\python.exe -m src.backtesting --horizon weekly --season-start 2024 --season-end 2024 --scoring-profile ppr --league-type redraft --roster-format one_qb --market-source-id manual_ecr --dry-run
 ```
 
 Cloud Run Job dispatcher path:
 
 ```powershell
-python -m src.job_runner --job-name run-backtests --season-start 2023 --season-end 2024 --horizon weekly --scoring-profile half_ppr --league-type redraft --roster-format superflex --dry-run
+.\venv\Scripts\python.exe -m src.job_runner --job-name run-backtests --season-start 2023 --season-end 2024 --horizon weekly --scoring-profile half_ppr --league-type redraft --roster-format superflex --dry-run
 ```
 
 ## Future Baselines

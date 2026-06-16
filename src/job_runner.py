@@ -33,6 +33,8 @@ VALID_JOB_NAMES = (
     "run-backtests",
     "validate-warehouse",
     "verify-external-context",
+    "generate-content-briefs",
+    "grade-claims",
 )
 
 logger = logging.getLogger("job_runner")
@@ -85,6 +87,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--job-run-id")
     parser.add_argument("--backtest-name")
     parser.add_argument("--allow-large-backtest", action="store_true")
+    parser.add_argument("--brief-type")
+    parser.add_argument("--claim-id")
     parser.add_argument("--log-level", default=os.environ.get("LOG_LEVEL", "INFO"))
     return parser.parse_args(argv)
 
@@ -177,7 +181,17 @@ def start_job_run(client: Any, args: argparse.Namespace, job_run_id: str, starte
         "created_by": os.environ.get("K_SERVICE") or "job_runner",
         "metadata_json": json.dumps(_args_metadata(args), sort_keys=True),
     }
-    errors = client.insert_rows_json(_table_id(client.project, args.dataset, JOB_RUNS_TABLE), [row])
+    table_id = _table_id(client.project, args.dataset, JOB_RUNS_TABLE)
+    if hasattr(client, "load_table_from_json"):
+        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND)
+        job = client.load_table_from_json([row], table_id, job_config=job_config)
+        job.result()
+        errors = getattr(job, "errors", None)
+        if errors:
+            raise RuntimeError(f"Failed to load job run {job_run_id}: {errors}")
+        return
+
+    errors = client.insert_rows_json(table_id, [row])
     if errors:
         raise RuntimeError(f"Failed to insert job run {job_run_id}: {errors}")
 
@@ -530,6 +544,69 @@ def dispatch_verify_external_context(args: argparse.Namespace, client: Any) -> d
     return {"row_count": stored_count, "player": args.player}
 
 
+def dispatch_generate_content_briefs(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    del client
+    _require(args.brief_type, "--brief-type is required")
+    _require(args.season, "--season is required")
+    if args.dry_run:
+        return {
+            "row_count": 0,
+            "brief_type": args.brief_type,
+            "season": args.season,
+            "week": args.week,
+            "dry_run": True,
+            "skipped": "content brief generation preview only",
+        }
+    argv = [
+        "--brief-type",
+        args.brief_type,
+        "--season",
+        str(args.season),
+        "--scoring-profile",
+        args.scoring_profile,
+        "--league-type",
+        args.league_type,
+        "--roster-format",
+        args.roster_format,
+    ]
+    if args.week is not None:
+        argv.extend(["--week", str(args.week)])
+    if args.model_run_id:
+        argv.extend(["--model-run-id", args.model_run_id])
+    _call_module_main("src.content_briefs", argv)
+    return {
+        "row_count": 0,
+        "brief_type": args.brief_type,
+        "season": args.season,
+        "week": args.week,
+        "dry_run": args.dry_run,
+    }
+
+
+def dispatch_grade_claims(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.claim_grading import run_claim_grading
+
+    result = run_claim_grading(
+        claim_id=args.claim_id,
+        season=args.season,
+        week=args.week,
+        model_run_id=args.model_run_id,
+        scoring_profile_id=args.scoring_profile,
+        league_type_id=args.league_type,
+        roster_format_id=args.roster_format,
+        client=client,
+        dataset_id=args.dataset,
+        dry_run=args.dry_run,
+    )
+    return {
+        "row_count": result.get("grade_count", 0),
+        "claim_grading_run_id": (result.get("run") or {}).get("claim_grading_run_id"),
+        "grade_count": result.get("grade_count", 0),
+        "scorecard_count": result.get("scorecard_count", 0),
+        "dry_run": args.dry_run,
+    }
+
+
 JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | None]] = {
     "ingest-nflverse": dispatch_ingest_nflverse,
     "ingest-sleeper-news": dispatch_ingest_sleeper_news,
@@ -544,6 +621,8 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "run-backtests": dispatch_run_backtests,
     "validate-warehouse": dispatch_validate_warehouse,
     "verify-external-context": dispatch_verify_external_context,
+    "generate-content-briefs": dispatch_generate_content_briefs,
+    "grade-claims": dispatch_grade_claims,
 }
 
 
