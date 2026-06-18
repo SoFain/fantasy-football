@@ -17,3 +17,9 @@ __pycache__/
 # Google Cloud credentials keys
 *.json
 !requirements.txt
+
+# Media assets & local wheels
+*.mp4
+temp_nflreadpy/
+*.whl
+
