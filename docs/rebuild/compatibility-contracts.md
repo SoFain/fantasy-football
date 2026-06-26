@@ -325,3 +325,15 @@ Scoring-profile-aware fantasy points are now documented:
 10. P1: Wire Segment and Pigskin reads to saved `fraud_watch_packets` and `sleeper_breakout_packets` only after packet validation and default-off flags.
 11. P1: Generate and backtest `projections_player_weekly`, `projections_player_ros`, and `projections_player_dynasty` before public confidence claims.
 12. P2: Move remaining placeholder compatibility objects to tested production marts where query cost or reliability requires it.
+
+## Phase 22.6 Trade Analyzer Score Contract
+
+Phase 22.6 adds the default-off deterministic Trade Analyzer score contract:
+
+| Object | Contract | View or migration | Runtime status |
+| --- | --- | --- | --- |
+| `trade_player_scores` | [contract](../../bigquery/contracts/trade_player_scores.md) | [migration](../../bigquery/migrations/0025__trade_analyzer_score_v0.sql) | Output table for future bounded score materialization. Not wired to runtime. |
+| `trade_player_scores_current` | [contract](../../bigquery/contracts/trade_player_scores_current.md) | [view](../../bigquery/views/trade_player_scores_current.sql), [migration](../../bigquery/migrations/0025__trade_analyzer_score_v0.sql) | Current view over score output rows. Not a raw/source view. |
+| `compat_trade_player_scores_current` | [contract](../../bigquery/contracts/compat_trade_player_scores_current.md) | [view](../../bigquery/views/compat_trade_player_scores_current.sql), [migration](../../bigquery/migrations/0025__trade_analyzer_score_v0.sql) | Future safe Streamlit and Pigskin read surface. Runtime flags remain default off. |
+
+Future score wiring must use `USE_TRADE_ANALYZER_SCORE_V0=false` and `USE_COMPAT_TRADE_PLAYER_SCORE=false` by default. The compatibility view reads only `trade_player_scores_current`, which reads only `trade_player_scores`.

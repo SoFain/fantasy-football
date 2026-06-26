@@ -1,12 +1,38 @@
 import sys
 import argparse
 import logging
+import json
 from datetime import datetime
 
 from src.extract import get_pbp_data, get_weekly_data, get_team_data, get_draft_picks_data, get_players_data, get_contracts_data, get_ngs_passing_data, get_ngs_rushing_data, get_ngs_receiving_data, get_ftn_charting_data, get_snap_counts_data, get_injury_reports_data, get_depth_charts_data
 from src.transform import transform_pbp_data, transform_weekly_data, transform_team_data, transform_draft_picks_data, transform_players_data, transform_contracts_data, transform_standard_seasonal_data, transform_depth_charts_data
-from src.load import get_bigquery_client, create_dataset_if_not_exists, load_df_to_partitioned_table
+from src.load import get_bigquery_client, create_dataset_if_not_exists, load_df_to_partitioned_table, get_schema_aware_append_policy
 from src.materialize import materialize_all
+
+
+PIPELINE_LOAD_TABLES = [
+    "play_by_play",
+    "weekly_metrics",
+    "team_descriptions",
+    "draft_picks",
+    "player_rosters",
+    "player_contracts",
+    "ngs_passing",
+    "ngs_rushing",
+    "ngs_receiving",
+    "ftn_charting",
+    "weekly_snap_counts",
+    "injury_reports",
+    "depth_charts",
+]
+
+PIPELINE_MATERIALIZED_TABLES = [
+    "analytics_game_environment",
+    "analytics_player_qb_weekly",
+    "analytics_player_weekly_truth",
+    "analytics_fraud_watch",
+    "analytics_pigskin_rankings",
+]
 
 def setup_logging():
     """
@@ -26,7 +52,92 @@ def setup_logging():
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("google").setLevel(logging.WARNING)
 
-def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fantasy_football_brain"):
+
+def build_pipeline_plan(
+    seasons,
+    write_disposition="WRITE_APPEND",
+    dataset_name="fantasy_football_brain",
+    ingest_only=False,
+    allow_full_refresh=False,
+    week_start=None,
+    week_end=None,
+):
+    """
+    Builds a non-mutating execution plan for the NFL data pipeline.
+    """
+    return {
+        "source_library": "nflreadpy",
+        "seasons": list(seasons),
+        "dataset": dataset_name,
+        "write_disposition": write_disposition,
+        "ingest_only": ingest_only,
+        "allow_full_refresh": allow_full_refresh,
+        "raw_tables_to_load": PIPELINE_LOAD_TABLES,
+        "derived_tables_to_materialize": PIPELINE_MATERIALIZED_TABLES,
+        "partitioning": "range partitioned by season where supported",
+        "bounded_by": "season",
+        "week_bound_supported": False,
+        "requested_week_window": {
+            "week_start": week_start,
+            "week_end": week_end,
+        },
+        "will_extract": False,
+        "will_write_bigquery": False,
+        "will_materialize": False,
+        "live_run_behavior": {
+            "will_extract": True,
+            "will_write_bigquery": True,
+            "will_materialize": not ingest_only,
+            "will_call_llm": False,
+            "will_scrape": False,
+            "will_trigger_cloud_run_jobs": False,
+        },
+        "destructive_risk": {
+            "raw_load_truncate": write_disposition == "WRITE_TRUNCATE",
+            "derived_create_or_replace": not ingest_only,
+        },
+        "schema_aware_append": get_schema_aware_append_policy(),
+        "recommended_modern_restore_command": (
+            f"python -m src.pipeline --seasons {','.join(str(season) for season in seasons)} "
+            f"--write-disposition WRITE_APPEND --dataset {dataset_name} --ingest-only"
+        ),
+        "notes": [
+            "Plan mode does not extract, transform, load, or materialize data.",
+            "Pipeline bounds ingestion by season, not week.",
+            "Append loads fetch existing BigQuery table schema and coerce compatible dataframe columns before loading.",
+            "Ingest-only mode extracts, transforms, and loads source tables, then stops before derived analytics materialization.",
+            "Use WRITE_APPEND for modern season restore to avoid truncating existing source tables.",
+            "WRITE_TRUNCATE requires --allow-full-refresh for live runs.",
+            "Derived analytics materialization currently uses CREATE OR REPLACE and should be run separately only after source coverage is confirmed.",
+        ],
+    }
+
+
+def print_pipeline_plan(plan):
+    print(json.dumps(plan, indent=2, sort_keys=True))
+
+
+def validate_pipeline_request(
+    seasons,
+    seasons_were_explicit,
+    write_disposition,
+    allow_full_refresh=False,
+    week_start=None,
+    week_end=None,
+):
+    errors = []
+    if not seasons:
+        errors.append("At least one season is required.")
+    if not seasons_were_explicit and not allow_full_refresh:
+        errors.append("Explicit --seasons is required unless --allow-full-refresh is set.")
+    if write_disposition == "WRITE_TRUNCATE" and not allow_full_refresh:
+        errors.append("WRITE_TRUNCATE requires --allow-full-refresh.")
+    if week_start is not None or week_end is not None:
+        errors.append("Week bounds are not supported by this nflreadpy ingestion path yet.")
+    return errors
+
+
+def run_pipeline(seasons, write_disposition="WRITE_APPEND", dataset_name="fantasy_football_brain", ingest_only=False):
     """
     Orchestrates the ETL process for NFL statistics:
     1. Extract PBP, Weekly, and Team Data (with caching and backoff).
@@ -39,6 +150,7 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
     logger.info(f"Target Seasons: {seasons}")
     logger.info(f"Write Disposition: {write_disposition}")
     logger.info(f"Dataset Name: {dataset_name}")
+    logger.info(f"Ingest Only: {ingest_only}")
     logger.info("=" * 60)
 
     try:
@@ -187,9 +299,12 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         # Load depth charts
         load_df_to_partitioned_table(client=bq_client, df=depth_charts_clean, dataset_id=dataset_id, table_name="depth_charts", write_disposition=write_disposition)
 
-        logger.info("--- Starting Step 4: Materializing AI vs Vibes truth table ---")
-        materialize_all(bq_client, dataset_id=dataset_name)
-        logger.info("Successfully materialized AI vs Vibes analytics tables.")
+        if ingest_only:
+            logger.info("--- Skipping Step 4: Ingest-only mode requested. Analytics materialization not run. ---")
+        else:
+            logger.info("--- Starting Step 4: Materializing AI vs Vibes truth table ---")
+            materialize_all(bq_client, dataset_id=dataset_name)
+            logger.info("Successfully materialized AI vs Vibes analytics tables.")
 
         logger.info("=" * 60)
         logger.info(f"NFL Data Pipeline finished successfully at {datetime.now()}!")
@@ -212,13 +327,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--seasons",
         type=str,
-        default=",".join(map(str, default_seasons)),
+        default=None,
         help="Comma-separated list of NFL seasons to ingest (e.g. 2020,2021,2022)"
     )
     parser.add_argument(
         "--write-disposition",
         type=str,
-        default="WRITE_TRUNCATE",
+        default="WRITE_APPEND",
         choices=["WRITE_TRUNCATE", "WRITE_APPEND"],
         help="BigQuery load job write disposition (WRITE_TRUNCATE or WRITE_APPEND)"
     )
@@ -228,18 +343,72 @@ if __name__ == "__main__":
         default="fantasy_football_brain",
         help="Google BigQuery dataset name to upload tables into"
     )
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Print a non-mutating pipeline plan and exit before extraction or BigQuery writes."
+    )
+    parser.add_argument(
+        "--ingest-only",
+        action="store_true",
+        help="Extract, transform, and load source tables, then stop before analytics materialization."
+    )
+    parser.add_argument(
+        "--allow-full-refresh",
+        action="store_true",
+        help="Allow default broad season window or WRITE_TRUNCATE for an explicitly authorized full refresh."
+    )
+    parser.add_argument(
+        "--week-start",
+        type=int,
+        default=None,
+        help="Reserved for future week-bounded ingestion. Current nflreadpy path is season-bounded only."
+    )
+    parser.add_argument(
+        "--week-end",
+        type=int,
+        default=None,
+        help="Reserved for future week-bounded ingestion. Current nflreadpy path is season-bounded only."
+    )
 
     args = parser.parse_args()
     
     # Parse seasons argument
+    seasons_were_explicit = args.seasons is not None
     try:
-        seasons_list = [int(s.strip()) for s in args.seasons.split(",") if s.strip()]
+        seasons_text = args.seasons if seasons_were_explicit else ",".join(map(str, default_seasons))
+        seasons_list = [int(s.strip()) for s in seasons_text.split(",") if s.strip()]
     except ValueError:
-        print("Error: Seasons list must contain only comma-separated integers.")
-        sys.exit(1)
+        parser.error("Seasons list must contain only comma-separated integers.")
+
+    if args.plan_only:
+        print_pipeline_plan(
+            build_pipeline_plan(
+                seasons=seasons_list,
+                write_disposition=args.write_disposition,
+                dataset_name=args.dataset,
+                ingest_only=args.ingest_only,
+                allow_full_refresh=args.allow_full_refresh,
+                week_start=args.week_start,
+                week_end=args.week_end,
+            )
+        )
+        sys.exit(0)
+
+    validation_errors = validate_pipeline_request(
+        seasons=seasons_list,
+        seasons_were_explicit=seasons_were_explicit,
+        write_disposition=args.write_disposition,
+        allow_full_refresh=args.allow_full_refresh,
+        week_start=args.week_start,
+        week_end=args.week_end,
+    )
+    if validation_errors:
+        parser.error(" ".join(validation_errors))
 
     run_pipeline(
         seasons=seasons_list,
         write_disposition=args.write_disposition,
-        dataset_name=args.dataset
+        dataset_name=args.dataset,
+        ingest_only=args.ingest_only,
     )

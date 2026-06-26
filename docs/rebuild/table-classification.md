@@ -154,3 +154,13 @@ Tables to remove from Pigskin schema text:
 10. P1: Validate and wire `fraud_watch_packets` and `sleeper_breakout_packets` behind default-off segment and Pigskin context flags.
 11. P1: Generate and backtest projection outputs before wiring them into rankings, trade, viewer-team, segment, or Pigskin consumers.
 12. P2: Add partitioning or replacement marts for append-only Sleeper snapshots.
+
+## Phase 22.6 Trade Analyzer Score Tables
+
+| Table or view | Classification | Writer or definition | UI or Pigskin status |
+| --- | --- | --- | --- |
+| `trade_player_scores` | output | Created by `0025__trade_analyzer_score_v0.sql`; future bounded score builder will write deterministic rows. | Not safe for direct Pigskin exposure. Prefer compatibility view. |
+| `trade_player_scores_current` | output | View created by `0025__trade_analyzer_score_v0.sql` and mirrored in `bigquery/views/trade_player_scores_current.sql`. | Internal current view. |
+| `compat_trade_player_scores_current` | output | View created by `0025__trade_analyzer_score_v0.sql` and mirrored in `bigquery/views/compat_trade_player_scores_current.sql`. | Safe future read contract for Trade Lab and Pigskin after default-off helper wiring and validation. |
+
+These objects are not raw/source tables. They do not replace the existing Trade Lab value path until future default-off flags are explicitly enabled in staging.

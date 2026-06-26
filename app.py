@@ -16,6 +16,8 @@ from src.compat_flags import (
     USE_BACKTEST_DASHBOARD,
     USE_CLAIM_LEDGER_UI,
     USE_CONTENT_BRIEF_REVIEW_UI,
+    USE_TRADE_ANALYZER_SCORE_V0,
+    USE_COMPAT_TRADE_PLAYER_SCORE,
     compat_flag_enabled,
 )
 from src.cloud_run_jobs import (
@@ -34,6 +36,14 @@ from src.pigskin_chat_schema import render_pigskin_chat_schema
 from src.pigskin_context_tools import (
     execute_pigskin_context_tool,
     get_pigskin_context_tool_declarations,
+)
+from src.ui_data_guards import (
+    collect_selected_trade_assets,
+    attach_trade_scores_to_assets,
+    ensure_player_profile_display_columns,
+    ensure_sleeper_watch_display_columns,
+    summarize_trade_score_side,
+    unresolved_trade_asset_labels,
 )
 
 DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
@@ -77,6 +87,18 @@ def use_claim_ledger_ui():
 
 def use_content_brief_review_ui():
     return compat_flag_enabled(USE_CONTENT_BRIEF_REVIEW_UI)
+
+
+def use_trade_analyzer_score_v0():
+    return compat_flag_enabled(USE_TRADE_ANALYZER_SCORE_V0)
+
+
+def use_compat_trade_player_score():
+    return compat_flag_enabled(USE_COMPAT_TRADE_PLAYER_SCORE)
+
+
+def use_trade_score_ui():
+    return use_trade_analyzer_score_v0() and use_compat_trade_player_score()
 
 
 def use_cloud_run_jobs_for_data_ops():
@@ -1821,7 +1843,7 @@ def normalize_compat_player_profiles_data(df):
     out["pos_rank"] = _compat_column(df, "pigskin_rank_position").combine_first(_compat_column(df, "position_rank_by_profile"))
     out["source_freshness_json"] = _compat_column(df, "source_freshness_json")
     out["missing_data_flags"] = _compat_column(df, "missing_data_flags")
-    return out
+    return ensure_player_profile_display_columns(out)
 
 
 def fetch_compat_player_profiles_data():
@@ -1856,7 +1878,7 @@ def normalize_compat_sleeper_watch_data(rows):
     out["sleeper_score"] = _compat_column(df, "streamer_score", 0.0).fillna(0.0)
     out["source_freshness_json"] = _compat_column(df, "source_freshness_json")
     out["missing_data_flags"] = _compat_column(df, "missing_data_flags")
-    return out
+    return ensure_sleeper_watch_display_columns(out)
 
 
 def fetch_compat_sleeper_watch_candidates_data():
@@ -1894,6 +1916,20 @@ def query_compat_trade_player_history(name):
     from src.trade_history import get_trade_player_history
 
     return get_trade_player_history(player_name=name, limit=10)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_trade_player_scores_current():
+    import pandas as pd
+    from src.trade_player_scores import get_current_trade_player_scores
+
+    rows = get_current_trade_player_scores(
+        scoring_profile_id="ppr",
+        league_type_id="redraft",
+        roster_format_id="one_qb",
+        limit=500,
+    )
+    return pd.DataFrame(rows)
 
 
 def get_compat_sleeper_viewer_team_context(console_context):
@@ -2078,7 +2114,7 @@ def render_sleeper_watch_segment():
                 team,
                 opponent AS opponent_team,
                 rostered_rate AS roster_pct,
-                COALESCE(rolling_3_week_ppr, 0.0) AS rolling_3_week_ppr,
+                COALESCE(fantasy_points_last_3, 0.0) / 3.0 AS rolling_3_week_ppr,
                 COALESCE(snap_share_last_3, 0.0) AS snap_share,
                 COALESCE(targets_last_3, 0.0) / 3.0 AS targets_3w,
                 COALESCE(carries_last_3, 0.0) / 3.0 AS carries_3w,
@@ -2089,7 +2125,7 @@ def render_sleeper_watch_segment():
             FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.compat_sleeper_watch_candidates` c, latest_week lw
             WHERE c.season = lw.max_season AND c.week = lw.max_week
             """
-            df = execute_bq_cached(sql_query)
+            df = ensure_sleeper_watch_display_columns(execute_bq_cached(sql_query))
     except Exception as e:
         st.info(f"Sleeper Watch data is not materialized yet or the selected data path failed: {e}")
         return
@@ -2351,12 +2387,11 @@ def fetch_player_profiles_data():
     latest_depth_charts AS (
         SELECT
             gsis_id,
-            ANY_VALUE(pos_abb) AS depth_position,
+            CAST(NULL AS STRING) AS depth_position,
             ANY_VALUE(pos_rank) AS depth_rank
         FROM (
             SELECT
                 gsis_id,
-                pos_abb,
                 pos_rank,
                 ROW_NUMBER() OVER(PARTITION BY gsis_id ORDER BY dt DESC) as rn
             FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.depth_charts`
@@ -2424,7 +2459,7 @@ def fetch_player_profiles_data():
         c.contract_apy,
         c.contract_guaranteed,
         c.contract_year_signed,
-        dc.depth_position,
+        COALESCE(dc.depth_position, rp.position) AS depth_position,
         dc.depth_rank,
         col.college_team,
         col.college_conf,
@@ -2455,7 +2490,7 @@ def fetch_player_profiles_data():
     """
     client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
     df = client.query(sql_query).result().to_dataframe()
-    return df
+    return ensure_player_profile_display_columns(df)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -4119,52 +4154,62 @@ def render_value_analyzer():
 
     with col_sel_A:
         st.markdown("#### 🟥 Side A (Assets)")
-        assets_A = []
+        selected_labels_A = []
         for i in range(st.session_state.num_a):
             selected = st.selectbox(
                 f"Select Asset A {i+1}",
                 [empty_asset_label] + player_options,
                 key=f"sel_a_{i}"
             )
-            if selected != empty_asset_label:
-                assets_A.append(player_map[selected])
+            selected_labels_A.append(selected)
 
+        assets_A = collect_selected_trade_assets(selected_labels_A, player_map, empty_asset_label)
+        unresolved_assets_A = unresolved_trade_asset_labels(selected_labels_A, player_map, empty_asset_label)
         if len(assets_A) == st.session_state.num_a:
             st.session_state.num_a += 1
-            st.rerun()
 
     with col_sel_B:
         st.markdown("#### 🟦 Side B (Assets)")
-        assets_B = []
+        selected_labels_B = []
         for i in range(st.session_state.num_b):
             selected = st.selectbox(
                 f"Select Asset B {i+1}",
                 [empty_asset_label] + player_options,
                 key=f"sel_b_{i}"
             )
-            if selected != empty_asset_label:
-                assets_B.append(player_map[selected])
+            selected_labels_B.append(selected)
 
+        assets_B = collect_selected_trade_assets(selected_labels_B, player_map, empty_asset_label)
+        unresolved_assets_B = unresolved_trade_asset_labels(selected_labels_B, player_map, empty_asset_label)
         if len(assets_B) == st.session_state.num_b:
             st.session_state.num_b += 1
-            st.rerun()
+
+    if unresolved_assets_A:
+        st.warning(f"Side A selected asset could not be resolved: {', '.join(map(str, unresolved_assets_A))}")
+    if unresolved_assets_B:
+        st.warning(f"Side B selected asset could not be resolved: {', '.join(map(str, unresolved_assets_B))}")
 
     # Display Side-by-Side Cards
     st.markdown("#### ⚖️ Side-by-Side Comparison")
     col_card_A, col_card_B = st.columns(2)
 
-    total_val_A = sum(numeric_value(a['market_value']) for a in assets_A)
+    total_val_A = sum(numeric_value(a.get('market_value')) for a in assets_A)
     total_proj_A = sum(project_asset_value(a, projection_years) for a in assets_A)
 
-    total_val_B = sum(numeric_value(b['market_value']) for b in assets_B)
+    total_val_B = sum(numeric_value(b.get('market_value')) for b in assets_B)
     total_proj_B = sum(project_asset_value(b, projection_years) for b in assets_B)
 
     with col_card_A:
         asset_list_html = "".join([
-            f"<li><b>{safe_display(a['player_display_name'])}</b> ({safe_display(a['position'], 'Pick')})<br>"
-            f"Age: {safe_display(a['age'], 'N/A')} | "
-            f"Val: {numeric_value(a['market_value'])} &rarr; Projected: {project_asset_value(a, projection_years)}</li>"
+            f"<li><b>{safe_display(a.get('player_display_name'))}</b> "
+            f"({safe_display(a.get('position'), 'Pick')} - {safe_display(a.get('team'), 'N/A')})<br>"
+            f"Age: {safe_display(a.get('age'), 'N/A')} | "
+            f"Val: {numeric_value(a.get('market_value'))} &rarr; Projected: {project_asset_value(a, projection_years)}</li>"
             for a in assets_A
+        ])
+        unresolved_html = "".join([
+            f"<li>Selected asset could not be resolved: {html.escape(str(label))}</li>"
+            for label in unresolved_assets_A
         ])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #10B981; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
@@ -4174,17 +4219,22 @@ def render_value_analyzer():
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
             <h5 style="margin-bottom: 5px;">Selected Assets:</h5>
             <ul style="padding-left: 20px; margin-top: 0;">
-                {asset_list_html if assets_A else "<li>No assets selected</li>"}
+                {asset_list_html or unresolved_html or "<li>No assets selected</li>"}
             </ul>
         </div>
         """, unsafe_allow_html=True)
 
     with col_card_B:
         asset_list_html_B = "".join([
-            f"<li><b>{safe_display(b['player_display_name'])}</b> ({safe_display(b['position'], 'Pick')})<br>"
-            f"Age: {safe_display(b['age'], 'N/A')} | "
-            f"Val: {numeric_value(b['market_value'])} &rarr; Projected: {project_asset_value(b, projection_years)}</li>"
+            f"<li><b>{safe_display(b.get('player_display_name'))}</b> "
+            f"({safe_display(b.get('position'), 'Pick')} - {safe_display(b.get('team'), 'N/A')})<br>"
+            f"Age: {safe_display(b.get('age'), 'N/A')} | "
+            f"Val: {numeric_value(b.get('market_value'))} &rarr; Projected: {project_asset_value(b, projection_years)}</li>"
             for b in assets_B
+        ])
+        unresolved_html_B = "".join([
+            f"<li>Selected asset could not be resolved: {html.escape(str(label))}</li>"
+            for label in unresolved_assets_B
         ])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #3B82F6; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
@@ -4194,10 +4244,107 @@ def render_value_analyzer():
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
             <h5 style="margin-bottom: 5px;">Selected Assets:</h5>
             <ul style="padding-left: 20px; margin-top: 0;">
-                {asset_list_html_B if assets_B else "<li>No assets selected</li>"}
+                {asset_list_html_B or unresolved_html_B or "<li>No assets selected</li>"}
             </ul>
         </div>
         """, unsafe_allow_html=True)
+
+    if use_trade_score_ui():
+        st.markdown("#### 🧮 Pigskin Trade Score")
+        st.caption("Pigskin Trade Score source: compat_trade_player_scores_current")
+        st.caption("Market-value totals remain separate from Pigskin Trade Score totals.")
+
+        score_rows = []
+        try:
+            score_df = load_trade_player_scores_current()
+            if score_df is not None and not score_df.empty:
+                score_rows = score_df.to_dict("records")
+            else:
+                st.warning("Pigskin Trade Score unavailable: compat_trade_player_scores_current returned no rows.")
+        except Exception as score_error:
+            st.warning(f"Pigskin Trade Score unavailable: {score_error}")
+
+        attached_scores_A = attach_trade_scores_to_assets(assets_A, score_rows)
+        attached_scores_B = attach_trade_scores_to_assets(assets_B, score_rows)
+        score_summary_A = summarize_trade_score_side(attached_scores_A)
+        score_summary_B = summarize_trade_score_side(attached_scores_B)
+        score_total_A = score_summary_A["total_trade_score"] if score_summary_A["scored_count"] else None
+        score_total_B = score_summary_B["total_trade_score"] if score_summary_B["scored_count"] else None
+
+        score_col_A, score_col_B, score_col_delta = st.columns(3)
+        with score_col_A:
+            st.metric("Side A Pigskin Trade Score", score_total_A if score_total_A is not None else "N/A")
+            st.caption(f"Scored assets: {score_summary_A['scored_count']} of {score_summary_A['asset_count']}")
+        with score_col_B:
+            st.metric("Side B Pigskin Trade Score", score_total_B if score_total_B is not None else "N/A")
+            st.caption(f"Scored assets: {score_summary_B['scored_count']} of {score_summary_B['asset_count']}")
+        with score_col_delta:
+            if score_total_A is not None and score_total_B is not None:
+                st.metric("Pigskin Score Fairness Delta", round(abs(score_total_A - score_total_B), 2))
+            else:
+                st.metric("Pigskin Score Fairness Delta", "N/A")
+            st.caption("Lower delta means the score model sees the sides as closer.")
+
+        for side_label, attached_scores in (("Side A", attached_scores_A), ("Side B", attached_scores_B)):
+            missing_score_assets = [
+                safe_display(item["asset"].get("player_display_name") if hasattr(item["asset"], "get") else item["asset"])
+                for item in attached_scores
+                if item.get("score") is None
+            ]
+            if missing_score_assets:
+                st.warning(f"Pigskin Trade Score unavailable for {side_label}: {', '.join(missing_score_assets)}")
+
+            with st.expander(f"{side_label} score component breakdown", expanded=False):
+                if not attached_scores:
+                    st.caption("No assets selected.")
+                    continue
+                for item in attached_scores:
+                    asset = item["asset"]
+                    score = item.get("score")
+                    asset_name = asset.get("player_display_name") if hasattr(asset, "get") else str(asset)
+                    if not score:
+                        st.caption(f"{safe_display(asset_name)}: score unavailable")
+                        continue
+                    component_json = {}
+                    missing_flags = []
+                    source_freshness = {}
+                    try:
+                        component_json = json.loads(score.get("component_json") or "{}")
+                    except Exception:
+                        component_json = {}
+                    try:
+                        missing_flags = json.loads(score.get("missing_flags_json") or "[]")
+                    except Exception:
+                        missing_flags = []
+                    try:
+                        source_freshness = json.loads(score.get("source_freshness_json") or "{}")
+                    except Exception:
+                        source_freshness = {}
+
+                    st.markdown(
+                        f"**{safe_display(asset_name)}**: "
+                        f"score `{safe_display(score.get('trade_score'))}`, "
+                        f"tier `{safe_display(score.get('score_tier'))}`, "
+                        f"confidence `{safe_display(score.get('confidence_score'))}`, "
+                        f"risk `{safe_display(score.get('normalized_risk_score'))}`, "
+                        f"Fraud Watch `{safe_display(score.get('fraud_score'))}`"
+                    )
+                    component_rows = [
+                        {"component": key, "score": component_json.get(key)}
+                        for key in (
+                            "market_score",
+                            "projection_score",
+                            "recent_production_score",
+                            "role_usage_score",
+                            "positional_scarcity_score",
+                            "efficiency_score",
+                        )
+                    ]
+                    st.dataframe(component_rows, hide_index=True, use_container_width=True)
+                    if missing_flags:
+                        st.caption("Missing-data warnings: " + ", ".join(map(str, missing_flags)))
+                    if source_freshness:
+                        st.caption("Source freshness: `" + json.dumps(source_freshness, sort_keys=True)[:240] + "`")
 
     # Difference & recommendation
     diff_current = abs(total_val_A - total_val_B)

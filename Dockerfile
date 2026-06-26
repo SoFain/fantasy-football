@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source files
 COPY app.py validate.py ./
 COPY src/ ./src/
+COPY scripts/run_bigquery_validations.py ./scripts/run_bigquery_validations.py
+COPY bigquery/validations/ ./bigquery/validations/
 COPY data/ ./data/
 
 # Set Streamlit environment variables

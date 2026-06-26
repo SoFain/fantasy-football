@@ -22,6 +22,11 @@ diff_app.txt
 migration_error.log
 validations.log
 
+# Local run artifacts
+output/
+pipeline_execution.log
+*.log
+
 # Google Cloud credentials keys
 *.json
 !requirements.txt

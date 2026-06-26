@@ -100,6 +100,23 @@ class CloudRunJobsTests(unittest.TestCase):
         self.assertIn("--dataset,fantasy_football_brain", result["command_preview"])
         self.assertIn("--season,2026", result["command_preview"])
 
+    def test_validate_warehouse_dry_run_uses_narrow_pattern(self):
+        with patch.dict(os.environ, {
+            "CLOUD_RUN_PROJECT": "test-project",
+            "CLOUD_RUN_REGION": "us-central1",
+        }, clear=True):
+            result = cloud_run_jobs.trigger_cloud_run_job(
+                "validate-warehouse",
+                {"pattern": "model_runs"},
+                dry_run=True,
+            )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertIn("gcloud run jobs execute validate-warehouse", result["command_preview"])
+        self.assertIn("--job-name,validate-warehouse", result["command_preview"])
+        self.assertIn("--pattern,model_runs", result["command_preview"])
+        self.assertNotIn("--run-after-deploy", result["command_preview"])
+
     def test_secrets_redacted_and_sensitive_env_refused(self):
         payload = cloud_run_jobs.redact_payload({"GEMINI_API_KEY": "secret", "safe": "ok"})
 

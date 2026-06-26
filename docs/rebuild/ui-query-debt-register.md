@@ -185,3 +185,11 @@ The smallest safe transition keeps Streamlit functions in place and changes thei
 12. P1: Validate and gradually enable `USE_BACKTEST_DASHBOARD` after Phase 13.2 has materialized representative backtest rows.
 10. P1: Add source freshness fields to external context, market, Sleeper, and ranking outputs.
 11. P2: Move admin write jobs out of the Streamlit process and into explicit Cloud Run Jobs using `src/job_runner.py` and `cloud_run_job_runs`.
+
+## Phase 22.6 Trade Analyzer Score Debt Addendum
+
+| Debt ID | Location | Raw/source tables | Current purpose | Risk | Minimum compatibility target |
+| --- | --- | --- | --- | --- | --- |
+| UI-004H | future Trade Lab score display | none yet | Future deterministic Trade Analyzer score display for selected side assets. | Contract and views exist, but no builder or runtime wiring is enabled. Production must remain default off. | `compat_trade_player_scores_current`, `USE_TRADE_ANALYZER_SCORE_V0=false`, and `USE_COMPAT_TRADE_PLAYER_SCORE=false`. |
+
+The future score helper must read only `compat_trade_player_scores_current`. It must not query `weekly_metrics`, `play_by_play`, `market_values`, raw NGS, FTN, snap, injury, schedule, roster, or Sleeper source tables from UI or Pigskin-visible paths.
