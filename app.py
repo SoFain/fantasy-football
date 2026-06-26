@@ -761,7 +761,7 @@ def render_cloud_run_jobs_data_ops_panel():
             for job in jobs
         ],
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     selected_job = st.selectbox(
@@ -805,7 +805,7 @@ def render_cloud_run_jobs_data_ops_panel():
         try:
             recent_runs = get_recent_cloud_run_job_runs(limit=25)
             if recent_runs:
-                st.dataframe(recent_runs, hide_index=True, use_container_width=True)
+                st.dataframe(recent_runs, hide_index=True, width="stretch")
             else:
                 st.caption("No Cloud Run Job runs recorded yet.")
         except Exception as ex:
@@ -879,7 +879,7 @@ def render_backtest_dashboard():
         st.info("No backtest runs are available yet. Run backtests through the Cloud Run Job path before enabling this dashboard for review.")
         return
 
-    st.dataframe(runs, hide_index=True, use_container_width=True)
+    st.dataframe(runs, hide_index=True, width="stretch")
     run_options = [row.get("backtest_run_id") for row in runs if row.get("backtest_run_id")]
     if not run_options:
         st.info("Backtest run rows exist, but none have a usable backtest_run_id.")
@@ -956,13 +956,13 @@ def render_backtest_dashboard():
         metric_cols[4].metric("Rank Error", _metric_value(overall.get("rank_mae_overall")))
         metric_cols[5].metric("Top 24 Hit", _percent_value(overall.get("top_24_hit_rate")))
         metric_cols[6].metric("Calibration", _percent_value(overall.get("range_calibration_rate")))
-        st.dataframe(summary_rows, hide_index=True, use_container_width=True)
+        st.dataframe(summary_rows, hide_index=True, width="stretch")
     else:
         st.info("No summary rows matched the selected filters.")
 
     if leaderboard_rows:
         with st.expander("Backtest leaderboard", expanded=False):
-            st.dataframe(leaderboard_rows, hide_index=True, use_container_width=True)
+            st.dataframe(leaderboard_rows, hide_index=True, width="stretch")
 
     render_section_header(
         "Player Errors",
@@ -983,7 +983,7 @@ def render_backtest_dashboard():
         player_errors = []
 
     if player_errors:
-        st.dataframe(player_errors, hide_index=True, use_container_width=True)
+        st.dataframe(player_errors, hide_index=True, width="stretch")
         missing_flags = sorted(
             {
                 str(row.get("missing_data_flags"))
@@ -1007,7 +1007,7 @@ def render_backtest_dashboard():
         st.warning(f"Backtest calibration is unavailable: {ex}")
         calibration_rows = []
     if calibration_rows:
-        st.dataframe(calibration_rows, hide_index=True, use_container_width=True)
+        st.dataframe(calibration_rows, hide_index=True, width="stretch")
     else:
         st.info("No calibration rows are available for this run.")
 
@@ -1169,7 +1169,7 @@ def render_content_brief_review_ui():
         runs = []
 
     if runs:
-        st.dataframe(runs, hide_index=True, use_container_width=True)
+        st.dataframe(runs, hide_index=True, width="stretch")
     else:
         st.info("No content brief runs matched the selected filters.")
 
@@ -1223,7 +1223,7 @@ def render_content_brief_review_ui():
         st.dataframe(
             [{key: row.get(key) for key in list_columns} for row in briefs],
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
     else:
         st.info("No content briefs matched the selected filters.")
@@ -1307,7 +1307,7 @@ def render_content_brief_review_ui():
         st.dataframe(
             [{key: row.get(key) for key in item_columns} for row in items],
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
     else:
         st.info("No content brief items are available for the selected brief.")
@@ -1438,7 +1438,7 @@ def render_claim_ledger_ui():
     try:
         sources = claim_import.list_claim_sources(search=source_search, active_only=active_only, limit=200)
         if sources:
-            st.dataframe(sources, hide_index=True, use_container_width=True)
+            st.dataframe(sources, hide_index=True, width="stretch")
         else:
             st.info("No claim sources found yet.")
     except Exception as ex:
@@ -1584,7 +1584,7 @@ def render_claim_ledger_ui():
             preview_rows = []
         if preview_rows:
             preview_table = claim_import.preview_rows_for_display(preview_rows)
-            st.dataframe(preview_table, hide_index=True, use_container_width=True)
+            st.dataframe(preview_table, hide_index=True, width="stretch")
             invalid_count = sum(1 for row in preview_rows if not row.get("can_write"))
             ambiguous_count = sum(1 for row in preview_rows if row.get("player_resolution_status") == "ambiguous")
             unresolved_count = sum(1 for row in preview_rows if row.get("player_resolution_status") == "unresolved")
@@ -1630,7 +1630,7 @@ def render_claim_ledger_ui():
             limit=200,
         )
         if claims:
-            st.dataframe(claims, hide_index=True, use_container_width=True)
+            st.dataframe(claims, hide_index=True, width="stretch")
         else:
             st.info("No claims matched the selected filters.")
     except Exception as ex:
@@ -1651,10 +1651,10 @@ def render_claim_ledger_ui():
                 st.json(detail["claim"])
                 if detail["players"]:
                     st.markdown("#### Linked Players")
-                    st.dataframe(detail["players"], hide_index=True, use_container_width=True)
+                    st.dataframe(detail["players"], hide_index=True, width="stretch")
                 if detail["evaluation_windows"]:
                     st.markdown("#### Evaluation Windows")
-                    st.dataframe(detail["evaluation_windows"], hide_index=True, use_container_width=True)
+                    st.dataframe(detail["evaluation_windows"], hide_index=True, width="stretch")
                 action_cols = st.columns(4)
                 with action_cols[0]:
                     if st.button("Mark Reviewed"):
@@ -2083,7 +2083,7 @@ def render_fraud_watch_segment():
     cols[0].metric("Top Candidate", top["player_name"])
     cols[1].metric("Fraud Score", f'{top["fraud_score"]:.1f}')
     cols[2].metric("Label", top["fraud_label"])
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
 
 def render_sleeper_watch_segment():
@@ -2229,7 +2229,7 @@ def render_sleeper_watch_segment():
     # Render dataframe
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Opp Def Rank vs Pos": st.column_config.NumberColumn(
@@ -3107,7 +3107,7 @@ def render_player_profiles_tab():
                 height=220,
             )
             
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
 
         # 2. Season History
         if not history_df.empty:
@@ -3148,7 +3148,7 @@ def render_player_profiles_tab():
                 })
                 
             season_summary_df = pd.DataFrame(season_summary_data).sort_values(by="Season", ascending=False)
-            st.dataframe(season_summary_df, use_container_width=True, hide_index=True)
+            st.dataframe(season_summary_df, width="stretch", hide_index=True)
 
             # 3. Game Log dropdown
             st.markdown("#### 📋 Seasonal Game Logs")
@@ -3178,7 +3178,7 @@ def render_player_profiles_tab():
                             "total_epa": "EPA",
                         }
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True
                 )
 
@@ -3199,7 +3199,7 @@ def render_player_profiles_tab():
                         <div style="font-size: 11px; color: #0284c7;">Grade: {comp['avg_grade']:.1f}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    if st.button("🔍 View Profile", key=f"comp_jump_{comp['player_id']}", use_container_width=True):
+                    if st.button("🔍 View Profile", key=f"comp_jump_{comp['player_id']}", width="stretch"):
                         st.session_state.selected_player_id = comp["player_id"]
                         st.session_state.global_profile_search = comp["player_display_name"]
                         st.rerun()
@@ -3218,7 +3218,7 @@ def render_player_profiles_tab():
         for idx, pos in enumerate(positions):
             label = f"🏈 {pos}" if pos != "All" else "🌍 All"
             btn_type = "primary" if st.session_state.selected_pos == pos else "secondary"
-            if cols_pos[idx].button(label, type=btn_type, use_container_width=True, key=f"pos_btn_{pos}"):
+            if cols_pos[idx].button(label, type=btn_type, width="stretch", key=f"pos_btn_{pos}"):
                 st.session_state.selected_pos = pos
                 st.rerun()
 
@@ -3270,7 +3270,7 @@ def render_player_profiles_tab():
 
         st.dataframe(
             display_ranks[["Rank", "Player", "Team", "College", "Pigskin Score", "Tier", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
 
@@ -3287,7 +3287,7 @@ def render_player_profiles_tab():
         with col_btn:
             st.write("") # Alignment spacers
             st.write("")
-            if st.button("View Full Profile 👤", type="primary", use_container_width=True):
+            if st.button("View Full Profile 👤", type="primary", width="stretch"):
                 if rank_selected:
                     st.session_state.selected_player_id = df_pos[df_pos["player_display_name"] == rank_selected].iloc[0]["player_id"]
                     st.rerun()
@@ -3722,7 +3722,7 @@ def render_reddit_topic_scout():
             "Best Board Rank": topic["top_weekly_rank"],
             "Top Link": topic["top_link"],
         } for index, topic in enumerate(topics)])
-        st.dataframe(topic_df, use_container_width=True, hide_index=True)
+        st.dataframe(topic_df, width="stretch", hide_index=True)
 
         for index, topic in enumerate(topics, start=1):
             with st.expander(f"{index}. {topic['topic']}"):
@@ -4340,7 +4340,7 @@ def render_value_analyzer():
                             "efficiency_score",
                         )
                     ]
-                    st.dataframe(component_rows, hide_index=True, use_container_width=True)
+                    st.dataframe(component_rows, hide_index=True, width="stretch")
                     if missing_flags:
                         st.caption("Missing-data warnings: " + ", ".join(map(str, missing_flags)))
                     if source_freshness:
@@ -4498,7 +4498,7 @@ if view_mode == "broadcast":
 st.sidebar.title("Settings")
 
 # Low-profile Logout Button
-if st.sidebar.button("🔒 Logout", key="logout_btn", use_container_width=True):
+if st.sidebar.button("🔒 Logout", key="logout_btn", width="stretch"):
     st.session_state.clear()
     st.rerun()
 
