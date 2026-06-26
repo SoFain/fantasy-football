@@ -18,6 +18,8 @@ from src.compat_flags import (
     USE_CONTENT_BRIEF_REVIEW_UI,
     USE_TRADE_ANALYZER_SCORE_V0,
     USE_COMPAT_TRADE_PLAYER_SCORE,
+    USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS,
+    DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER,
     compat_flag_enabled,
 )
 from src.cloud_run_jobs import (
@@ -103,6 +105,18 @@ def use_trade_score_ui():
 
 def use_cloud_run_jobs_for_data_ops():
     return should_use_cloud_run_jobs_for_data_ops()
+
+
+def use_data_ops_local_subprocess_controls():
+    return compat_flag_enabled(USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS)
+
+
+def data_ops_local_subprocess_trigger_allowed():
+    return compat_flag_enabled(DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER)
+
+
+def data_ops_local_subprocess_controls_enabled():
+    return use_data_ops_local_subprocess_controls() and data_ops_local_subprocess_trigger_allowed()
 
 # Set Streamlit Page Configuration
 st.set_page_config(
@@ -745,7 +759,7 @@ def render_cloud_run_jobs_data_ops_panel():
         f"{'true' if trigger_allowed else 'false'}."
     )
     if not cloud_jobs_enabled:
-        st.info("Cloud Run Job execution is not active. The local subprocess controls below remain the active Data Ops path.")
+        st.info("Cloud Run Job execution is not active. Local subprocess controls use separate default-off gates.")
     elif not trigger_allowed:
         st.warning("Cloud Run Job previews are enabled, but triggering is blocked until the explicit allow flag is set.")
 
@@ -812,12 +826,38 @@ def render_cloud_run_jobs_data_ops_panel():
             st.caption(f"Recent job status is unavailable: {ex}")
 
 
+def render_data_ops_local_subprocess_gate():
+    controls_visible = use_data_ops_local_subprocess_controls()
+    trigger_allowed = data_ops_local_subprocess_trigger_allowed()
+    controls_can_run = data_ops_local_subprocess_controls_enabled()
+
+    status_cols = st.columns(2)
+    with status_cols[0]:
+        st.metric("Local controls", "Visible" if controls_visible else "Disabled")
+    with status_cols[1]:
+        st.metric("Local trigger allow flag", "Enabled" if trigger_allowed else "Disabled")
+
+    st.caption(
+        f"`{USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS}` is "
+        f"{'true' if controls_visible else 'false'}; `{DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER}` is "
+        f"{'true' if trigger_allowed else 'false'}."
+    )
+    if not controls_visible:
+        st.info("Local subprocess, ingestion, external refresh, BigQuery write, and LLM-backed controls are disabled by default.")
+    elif not trigger_allowed:
+        st.warning("Local subprocess controls are visible for review, but execution is disabled until the explicit trigger allow flag is set.")
+    else:
+        st.warning("Local subprocess controls are visible and executable. Use only in an authorized admin session.")
+
+    return controls_visible, controls_can_run
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def execute_bq_cached(sql_query: str):
     from google.cloud import bigquery
     bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
     query_job = bq_client.query(sql_query)
-    df = query_job.result().to_dataframe()
+    df = query_job.result().to_dataframe(create_bqstorage_client=False)
     return df
 
 
@@ -4374,11 +4414,17 @@ def render_value_analyzer():
     if trade_history_uses_compat:
         st.caption("Trade player history source: compat_trade_player_history")
 
+    trade_ai_controls_visible = use_data_ops_local_subprocess_controls()
+    trade_ai_controls_can_run = data_ops_local_subprocess_controls_enabled()
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if not active_gemini_key:
+    if not trade_ai_controls_visible:
+        st.info("AI outlook analysis is hidden unless local admin controls are explicitly enabled.")
+    elif not active_gemini_key:
         st.info("⚠️ Enter your **Gemini API Key** in the sidebar to activate the AI Analysis option.")
     else:
-        if st.button(f"🧠 Run AI {projection_years}-Year Outlook Analysis", type="primary"):
+        if not trade_ai_controls_can_run:
+            st.warning("AI outlook analysis is visible but disabled until the local subprocess trigger allow flag is set.")
+        if st.button(f"🧠 Run AI {projection_years}-Year Outlook Analysis", type="primary", disabled=not trade_ai_controls_can_run):
             if not assets_A and not assets_B:
                 st.error("Select assets on Side A or Side B first.")
                 return
@@ -5022,6 +5068,7 @@ with tab_data_ops:
     render_tab_bookmarks([
         ("Runtime", "runtime-status"),
         ("Cloud Jobs", "cloud-run-jobs"),
+        ("Local Gates", "local-admin-controls"),
         ("Safe Checks", "safe-checks"),
         ("External API", "external-api"),
         ("Warehouse Writes", "warehouse-writes"),
@@ -5038,10 +5085,18 @@ with tab_data_ops:
     render_section_header(
         "Cloud Run Jobs",
         "cloud-run-jobs",
-        "Preview and optionally trigger Cloud Run Jobs while local subprocess controls remain available.",
+        "Preview and optionally trigger Cloud Run Jobs through separate Cloud Run gates.",
     )
     with st.container(border=True):
         render_cloud_run_jobs_data_ops_panel()
+
+    render_section_header(
+        "Local Admin Controls",
+        "local-admin-controls",
+        "Default-off gates for local subprocesses, ingestion, external refreshes, BigQuery writes, and LLM-backed actions.",
+    )
+    with st.container(border=True):
+        local_controls_visible, local_controls_can_run = render_data_ops_local_subprocess_gate()
 
     render_section_header(
         "Safe Checks",
@@ -5052,7 +5107,7 @@ with tab_data_ops:
         st.markdown("#### Range Partition Verification")
         st.caption("Inspect table metadata and partition health without running `SELECT *`.")
         render_last_success("validation_sweep")
-        if st.button("🔍 Run Validation Sweep", type="secondary"):
+        if st.button("🔍 Run Validation Sweep", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["validate.py"]
 
             exec_env = {}
@@ -5071,7 +5126,7 @@ with tab_data_ops:
         st.markdown("#### Sleeper Player Status, News, and Trending")
         st.caption("Refresh the global Sleeper player map plus real-time add/drop vectors used by rankings and context.")
         render_last_success("realtime_news")
-        if st.button("🚀 Ingest Realtime Player News", type="secondary"):
+        if st.button("🚀 Ingest Realtime Player News", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.ingest_news"]
 
             exec_env = {}
@@ -5084,7 +5139,7 @@ with tab_data_ops:
         st.markdown("#### Context Event Ledger")
         st.caption("Load or refresh curated context events used by Pigskin before narrative claims.")
         render_last_success("context_event_ledger")
-        if st.button("🧠 Load Context Event Ledger", type="secondary"):
+        if st.button("🧠 Load Context Event Ledger", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.ingest_context_events"]
 
             exec_env = {}
@@ -5099,7 +5154,7 @@ with tab_data_ops:
         render_last_success("market_values")
         is_dynasty_ingest = st.checkbox("Dynasty Values", value=True, help="If checked, fetches dynasty values. Otherwise, fetches redraft values.")
 
-        if st.button("📊 Ingest FantasyCalc Market Values", type="secondary"):
+        if st.button("📊 Ingest FantasyCalc Market Values", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.fetch_market_values"]
             if not is_dynasty_ingest:
                 cmd_args.append("--redraft")
@@ -5128,7 +5183,7 @@ with tab_data_ops:
             placeholder='"Michael Pittman" "Daniel Jones" injury Colts'
         )
 
-        if st.button("🔎 Verify Player Context", type="secondary"):
+        if st.button("🔎 Verify Player Context", type="secondary", disabled=not local_controls_can_run):
             if not verify_player.strip():
                 st.error("Enter a player name before running outside verification.")
             else:
@@ -5158,7 +5213,7 @@ with tab_data_ops:
             default_cfbd_key = os.environ.get("CFBD_API_KEY", "")
             cfbd_key = st.text_input("CFBD API Key", type="password", value=default_cfbd_key, placeholder="e.g. mock or your_cfbd_key")
 
-        if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
+        if st.button("🚀 Ingest CFBD College Stats", type="secondary", disabled=not local_controls_can_run):
             if not cfbd_key.strip():
                 st.error("A CFBD API Key (or 'mock') is required to run the ingestion.")
             else:
@@ -5199,7 +5254,7 @@ with tab_data_ops:
         if write_disp == "WRITE_TRUNCATE":
             st.warning("WRITE_TRUNCATE overwrites the target warehouse tables for the selected seasons.")
 
-        if st.button("🚀 Run Ingestion Pipeline", type="primary"):
+        if st.button("🚀 Run Ingestion Pipeline", type="primary", disabled=not local_controls_can_run):
             if not seasons_clean:
                 st.error("Please provide at least one target season.")
             else:
@@ -5215,7 +5270,7 @@ with tab_data_ops:
         st.markdown("#### Publish Pigskin Rankings")
         st.caption("Generate LLM-authored Pigskin rankings from curated BigQuery evidence, then append a rankings-history snapshot.")
         render_last_success("pigskin_rankings")
-        if st.button("🏆 Generate Pigskin Rankings", type="secondary"):
+        if st.button("🏆 Generate Pigskin Rankings", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.generate_pigskin_rankings", "--refresh-sleeper"]
 
             exec_env = {}
@@ -5230,7 +5285,15 @@ with tab_data_ops:
         st.markdown("#### Upload Rookie Scouting CSV")
         st.caption("Import advanced player profiling spreadsheets into BigQuery.")
         render_last_success("rookie_scouting_csv")
-        scouting_file = st.file_uploader("Choose a CSV file", type=["csv"], key="scouting_csv_uploader")
+        if local_controls_can_run:
+            scouting_file = st.file_uploader(
+                "Choose a CSV file",
+                type=["csv"],
+                key="scouting_csv_uploader",
+            )
+        else:
+            scouting_file = None
+            st.info("Scouting CSV upload is disabled until local subprocess controls and the local trigger allow flag are both enabled.")
 
         if scouting_file is not None:
             import pandas as pd
@@ -5265,7 +5328,7 @@ with tab_data_ops:
 
                 scout_source = st.text_input("Data Source Name", value="Reception Perception")
 
-                if st.button("📤 Upload and Import Scouting Metrics", type="primary"):
+                if st.button("📤 Upload and Import Scouting Metrics", type="primary", disabled=not local_controls_can_run):
                     if c_season == "None" or c_name == "None":
                         st.error("❌ 'Season / Draft Year' and 'Player Name' are required fields.")
                     else:
