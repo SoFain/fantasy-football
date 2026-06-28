@@ -47,6 +47,13 @@ from src.ui_data_guards import (
     summarize_trade_score_side,
     unresolved_trade_asset_labels,
 )
+from src.trade_player_scores import (
+    trade_score_model_context,
+    trade_score_model_context_label,
+    trade_score_source_freshness_rows,
+    trade_score_unavailable_reason,
+    trade_score_warning_summary_rows,
+)
 
 DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
 BIGQUERY_PROJECT_ID = (
@@ -4304,6 +4311,10 @@ def render_value_analyzer():
         except Exception as score_error:
             st.warning(f"Pigskin Trade Score unavailable: {score_error}")
 
+        model_context = trade_score_model_context(score_rows)
+        if model_context:
+            st.caption(trade_score_model_context_label(model_context))
+
         attached_scores_A = attach_trade_scores_to_assets(assets_A, score_rows)
         attached_scores_B = attach_trade_scores_to_assets(assets_B, score_rows)
         score_summary_A = summarize_trade_score_side(attached_scores_A)
@@ -4326,11 +4337,14 @@ def render_value_analyzer():
             st.caption("Lower delta means the score model sees the sides as closer.")
 
         for side_label, attached_scores in (("Side A", attached_scores_A), ("Side B", attached_scores_B)):
-            missing_score_assets = [
-                safe_display(item["asset"].get("player_display_name") if hasattr(item["asset"], "get") else item["asset"])
-                for item in attached_scores
-                if item.get("score") is None
-            ]
+            missing_score_assets = []
+            for item in attached_scores:
+                if item.get("score") is not None:
+                    continue
+                asset = item["asset"]
+                asset_name = asset.get("player_display_name") if hasattr(asset, "get") else asset
+                reason = trade_score_unavailable_reason(asset)
+                missing_score_assets.append(f"{safe_display(asset_name)} ({reason})")
             if missing_score_assets:
                 st.warning(f"Pigskin Trade Score unavailable for {side_label}: {', '.join(missing_score_assets)}")
 
@@ -4343,11 +4357,11 @@ def render_value_analyzer():
                     score = item.get("score")
                     asset_name = asset.get("player_display_name") if hasattr(asset, "get") else str(asset)
                     if not score:
-                        st.caption(f"{safe_display(asset_name)}: score unavailable")
+                        reason = trade_score_unavailable_reason(asset)
+                        st.caption(f"{safe_display(asset_name)}: Pigskin Trade Score N/A. Reason: {reason}.")
                         continue
                     component_json = {}
                     missing_flags = []
-                    source_freshness = {}
                     try:
                         component_json = json.loads(score.get("component_json") or "{}")
                     except Exception:
@@ -4356,10 +4370,6 @@ def render_value_analyzer():
                         missing_flags = json.loads(score.get("missing_flags_json") or "[]")
                     except Exception:
                         missing_flags = []
-                    try:
-                        source_freshness = json.loads(score.get("source_freshness_json") or "{}")
-                    except Exception:
-                        source_freshness = {}
 
                     st.markdown(
                         f"**{safe_display(asset_name)}**: "
@@ -4381,10 +4391,19 @@ def render_value_analyzer():
                         )
                     ]
                     st.dataframe(component_rows, hide_index=True, width="stretch")
-                    if missing_flags:
-                        st.caption("Missing-data warnings: " + ", ".join(map(str, missing_flags)))
-                    if source_freshness:
-                        st.caption("Source freshness: `" + json.dumps(source_freshness, sort_keys=True)[:240] + "`")
+                    warning_rows = trade_score_warning_summary_rows(missing_flags)
+                    if warning_rows:
+                        warning_categories = ", ".join(
+                            f"{row['category']} ({row['count']})" for row in warning_rows
+                        )
+                        st.caption(f"Warning categories: {warning_categories}")
+                        with st.expander(f"{safe_display(asset_name)} warning details", expanded=False):
+                            st.dataframe(warning_rows, hide_index=True, width="stretch")
+
+                    freshness_rows = trade_score_source_freshness_rows(score)
+                    if freshness_rows:
+                        with st.expander(f"{safe_display(asset_name)} source freshness", expanded=False):
+                            st.dataframe(freshness_rows, hide_index=True, width="stretch")
 
     # Difference & recommendation
     diff_current = abs(total_val_A - total_val_B)

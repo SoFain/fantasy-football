@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,47 @@ SAFE_SOURCE_OBJECTS = (
 
 MATERIALIZATION_POLICY_VERSION = "trade_score_v0_staging_review_policy"
 LOW_CONFIDENCE_THRESHOLD = 70.0
+V1_MODEL_PREFIX = "trade_score_v1"
+
+GENERIC_SCORING_FLAGS = {
+    "missing_fumbles_lost",
+    "missing_return_tds",
+    "scoring_missing_data_flags_present",
+}
+POSITION_SCORING_FLAGS = {
+    "QB": {
+        "missing_interceptions",
+        "missing_passing_2pt_conversions",
+        "missing_rushing_2pt_conversions",
+    },
+    "RB": {
+        "missing_rushing_2pt_conversions",
+    },
+    "WR": {
+        "missing_receiving_2pt_conversions",
+    },
+    "TE": {
+        "missing_receiving_2pt_conversions",
+    },
+}
+LOW_IMPACT_SCORING_FLAGS = {
+    "missing_passing_2pt_conversions",
+    "missing_receiving_2pt_conversions",
+    "missing_rushing_2pt_conversions",
+    "missing_return_tds",
+}
+ROLE_SOURCE_FLAGS = {
+    "missing_snaps",
+    "missing_snaps_last_3",
+    "missing_snap_share",
+    "missing_routes_proxy",
+}
+FALLBACK_FLAGS = {
+    "efficiency_fallback_used",
+    "expected_points_proxy_used",
+    "projection_score_pigskin_projection_proxy",
+    "role_usage_fallback_used",
+}
 
 COMPONENT_FIELDS = (
     "market_score",
@@ -160,6 +202,7 @@ def build_trade_player_score_source_query(
             AVG(yards_per_reception) AS yards_per_reception,
             AVG(catch_rate) AS catch_rate,
             COUNT(1) AS history_sample_size,
+            ARRAY_AGG(DISTINCT team IGNORE NULLS ORDER BY team) AS history_teams,
             ANY_VALUE(source_freshness_json) AS history_source_freshness_json,
             ANY_VALUE(missing_data_flags) AS history_missing_data_flags
         FROM `{table("compat_trade_player_history")}`
@@ -177,7 +220,9 @@ def build_trade_player_score_source_query(
             AVG(carry_share) AS truth_rush_share,
             AVG(red_zone_touches) AS red_zone_touches,
             AVG(role_quality_score) AS role_quality_score,
-            AVG(role_fragility_score) AS role_fragility_score
+            AVG(role_fragility_score) AS role_fragility_score,
+            ARRAY_AGG(DISTINCT team IGNORE NULLS ORDER BY team) AS truth_teams,
+            ARRAY_AGG(DISTINCT current_team IGNORE NULLS ORDER BY current_team) AS truth_current_teams
         FROM `{table("analytics_player_weekly_truth")}`
         WHERE season = @season
             AND week BETWEEN GREATEST(@week - 4, 1) AND @week
@@ -189,6 +234,7 @@ def build_trade_player_score_source_query(
             COALESCE(player_id_internal, source_player_key) AS player_key,
             AVG(total_fantasy_points) AS profile_recent_points,
             COUNT(1) AS fantasy_profile_sample_size,
+            ARRAY_AGG(DISTINCT team IGNORE NULLS ORDER BY team) AS fantasy_teams,
             ANY_VALUE(source_freshness_json) AS fantasy_source_freshness_json,
             ANY_VALUE(missing_data_flags) AS fantasy_missing_data_flags
         FROM `{table("analytics_player_fantasy_points_by_profile")}`
@@ -205,6 +251,8 @@ def build_trade_player_score_source_query(
                 CAST(fraud_score AS FLOAT64) AS source_fraud_score,
                 fraud_label,
                 analytical_verdict AS fraud_verdict,
+                team AS fraud_team,
+                current_team AS fraud_current_team,
                 ROW_NUMBER() OVER (
                     PARTITION BY player_id
                     ORDER BY season DESC, week DESC
@@ -230,6 +278,8 @@ def build_trade_player_score_source_query(
                 f.source_fraud_score,
                 f.fraud_label,
                 f.fraud_verdict,
+                f.fraud_team,
+                f.fraud_current_team,
                 CASE
                     WHEN a.source_player_key = f.player_key THEN 1
                     WHEN a.gsis_id = f.player_key THEN 2
@@ -267,6 +317,8 @@ def build_trade_player_score_source_query(
             r.rank_overall AS projection_rank_overall,
             r.rank_position AS projection_rank_position,
             r.tier AS projection_tier,
+            r.as_of_season AS projection_raw_as_of_season,
+            r.as_of_week AS projection_raw_as_of_week,
             COALESCE(r.as_of_season, r.season) AS projection_as_of_season,
             COALESCE(r.as_of_week, r.week) AS projection_as_of_week,
             CAST(r.projected_points_or_value AS FLOAT64) AS projected_points_or_value,
@@ -333,6 +385,9 @@ def build_trade_player_score_source_query(
                 p.projection_rank_overall,
                 p.projection_rank_position,
                 p.projection_tier,
+                p.projection_team,
+                p.projection_raw_as_of_season,
+                p.projection_raw_as_of_week,
                 p.projection_as_of_season,
                 p.projection_as_of_week,
                 p.projected_points_or_value,
@@ -434,6 +489,7 @@ def build_trade_player_score_source_query(
         h.yards_per_reception,
         h.catch_rate,
         h.history_sample_size,
+        h.history_teams,
         h.history_source_freshness_json,
         h.history_missing_data_flags,
         t.truth_recent_points,
@@ -443,8 +499,11 @@ def build_trade_player_score_source_query(
         t.red_zone_touches,
         t.role_quality_score,
         t.role_fragility_score,
+        t.truth_teams,
+        t.truth_current_teams,
         fp.profile_recent_points,
         fp.fantasy_profile_sample_size,
+        fp.fantasy_teams,
         fp.fantasy_source_freshness_json,
         fp.fantasy_missing_data_flags,
         f.fraud_join_key,
@@ -452,6 +511,8 @@ def build_trade_player_score_source_query(
         f.source_fraud_score,
         f.fraud_label,
         f.fraud_verdict,
+        f.fraud_team,
+        f.fraud_current_team,
         p.projection_join_key,
         p.projection_join_strategy,
         p.projection_model_run_id,
@@ -459,6 +520,9 @@ def build_trade_player_score_source_query(
         p.projection_rank_overall,
         p.projection_rank_position,
         p.projection_tier,
+        p.projection_team,
+        p.projection_raw_as_of_season,
+        p.projection_raw_as_of_week,
         p.projection_as_of_season,
         p.projection_as_of_week,
         p.projected_points_or_value,
@@ -664,6 +728,36 @@ def calculate_trade_score(
 
 def confidence_multiplier(confidence_score: float) -> float:
     return _clamp(_num(confidence_score, 0.0) / 100.0, 0.70, 1.00)
+
+
+def calculate_trade_score_v1(
+    *,
+    market_score: float,
+    projection_score: float,
+    recent_production_score: float,
+    role_usage_score: float,
+    positional_scarcity_score: float,
+    efficiency_score: float,
+    source_stability_score: float,
+    risk_adjustment: float,
+) -> dict[str, float]:
+    base_score = (
+        0.35 * _clamp(market_score, 0.0, 100.0)
+        + 0.25 * _clamp(projection_score, 0.0, 100.0)
+        + 0.15 * _clamp(recent_production_score, 0.0, 100.0)
+        + 0.10 * _clamp(role_usage_score, 0.0, 100.0)
+        + 0.05 * _clamp(positional_scarcity_score, 0.0, 100.0)
+        + 0.05 * _clamp(efficiency_score, 0.0, 100.0)
+        + 0.05 * _clamp(source_stability_score, 0.0, 100.0)
+    )
+    safe_risk_adjustment = _clamp(risk_adjustment, -10.0, 0.0)
+    trade_score = _clamp(base_score + safe_risk_adjustment, 0.0, 100.0)
+    return {
+        "base_score": round(base_score, 4),
+        "risk_adjustment": round(safe_risk_adjustment, 4),
+        "confidence_multiplier": 1.0,
+        "trade_score": round(trade_score, 4),
+    }
 
 
 def build_preview(rows: list[dict[str, Any]], examples: int = 5) -> dict[str, Any]:
@@ -982,6 +1076,15 @@ def _build_score_row(
     missing_flags = _missing_flags(row, target_week=week)
     if row.get("player_id_internal") in (None, "") and row.get("source_player_key"):
         missing_flags.append("source_player_key_used_as_player_id")
+    is_v1 = _is_v1_model(model_version)
+    team_context = _team_context(row) if is_v1 else None
+    if is_v1 and team_context and team_context["has_mismatch"]:
+        missing_flags.append("team_context_mismatch_warning")
+    if is_v1 and row.get("projection_model_run_id"):
+        raw_projection_season = row.get("projection_raw_as_of_season", row.get("projection_as_of_season"))
+        raw_projection_week = row.get("projection_raw_as_of_week", row.get("projection_as_of_week"))
+        if _num(raw_projection_season, None) is None or _num(raw_projection_week, None) is None:
+            missing_flags.append("projection_freshness_metadata_missing")
 
     market_score = _market_score(row, percentile_context)
     projection_score = _projection_score(row, percentile_context, missing_flags)
@@ -990,18 +1093,51 @@ def _build_score_row(
     scarcity_score = _positional_scarcity_score(row, roster_format_id, missing_flags)
     efficiency_score = _efficiency_score(row, missing_flags)
     fraud_score = _fraud_score(row)
-    normalized_risk_score = _normalized_risk_score(row, missing_flags, fraud_score)
-    confidence_breakdown = _confidence_breakdown(row, missing_flags)
+    source_stability = _source_stability_score(row, missing_flags) if is_v1 else None
+    risk_breakdown = (
+        _risk_breakdown_v1(
+            row,
+            missing_flags=missing_flags,
+            fraud_score=fraud_score,
+            league_type_id=league_type_id,
+            roster_format_id=roster_format_id,
+        )
+        if is_v1
+        else None
+    )
+    normalized_risk_score = (
+        risk_breakdown["normalized_risk_score"]
+        if risk_breakdown
+        else _normalized_risk_score(row, missing_flags, fraud_score)
+    )
+    confidence_breakdown = (
+        _confidence_breakdown_v1(row, missing_flags)
+        if is_v1
+        else _confidence_breakdown(row, missing_flags)
+    )
     confidence_score = confidence_breakdown["confidence_score"]
-    formula = calculate_trade_score(
-        market_score=market_score,
-        projection_score=projection_score,
-        recent_production_score=recent_score,
-        role_usage_score=role_score,
-        positional_scarcity_score=scarcity_score,
-        efficiency_score=efficiency_score,
-        normalized_risk_score=normalized_risk_score,
-        confidence_score=confidence_score,
+    formula = (
+        calculate_trade_score_v1(
+            market_score=market_score,
+            projection_score=projection_score,
+            recent_production_score=recent_score,
+            role_usage_score=role_score,
+            positional_scarcity_score=scarcity_score,
+            efficiency_score=efficiency_score,
+            source_stability_score=source_stability or 0.0,
+            risk_adjustment=risk_breakdown["risk_adjustment"] if risk_breakdown else 0.0,
+        )
+        if is_v1
+        else calculate_trade_score(
+            market_score=market_score,
+            projection_score=projection_score,
+            recent_production_score=recent_score,
+            role_usage_score=role_score,
+            positional_scarcity_score=scarcity_score,
+            efficiency_score=efficiency_score,
+            normalized_risk_score=normalized_risk_score,
+            confidence_score=confidence_score,
+        )
     )
     player_id = _clean_str(row.get("player_id_internal")) or _clean_str(row.get("source_player_key"))
     if not player_id:
@@ -1023,6 +1159,7 @@ def _build_score_row(
         "risk_adjustment": formula["risk_adjustment"],
         "confidence_multiplier": formula["confidence_multiplier"],
         "confidence_breakdown": confidence_breakdown,
+        "model_family": "v1" if is_v1 else "v0",
         "projection_join": {
             "join_key": row.get("projection_join_key"),
             "join_strategy": row.get("projection_join_strategy"),
@@ -1030,6 +1167,10 @@ def _build_score_row(
         "fallbacks": _fallbacks(row, missing_flags),
         "source_objects": list(SAFE_SOURCE_OBJECTS),
     }
+    if is_v1:
+        component_json["source_stability_score"] = source_stability
+        component_json["risk_breakdown"] = risk_breakdown
+        component_json["team_context"] = team_context
     return {
         "score_run_id": score_run_id,
         "model_run_id": model_run_id,
@@ -1253,6 +1394,73 @@ def _normalized_risk_score(row: dict[str, Any], missing_flags: list[str], fraud_
     return round(_clamp(risk, 0.0, 1.0), 4)
 
 
+def _risk_breakdown_v1(
+    row: dict[str, Any],
+    *,
+    missing_flags: list[str],
+    fraud_score: float,
+    league_type_id: str,
+    roster_format_id: str,
+) -> dict[str, Any]:
+    flags = set(missing_flags)
+    raw_fraud_risk = _clamp(fraud_score / 100.0, 0.0, 1.0)
+    projection_risk_value = _num(row.get("projection_risk_score"), None)
+    projection_risk = (
+        _clamp(projection_risk_value / 100.0, 0.0, 1.0)
+        if projection_risk_value is not None
+        else None
+    )
+    role_fragility_value = _num(row.get("role_fragility_score"), None)
+    role_fragility = (
+        _clamp(role_fragility_value / 100.0, 0.0, 1.0)
+        if role_fragility_value is not None
+        else None
+    )
+    identity_risk = 0.0
+    if "missing_player_id" in flags:
+        identity_risk = 1.0
+    elif "missing_player_id_internal" in flags or "source_player_key_used_as_player_id" in flags:
+        identity_risk = 0.35
+
+    corroborating_sources = [
+        value
+        for value in (projection_risk, role_fragility, identity_risk)
+        if value is not None and value >= 0.6
+    ]
+    fraud_cap = 1.0 if corroborating_sources else 0.65
+    fraud_risk = min(raw_fraud_risk, fraud_cap)
+    explicit_values = [fraud_risk, identity_risk]
+    if projection_risk is not None:
+        explicit_values.append(projection_risk)
+    if role_fragility is not None:
+        explicit_values.append(role_fragility)
+    normalized_risk = _clamp(max(explicit_values), 0.0, 1.0)
+
+    severe_sources = sum(1 for value in explicit_values if value >= 0.8)
+    severe_supported = severe_sources >= 2 or identity_risk >= 0.8
+    risk_cap = 10.0 if severe_supported else 6.0
+    if league_type_id == "redraft" and roster_format_id == "one_qb" and not severe_supported:
+        risk_cap = 6.0
+    risk_adjustment = -risk_cap * normalized_risk
+    notes = []
+    if "missing_fraud_context" in flags:
+        notes.append("missing_fraud_context_treated_as_unknown_not_high_risk")
+    if raw_fraud_risk > fraud_risk:
+        notes.append("fraud_only_risk_capped_without_corroboration")
+    return {
+        "fraud_risk": round(fraud_risk, 4),
+        "raw_fraud_risk": round(raw_fraud_risk, 4),
+        "projection_risk": round(projection_risk, 4) if projection_risk is not None else None,
+        "role_fragility_risk": round(role_fragility, 4) if role_fragility is not None else None,
+        "identity_risk": round(identity_risk, 4),
+        "missing_source_unknown_risk_notes": notes,
+        "risk_cap": risk_cap,
+        "severe_risk_supported": severe_supported,
+        "normalized_risk_score": round(normalized_risk, 4),
+        "risk_adjustment": round(risk_adjustment, 4),
+    }
+
+
 def _confidence_breakdown(row: dict[str, Any], missing_flags: list[str]) -> dict[str, Any]:
     confidence = 92.0
     starting_confidence = confidence
@@ -1293,6 +1501,238 @@ def _confidence_breakdown(row: dict[str, Any], missing_flags: list[str]) -> dict
         "missing_flag_penalty": missing_flag_penalty,
         "confidence_score": final_confidence,
     }
+
+
+def _confidence_breakdown_v1(row: dict[str, Any], missing_flags: list[str]) -> dict[str, Any]:
+    confidence = 92.0
+    starting_confidence = confidence
+    blend_steps = []
+    projection_confidence = _num(row.get("projection_confidence_score"), None)
+    if projection_confidence is not None:
+        confidence = (confidence + _clamp(projection_confidence, 0.0, 100.0)) / 2.0
+        blend_steps.append({
+            "source": "projection_rankings_current",
+            "value": round(_clamp(projection_confidence, 0.0, 100.0), 2),
+            "confidence_after_blend": round(confidence, 2),
+        })
+    pigskin_confidence = _num(row.get("pigskin_confidence"), None)
+    if pigskin_confidence is not None:
+        confidence = (confidence + _clamp(pigskin_confidence, 0.0, 100.0)) / 2.0
+        blend_steps.append({
+            "source": "compat_trade_assets_current",
+            "value": round(_clamp(pigskin_confidence, 0.0, 100.0), 2),
+            "confidence_after_blend": round(confidence, 2),
+        })
+
+    penalty_categories = _confidence_penalty_categories_v1(row, missing_flags)
+    penalty_total = round(sum(category["penalty"] for category in penalty_categories), 2)
+    confidence -= penalty_total
+    final_confidence = round(_clamp(confidence, 0.0, 100.0), 2)
+    return {
+        "starting_confidence": starting_confidence,
+        "blend_steps": blend_steps,
+        "sample_size": _sample_size(row),
+        "sample_size_penalty": _category_penalty(penalty_categories, "sample_size_warning"),
+        "missing_flag_count": len(set(missing_flags)),
+        "missing_flag_penalty": penalty_total,
+        "penalty_categories": penalty_categories,
+        "confidence_score": final_confidence,
+    }
+
+
+def _confidence_penalty_categories_v1(row: dict[str, Any], missing_flags: list[str]) -> list[dict[str, Any]]:
+    flags = set(missing_flags)
+    position = str(row.get("position") or "").upper()
+    categories: list[dict[str, Any]] = []
+
+    identity_flags = sorted(flags & {"missing_player_id", "missing_player_id_internal", "source_player_key_used_as_player_id"})
+    if "missing_player_id" in identity_flags:
+        _add_penalty_category(categories, "identity_blocker", identity_flags, 30.0, "blocker")
+    elif identity_flags:
+        _add_penalty_category(categories, "identity_blocker", identity_flags, 6.0, "warning")
+
+    core_flags = sorted(flags & {"missing_market_value", "missing_projection_context", "missing_model_run_id"})
+    core_penalty = min(25.0, len(core_flags) * 12.0)
+    _add_penalty_category(categories, "core_value_gap", core_flags, core_penalty, "major")
+
+    recent_flags = sorted(flags & {"missing_recent_trade_history"})
+    _add_penalty_category(categories, "recent_production_gap", recent_flags, 8.0 if recent_flags else 0.0, "major")
+
+    role_flags = sorted(flags & ROLE_SOURCE_FLAGS)
+    role_detail = _role_source_gap_detail(row, position, role_flags)
+    _add_penalty_category(
+        categories,
+        "role_source_gap",
+        role_flags,
+        role_detail["penalty"],
+        "warning",
+        extra={
+            "status": role_detail["status"],
+            "alternate_context": role_detail["alternate_context"],
+            "relevant_flags": role_detail["relevant_flags"],
+        },
+    )
+
+    position_flags = sorted(flags & POSITION_SCORING_FLAGS.get(position, set()))
+    position_penalty = min(6.0, len(position_flags) * 2.0)
+    _add_penalty_category(categories, "position_specific_scoring_gap", position_flags, position_penalty, "warning")
+
+    generic_flags = sorted((flags & GENERIC_SCORING_FLAGS) | ((flags & LOW_IMPACT_SCORING_FLAGS) - set(position_flags)))
+    _add_penalty_category(
+        categories,
+        "generic_scoring_source_warning",
+        generic_flags,
+        2.0 if generic_flags else 0.0,
+        "warning",
+    )
+
+    fraud_flags = sorted(flags & {"missing_fraud_context"})
+    _add_penalty_category(categories, "missing_fraud_context_warning", fraud_flags, 0.0, "info")
+
+    fallback_flags = sorted(flags & FALLBACK_FLAGS)
+    fallback_penalty = min(8.0, sum(_fallback_penalty(flag) for flag in fallback_flags))
+    _add_penalty_category(categories, "fallback_used", fallback_flags, fallback_penalty, "warning")
+
+    sample_size = _sample_size(row)
+    sample_penalty = 6.0 if sample_size < 2 else 0.0
+    _add_penalty_category(
+        categories,
+        "sample_size_warning",
+        ["sample_size_below_2"] if sample_size < 2 else [],
+        sample_penalty,
+        "warning",
+    )
+
+    freshness_flags = sorted(flags & {"stale_projection_context", "projection_freshness_metadata_missing"})
+    freshness_penalty = 8.0 if "stale_projection_context" in freshness_flags else (2.0 if freshness_flags else 0.0)
+    _add_penalty_category(categories, "projection_freshness_warning", freshness_flags, freshness_penalty, "warning")
+
+    return categories
+
+
+def _add_penalty_category(
+    categories: list[dict[str, Any]],
+    category: str,
+    flags: list[str],
+    penalty: float,
+    severity: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    if not flags and penalty == 0.0:
+        return
+    item = {
+        "category": category,
+        "flags": flags,
+        "penalty": round(penalty, 2),
+        "severity": severity,
+    }
+    if extra:
+        item.update(extra)
+    categories.append(item)
+
+
+def _category_penalty(categories: list[dict[str, Any]], category: str) -> float:
+    for item in categories:
+        if item.get("category") == category:
+            return float(item.get("penalty") or 0.0)
+    return 0.0
+
+
+def _role_source_gap_detail(row: dict[str, Any], position: str, role_flags: list[str]) -> dict[str, Any]:
+    relevant = _role_relevant_flags(position, role_flags)
+    alternate_context = _role_alternate_context(row, position)
+    if not role_flags:
+        return {
+            "penalty": 0.0,
+            "status": "clean",
+            "alternate_context": alternate_context,
+            "relevant_flags": [],
+        }
+    if not relevant:
+        return {
+            "penalty": 0.0,
+            "status": "warning_only",
+            "alternate_context": alternate_context,
+            "relevant_flags": [],
+        }
+    if alternate_context:
+        if set(relevant) <= {"missing_snaps", "missing_routes_proxy", "missing_snap_share"}:
+            return {
+                "penalty": 0.0,
+                "status": "suppressed_due_to_alternate_context",
+                "alternate_context": alternate_context,
+                "relevant_flags": relevant,
+            }
+        if "missing_snaps_last_3" in relevant and len(alternate_context) >= 2:
+            return {
+                "penalty": 0.0,
+                "status": "warning_only",
+                "alternate_context": alternate_context,
+                "relevant_flags": relevant,
+            }
+    return {
+        "penalty": _role_source_penalty(position, role_flags),
+        "status": "penalty",
+        "alternate_context": alternate_context,
+        "relevant_flags": relevant,
+    }
+
+
+def _role_relevant_flags(position: str, role_flags: list[str]) -> list[str]:
+    if not role_flags:
+        return []
+    if position in {"WR", "TE"}:
+        relevant = {"missing_routes_proxy", "missing_snaps", "missing_snaps_last_3", "missing_snap_share"}
+    elif position == "RB":
+        relevant = {"missing_snaps", "missing_snaps_last_3", "missing_snap_share"}
+    elif position == "QB":
+        relevant = {"missing_snaps", "missing_snaps_last_3"}
+    else:
+        relevant = set(role_flags)
+    return sorted(set(role_flags) & relevant)
+
+
+def _role_source_penalty(position: str, role_flags: list[str]) -> float:
+    relevant_count = len(_role_relevant_flags(position, role_flags))
+    return min(10.0, relevant_count * 3.0)
+
+
+def _role_alternate_context(row: dict[str, Any], position: str) -> list[str]:
+    context = []
+    if _num(row.get("history_sample_size"), None) is not None and (_num(row.get("history_sample_size"), 0.0) or 0.0) > 0:
+        context.append("recent_history_sample")
+    if _num(row.get("history_snap_share"), None) is not None or _num(row.get("truth_snap_share"), None) is not None:
+        context.append("snap_share")
+    if _num(row.get("history_target_share"), None) is not None or _num(row.get("truth_target_share"), None) is not None:
+        context.append("target_share")
+    if _num(row.get("history_rush_share"), None) is not None or _num(row.get("truth_rush_share"), None) is not None:
+        context.append("rush_share")
+    if _num(row.get("role_quality_score"), None) is not None:
+        context.append("truth_role_quality")
+    if _num(row.get("high_value_touches"), None) is not None:
+        context.append("high_value_touches")
+    if position in {"WR", "TE"} and _num(row.get("recent_points_per_game"), None) is not None:
+        context.append("receiving_role_proxy")
+    return sorted(set(context))
+
+
+def _fallback_penalty(flag: str) -> float:
+    if flag == "role_usage_fallback_used":
+        return 4.0
+    if flag == "efficiency_fallback_used":
+        return 2.0
+    if flag == "expected_points_proxy_used":
+        return 2.0
+    if flag == "projection_score_pigskin_projection_proxy":
+        return 3.0
+    return 1.0
+
+
+def _sample_size(row: dict[str, Any]) -> float:
+    return max(
+        _num(row.get("history_sample_size"), 0.0) or 0.0,
+        _num(row.get("fantasy_profile_sample_size"), 0.0) or 0.0,
+    )
 
 
 def _confidence_score(row: dict[str, Any], missing_flags: list[str]) -> float:
@@ -1356,6 +1796,10 @@ def _source_freshness(row: dict[str, Any]) -> dict[str, Any]:
             "projection_rankings_current": {
                 "model_run_id": row.get("projection_model_run_id"),
                 "projection_horizon": row.get("projection_horizon"),
+                "raw_as_of_season": row.get("projection_raw_as_of_season"),
+                "raw_as_of_week": row.get("projection_raw_as_of_week"),
+                "effective_as_of_season": row.get("projection_as_of_season"),
+                "effective_as_of_week": row.get("projection_as_of_week"),
                 "as_of_season": row.get("projection_as_of_season"),
                 "as_of_week": row.get("projection_as_of_week"),
                 "created_at": _clean_str(row.get("projection_created_at")),
@@ -1364,6 +1808,75 @@ def _source_freshness(row: dict[str, Any]) -> dict[str, Any]:
             },
         }
     }
+
+
+def _team_context(row: dict[str, Any]) -> dict[str, Any]:
+    asset_team = _clean_str(row.get("team"))
+    context_sources = {
+        "history_teams": _string_list(row.get("history_teams")),
+        "fantasy_teams": _string_list(row.get("fantasy_teams")),
+        "truth_teams": _string_list(row.get("truth_teams")),
+        "truth_current_teams": _string_list(row.get("truth_current_teams")),
+        "projection_team": _single_string_list(row.get("projection_team")),
+        "fraud_team": _single_string_list(row.get("fraud_team")),
+        "fraud_current_team": _single_string_list(row.get("fraud_current_team")),
+    }
+    asset_norm = _normalize_team(asset_team)
+    mismatches = []
+    current_matches_asset = any(
+        _normalize_team(team) == asset_norm
+        for team in context_sources["truth_current_teams"] + context_sources["fraud_current_team"]
+        if team
+    )
+    for source, teams in context_sources.items():
+        if source in {"truth_current_teams", "fraud_current_team"}:
+            continue
+        for team in teams:
+            team_norm = _normalize_team(team)
+            if asset_norm and team_norm and team_norm != asset_norm:
+                mismatches.append({
+                    "source": source,
+                    "team": team,
+                    "normalized_team": team_norm,
+                })
+    return {
+        "asset_team": asset_team,
+        "normalized_asset_team": asset_norm,
+        "context_sources": context_sources,
+        "current_team_matches_asset": current_matches_asset,
+        "mismatches": mismatches,
+        "has_mismatch": bool(mismatches),
+    }
+
+
+def _normalize_team(value: Any) -> str | None:
+    text = _clean_str(value)
+    if not text:
+        return None
+    upper = text.upper()
+    aliases = {
+        "LA": "LAR",
+        "LAR": "LAR",
+        "JAC": "JAX",
+        "WSH": "WAS",
+    }
+    return aliases.get(upper, upper)
+
+
+def _string_list(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple)):
+        return sorted({str(item) for item in value if item not in (None, "")})
+    parsed = _parse_json(value, None)
+    if isinstance(parsed, list):
+        return sorted({str(item) for item in parsed if item not in (None, "")})
+    return [str(value)]
+
+
+def _single_string_list(value: Any) -> list[str]:
+    text = _clean_str(value)
+    return [text] if text else []
 
 
 def _fallbacks(row: dict[str, Any], missing_flags: list[str]) -> list[str]:
@@ -1383,6 +1896,28 @@ def _fallbacks(row: dict[str, Any], missing_flags: list[str]) -> list[str]:
     if "projection_name_fallback_used" in missing_flags:
         fallbacks.append("attached projection context with unique player name fallback")
     return fallbacks
+
+
+def _source_stability_score(row: dict[str, Any], missing_flags: list[str]) -> float:
+    flags = set(missing_flags)
+    score = 0.0
+    if row.get("player_id_internal") and "missing_player_id" not in flags:
+        score += 20.0
+    if row.get("projection_model_run_id") or row.get("asset_model_run_id"):
+        score += 20.0
+    if _num(row.get("projected_3_year_value"), None) is not None or _num(row.get("projection_rank_position"), None) is not None:
+        score += 20.0
+    if (
+        _num(row.get("recent_points_per_game"), None) is not None
+        or _num(row.get("profile_recent_points"), None) is not None
+        or _num(row.get("truth_recent_points"), None) is not None
+    ):
+        score += 20.0
+    if _num(row.get("current_market_value"), None) is not None:
+        score += 15.0
+    if "stale_projection_context" not in flags:
+        score += 5.0
+    return round(_clamp(score, 0.0, 100.0), 2)
 
 
 def _preview_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -1551,8 +2086,238 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]+", "_", value).strip("_").lower() or "score"
 
 
+def _is_v1_model(model_version: str | None) -> bool:
+    return str(model_version or "").startswith(V1_MODEL_PREFIX)
+
+
+WARNING_CATEGORY_ORDER = (
+    "Source freshness",
+    "Team context",
+    "Role/source coverage",
+    "Risk/Fraud context",
+    "Identity/context",
+    "Scoring data",
+    "Draft pick/unavailable score",
+    "Other warnings",
+)
+
+
+def trade_score_model_context(score_rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Return the active score model context from current score rows."""
+    if not score_rows:
+        return {}
+
+    context_fields = (
+        "model_version",
+        "model_run_id",
+        "season",
+        "week",
+        "scoring_profile_id",
+        "league_type_id",
+        "roster_format_id",
+    )
+    context: dict[str, Any] = {}
+    for field in context_fields:
+        values = _unique_row_values(score_rows, field)
+        if not values:
+            continue
+        context[field] = values[0] if len(values) == 1 else ", ".join(values[:3])
+        if len(values) > 3:
+            context[field] += f" +{len(values) - 3} more"
+    return context
+
+
+def trade_score_model_context_label(context: Mapping[str, Any]) -> str:
+    if not context:
+        return "Pigskin Trade Score model context unavailable."
+    model_version = context.get("model_version") or "unknown"
+    season = context.get("season") or "unknown"
+    week = context.get("week") or "unknown"
+    scoring = context.get("scoring_profile_id") or "unknown"
+    league = context.get("league_type_id") or "unknown"
+    roster = context.get("roster_format_id") or "unknown"
+    model_run = context.get("model_run_id") or "unknown"
+    return (
+        f"Active model: `{model_version}` | Model run: `{model_run}` | "
+        f"Target: `{season}` week `{week}` | Context: `{scoring}` / `{league}` / `{roster}`"
+    )
+
+
+def trade_score_warning_summary_rows(missing_flags: Any) -> list[dict[str, Any]]:
+    """Group score missing-data flags into readable UI categories."""
+    grouped: dict[str, list[str]] = {category: [] for category in WARNING_CATEGORY_ORDER}
+    for flag in sorted(set(_json_array(missing_flags))):
+        grouped[_warning_category(flag)].append(flag)
+
+    return [
+        {
+            "category": category,
+            "count": len(flags),
+            "warnings": ", ".join(flags),
+        }
+        for category, flags in grouped.items()
+        if flags
+    ]
+
+
+def trade_score_source_freshness_rows(score_row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Flatten score source freshness into rows suitable for a Streamlit expander."""
+    freshness = _parse_json(score_row.get("source_freshness_json"), {}) or {}
+    sources = freshness.get("sources") if isinstance(freshness, dict) else {}
+    if not isinstance(sources, dict):
+        sources = {}
+
+    rows = [
+        _freshness_row("score_model", "model_version", score_row.get("model_version")),
+        _freshness_row("score_model", "model_run_id", score_row.get("model_run_id")),
+        _freshness_row("target", "season", score_row.get("season")),
+        _freshness_row("target", "week", score_row.get("week")),
+        _freshness_row("target", "scoring_profile_id", score_row.get("scoring_profile_id")),
+        _freshness_row("target", "league_type_id", score_row.get("league_type_id")),
+        _freshness_row("target", "roster_format_id", score_row.get("roster_format_id")),
+    ]
+
+    projection = sources.get("projection_rankings_current")
+    if isinstance(projection, dict):
+        for field in (
+            "model_run_id",
+            "created_at",
+            "effective_as_of_season",
+            "effective_as_of_week",
+            "raw_as_of_season",
+            "raw_as_of_week",
+            "projection_horizon",
+            "join_strategy",
+        ):
+            rows.append(_freshness_row("projection_rankings_current", field, projection.get(field)))
+        if not projection.get("raw_as_of_season") or not projection.get("raw_as_of_week"):
+            rows.append(_freshness_row(
+                "projection_rankings_current",
+                "raw_projection_metadata",
+                "missing",
+                status="warning",
+            ))
+    else:
+        rows.append(_freshness_row(
+            "projection_rankings_current",
+            "source_freshness",
+            "missing",
+            status="warning",
+        ))
+
+    for source in (
+        "compat_trade_assets_current",
+        "compat_trade_player_history",
+        "analytics_player_fantasy_points_by_profile",
+        "analytics_fraud_watch",
+    ):
+        source_value = sources.get(source)
+        if isinstance(source_value, dict):
+            for key, value in source_value.items():
+                rows.append(_freshness_row(source, str(key), value))
+        elif source_value:
+            rows.append(_freshness_row(source, "source_freshness", source_value))
+        else:
+            rows.append(_freshness_row(source, "source_freshness", "missing", status="warning"))
+
+    return rows
+
+
+def trade_score_unavailable_reason(asset: Any, missing_flags: Any = None) -> str:
+    flags = set(_json_array(missing_flags))
+    if "draft_pick_score_lane_pending" in flags or _is_draft_pick_asset(asset):
+        return "draft pick score lane pending"
+    return "no compatible player score row"
+
+
+def _unique_row_values(rows: Sequence[Mapping[str, Any]], field: str) -> list[str]:
+    values: list[str] = []
+    for row in rows:
+        value = _clean_str(row.get(field))
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def _warning_category(flag: str) -> str:
+    lowered = flag.lower()
+    if "draft_pick" in lowered or lowered == "pick_row":
+        return "Draft pick/unavailable score"
+    if "freshness" in lowered or lowered in {"missing_model_run_id", "stale_projection_context"}:
+        return "Source freshness"
+    if "team_context" in lowered:
+        return "Team context"
+    if (
+        flag in ROLE_SOURCE_FLAGS
+        or flag in FALLBACK_FLAGS
+        or "snap" in lowered
+        or "route" in lowered
+        or "role" in lowered
+        or "sample_size" in lowered
+        or "source_stability" in lowered
+    ):
+        return "Role/source coverage"
+    if "fraud" in lowered or "risk" in lowered:
+        return "Risk/Fraud context"
+    if (
+        flag in GENERIC_SCORING_FLAGS
+        or flag in LOW_IMPACT_SCORING_FLAGS
+        or lowered.startswith("missing_passing_")
+        or lowered.startswith("missing_rushing_")
+        or lowered.startswith("missing_receiving_")
+        or lowered.startswith("missing_return_")
+        or lowered.startswith("scoring_")
+    ):
+        return "Scoring data"
+    if "identity" in lowered or "player_id" in lowered or "source_player_key" in lowered or "context" in lowered:
+        return "Identity/context"
+    return "Other warnings"
+
+
+def _freshness_row(source: str, field: str, value: Any, *, status: str = "ok") -> dict[str, Any]:
+    if value in (None, ""):
+        value = "missing"
+        status = "warning"
+    return {
+        "source": source,
+        "field": field,
+        "value": _compact_freshness_value(value),
+        "status": status,
+    }
+
+
+def _compact_freshness_value(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        text = _json_dumps(value)
+    else:
+        text = str(value)
+    return text[:360]
+
+
+def _is_draft_pick_asset(asset: Any) -> bool:
+    position = _asset_lookup(asset, "position")
+    if str(position or "").upper() == "PICK":
+        return True
+    source_key = str(_asset_lookup(asset, "source_player_key") or _asset_lookup(asset, "player_id") or "")
+    if ":PICK:" in source_key.upper():
+        return True
+    display_name = str(
+        _asset_lookup(asset, "player_display_name")
+        or _asset_lookup(asset, "display_name")
+        or _asset_lookup(asset, "player_name")
+        or ""
+    ).lower()
+    return "pick" in display_name
+
+
+def _asset_lookup(asset: Any, field: str) -> Any:
+    if isinstance(asset, Mapping):
+        return asset.get(field)
+    return getattr(asset, field, None)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build deterministic Trade Analyzer score v0 rows.")
+    parser = argparse.ArgumentParser(description="Build deterministic Trade Analyzer score rows.")
     parser.add_argument("--season", required=True, type=int)
     parser.add_argument("--week", required=True, type=int)
     parser.add_argument("--scoring-profile-id", default=DEFAULT_SCORING_PROFILE)

@@ -86,10 +86,20 @@ def player_row(**overrides):
         "history_sample_size": 4,
         "source_fraud_score": 12.0,
         "projection_model_run_id": "model-1",
+        "projection_as_of_season": 2025,
         "projection_as_of_week": 6,
+        "projection_raw_as_of_season": 2025,
+        "projection_raw_as_of_week": 6,
+        "projection_team": "PHI",
         "projection_confidence_score": 90.0,
         "projection_risk_score": 8.0,
         "ranking_version": "rank-v1",
+        "history_teams": ["PHI"],
+        "truth_teams": ["PHI"],
+        "truth_current_teams": ["PHI"],
+        "fantasy_teams": ["PHI"],
+        "fraud_team": "PHI",
+        "fraud_current_team": "PHI",
         "asset_source_freshness_json": json.dumps({"assets": "fresh"}),
         "history_source_freshness_json": json.dumps({"history": "fresh"}),
         "fantasy_source_freshness_json": json.dumps({"fantasy": "fresh"}),
@@ -135,6 +145,280 @@ class TradePlayerScoreTests(unittest.TestCase):
         self.assertAlmostEqual(out["trade_score"], 48.4)
         self.assertEqual(scores.confidence_multiplier(10), 0.70)
         self.assertEqual(scores.confidence_multiplier(150), 1.00)
+
+    def test_v1_formula_does_not_apply_old_confidence_multiplier(self):
+        out = scores.calculate_trade_score_v1(
+            market_score=80,
+            projection_score=70,
+            recent_production_score=60,
+            role_usage_score=50,
+            positional_scarcity_score=40,
+            efficiency_score=30,
+            source_stability_score=90,
+            risk_adjustment=-3,
+        )
+
+        self.assertAlmostEqual(out["base_score"], 67.5)
+        self.assertAlmostEqual(out["risk_adjustment"], -3.0)
+        self.assertEqual(out["confidence_multiplier"], 1.0)
+        self.assertAlmostEqual(out["trade_score"], 64.5)
+
+    def test_v1_model_version_routes_to_v1_formula_and_metadata(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    projection_as_of_week=None,
+                    projection_raw_as_of_season=None,
+                    projection_raw_as_of_week=None,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )[0]
+
+        component = json.loads(row["component_json"])
+        flags = set(json.loads(row["missing_flags_json"]))
+        self.assertEqual(component["model_family"], "v1")
+        self.assertEqual(component["confidence_multiplier"], 1.0)
+        self.assertIn("source_stability_score", component)
+        self.assertIn("risk_breakdown", component)
+        self.assertIn("projection_freshness_metadata_missing", flags)
+        self.assertGreaterEqual(component["source_stability_score"], 0)
+        self.assertLessEqual(component["source_stability_score"], 100)
+
+    def test_v1_weighted_confidence_categories_collapse_generic_scoring_flags(self):
+        generic_flags = [
+            "missing_fumbles_lost",
+            "missing_interceptions",
+            "missing_passing_2pt_conversions",
+            "missing_receiving_2pt_conversions",
+            "missing_return_tds",
+            "missing_rushing_2pt_conversions",
+            "scoring_missing_data_flags_present",
+        ]
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    position="WR",
+                    asset_missing_data_flags=json.dumps(generic_flags),
+                    projection_as_of_week=18,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )[0]
+
+        component = json.loads(row["component_json"])
+        categories = component["confidence_breakdown"]["penalty_categories"]
+        generic = [item for item in categories if item["category"] == "generic_scoring_source_warning"]
+        self.assertEqual(len(generic), 1)
+        self.assertEqual(generic[0]["penalty"], 2.0)
+        self.assertGreater(row["confidence_score"], 60)
+
+    def test_v1_position_specific_scoring_penalties_are_position_aware(self):
+        qb_row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    position="QB",
+                    asset_missing_data_flags=json.dumps(["missing_interceptions"]),
+                    projection_as_of_week=18,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+        wr_row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    position="WR",
+                    asset_missing_data_flags=json.dumps(["missing_interceptions"]),
+                    projection_as_of_week=18,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        qb_categories = json.loads(qb_row["component_json"])["confidence_breakdown"]["penalty_categories"]
+        wr_categories = json.loads(wr_row["component_json"])["confidence_breakdown"]["penalty_categories"]
+        self.assertTrue(any(item["category"] == "position_specific_scoring_gap" for item in qb_categories))
+        self.assertFalse(any(item["category"] == "position_specific_scoring_gap" for item in wr_categories))
+
+    def test_v1_missing_fraud_context_is_warning_not_high_risk(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    source_fraud_score=None,
+                    pigskin_fraud_risk_score=None,
+                    projection_as_of_week=18,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        component = json.loads(row["component_json"])
+        categories = component["confidence_breakdown"]["penalty_categories"]
+        fraud_category = [item for item in categories if item["category"] == "missing_fraud_context_warning"]
+        self.assertEqual(fraud_category[0]["penalty"], 0.0)
+        self.assertIn(
+            "missing_fraud_context_treated_as_unknown_not_high_risk",
+            component["risk_breakdown"]["missing_source_unknown_risk_notes"],
+        )
+        self.assertLess(component["risk_breakdown"]["normalized_risk_score"], 0.7)
+
+    def test_v1_team_context_mismatch_warns_when_current_team_changed(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    team="NE",
+                    history_teams=["PHI"],
+                    fantasy_teams=["PHI"],
+                    truth_teams=["PHI"],
+                    truth_current_teams=["NE"],
+                    projection_team="PHI",
+                    fraud_team="PHI",
+                    fraud_current_team="NE",
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        flags = set(json.loads(row["missing_flags_json"]))
+        team_context = json.loads(row["component_json"])["team_context"]
+        self.assertIn("team_context_mismatch_warning", flags)
+        self.assertTrue(team_context["current_team_matches_asset"])
+        self.assertTrue(team_context["has_mismatch"])
+        self.assertGreaterEqual(len(team_context["mismatches"]), 1)
+
+    def test_v1_team_context_alias_does_not_warn(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    team="LAR",
+                    history_teams=["LA"],
+                    fantasy_teams=["LA"],
+                    truth_teams=["LA"],
+                    truth_current_teams=["LA"],
+                    projection_team="LA",
+                    fraud_team="LA",
+                    fraud_current_team="LA",
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        flags = set(json.loads(row["missing_flags_json"]))
+        team_context = json.loads(row["component_json"])["team_context"]
+        self.assertNotIn("team_context_mismatch_warning", flags)
+        self.assertFalse(team_context["has_mismatch"])
+        self.assertEqual(team_context["normalized_asset_team"], "LAR")
+
+    def test_v1_role_source_gap_suppressed_by_alternate_context(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    position="WR",
+                    history_missing_data_flags=json.dumps(["missing_snaps", "missing_routes_proxy"]),
+                    history_snap_share=0.82,
+                    history_target_share=0.28,
+                    history_sample_size=4,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        categories = json.loads(row["component_json"])["confidence_breakdown"]["penalty_categories"]
+        role_gap = [item for item in categories if item["category"] == "role_source_gap"][0]
+        self.assertEqual(role_gap["status"], "suppressed_due_to_alternate_context")
+        self.assertEqual(role_gap["penalty"], 0.0)
+        self.assertIn("target_share", role_gap["alternate_context"])
+
+    def test_v1_role_source_gap_penalizes_missing_role_context(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    position="RB",
+                    history_missing_data_flags=json.dumps(["missing_snaps_last_3"]),
+                    history_snap_share=None,
+                    history_target_share=None,
+                    history_rush_share=None,
+                    high_value_touches=None,
+                    recent_points_per_game=None,
+                    history_sample_size=None,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        categories = json.loads(row["component_json"])["confidence_breakdown"]["penalty_categories"]
+        role_gap = [item for item in categories if item["category"] == "role_source_gap"][0]
+        self.assertEqual(role_gap["status"], "penalty")
+        self.assertGreater(role_gap["penalty"], 0.0)
+        self.assertEqual(role_gap["alternate_context"], [])
+
+    def test_v1_qb_routes_gap_is_warning_only(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    position="QB",
+                    history_missing_data_flags=json.dumps(["missing_routes_proxy"]),
+                    history_snap_share=0.99,
+                    history_target_share=None,
+                    history_rush_share=None,
+                    high_value_touches=None,
+                    recent_points_per_game=None,
+                    history_sample_size=None,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        categories = json.loads(row["component_json"])["confidence_breakdown"]["penalty_categories"]
+        role_gap = [item for item in categories if item["category"] == "role_source_gap"][0]
+        self.assertEqual(role_gap["status"], "warning_only")
+        self.assertEqual(role_gap["penalty"], 0.0)
+        self.assertEqual(role_gap["relevant_flags"], [])
+
+    def test_v1_projection_raw_freshness_metadata_missing_is_visible(self):
+        row = scores.build_trade_player_score_rows(
+            [
+                player_row(
+                    projection_as_of_season=2025,
+                    projection_as_of_week=18,
+                    projection_raw_as_of_season=None,
+                    projection_raw_as_of_week=None,
+                )
+            ],
+            season=2025,
+            week=18,
+            model_version="trade_score_v1_2025_001",
+        )[0]
+
+        flags = set(json.loads(row["missing_flags_json"]))
+        freshness = json.loads(row["source_freshness_json"])["sources"]["projection_rankings_current"]
+        self.assertIn("projection_freshness_metadata_missing", flags)
+        self.assertIsNone(freshness["raw_as_of_season"])
+        self.assertIsNone(freshness["raw_as_of_week"])
+        self.assertEqual(freshness["effective_as_of_season"], 2025)
+        self.assertEqual(freshness["effective_as_of_week"], 18)
 
     def test_build_rows_outputs_required_json_and_score_bounds(self):
         rows = scores.build_trade_player_score_rows(
@@ -493,6 +777,98 @@ class TradePlayerScoreTests(unittest.TestCase):
         self.assertEqual(summary["low_confidence_row_count"], 1)
         self.assertEqual(summary["confidence_ge_70_count"], 0)
         self.assertIn("all_materializable_rows_below_confidence_70", summary["warnings"])
+
+    def test_trade_score_model_context_label_exposes_active_model_version(self):
+        context = scores.trade_score_model_context([
+            score_output_row(
+                model_version="trade_score_v1_2025_001",
+                model_run_id="projection-model-1",
+                season=2025,
+                week=18,
+                scoring_profile_id="ppr",
+                league_type_id="redraft",
+                roster_format_id="one_qb",
+            )
+        ])
+
+        label = scores.trade_score_model_context_label(context)
+
+        self.assertIn("trade_score_v1_2025_001", label)
+        self.assertIn("projection-model-1", label)
+        self.assertIn("2025", label)
+        self.assertIn("one_qb", label)
+
+    def test_trade_score_warning_summary_groups_v1_warning_categories(self):
+        rows = scores.trade_score_warning_summary_rows(json.dumps([
+            "projection_freshness_metadata_missing",
+            "team_context_mismatch_warning",
+            "role_usage_fallback_used",
+            "missing_fraud_context",
+            "missing_player_id",
+            "missing_fumbles_lost",
+            "draft_pick_score_lane_pending",
+        ]))
+        grouped = {row["category"]: row["warnings"] for row in rows}
+
+        self.assertIn("projection_freshness_metadata_missing", grouped["Source freshness"])
+        self.assertIn("team_context_mismatch_warning", grouped["Team context"])
+        self.assertIn("role_usage_fallback_used", grouped["Role/source coverage"])
+        self.assertIn("missing_fraud_context", grouped["Risk/Fraud context"])
+        self.assertIn("missing_player_id", grouped["Identity/context"])
+        self.assertIn("missing_fumbles_lost", grouped["Scoring data"])
+        self.assertIn("draft_pick_score_lane_pending", grouped["Draft pick/unavailable score"])
+
+    def test_trade_score_source_freshness_rows_expose_projection_context(self):
+        freshness = {
+            "sources": {
+                "projection_rankings_current": {
+                    "model_run_id": "projection-model-1",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "effective_as_of_season": 2025,
+                    "effective_as_of_week": 18,
+                    "raw_as_of_season": None,
+                    "raw_as_of_week": None,
+                },
+                "compat_trade_assets_current": {"market_snapshot_date": "2026-01-01"},
+                "compat_trade_player_history": {"history_rows": 500},
+                "analytics_player_fantasy_points_by_profile": {"season": 2025, "week": 18},
+                "analytics_fraud_watch": {"season": 2025, "week": 18, "label": "watch"},
+            }
+        }
+        row = score_output_row(
+            model_version="trade_score_v1_2025_001",
+            model_run_id="projection-model-1",
+            season=2025,
+            week=18,
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            source_freshness_json=json.dumps(freshness),
+        )
+
+        rows = scores.trade_score_source_freshness_rows(row)
+        by_key = {(item["source"], item["field"]): item for item in rows}
+
+        self.assertEqual(by_key[("score_model", "model_version")]["value"], "trade_score_v1_2025_001")
+        self.assertEqual(by_key[("projection_rankings_current", "model_run_id")]["value"], "projection-model-1")
+        self.assertEqual(by_key[("projection_rankings_current", "raw_projection_metadata")]["status"], "warning")
+        self.assertEqual(by_key[("analytics_fraud_watch", "label")]["value"], "watch")
+
+    def test_trade_score_unavailable_reason_keeps_draft_picks_out_of_score_lane(self):
+        asset = {
+            "player_display_name": "2026 Pick 1.01",
+            "position": "PICK",
+            "source_player_key": "fantasycalc:2026pick101:PICK:UNK",
+        }
+
+        self.assertEqual(
+            scores.trade_score_unavailable_reason(asset),
+            "draft pick score lane pending",
+        )
+        self.assertEqual(
+            scores.trade_score_unavailable_reason({"player_display_name": "Unknown Player"}),
+            "no compatible player score row",
+        )
 
     def test_write_excludes_non_materializable_rows_from_materialization(self):
         client = FakeClient(rows=[
