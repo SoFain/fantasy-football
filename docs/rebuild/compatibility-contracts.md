@@ -54,6 +54,12 @@ Streamlit rollout details live in [docs/rebuild/streamlit-compat-rollout.md](str
 | `content_brief_runs` | [contract](../../bigquery/contracts/content_brief_runs.md) | [migration](../../bigquery/migrations/0024__create_content_briefs.sql) | deterministic show brief run ledger |
 | `content_briefs` | [contract](../../bigquery/contracts/content_briefs.md) | [migration](../../bigquery/migrations/0024__create_content_briefs.sql) | compact show-ready content briefs |
 | `content_brief_items` | [contract](../../bigquery/contracts/content_brief_items.md) | [migration](../../bigquery/migrations/0024__create_content_briefs.sql) | ordered evidence items inside each brief |
+| `trade_player_scores` | [contract](../../bigquery/contracts/trade_player_scores.md) | [migration](../../bigquery/migrations/0025__trade_analyzer_score_v0.sql) | deterministic player Trade Analyzer score output |
+| `trade_player_scores_current` | [contract](../../bigquery/contracts/trade_player_scores_current.md) | [view](../../bigquery/views/trade_player_scores_current.sql), [migration](../../bigquery/migrations/0025__trade_analyzer_score_v0.sql) | current player score view |
+| `compat_trade_player_scores_current` | [contract](../../bigquery/contracts/compat_trade_player_scores_current.md) | [view](../../bigquery/views/compat_trade_player_scores_current.sql), [migration](../../bigquery/migrations/0025__trade_analyzer_score_v0.sql) | future safe player score read surface |
+| `trade_pick_scores` | [contract](../../bigquery/contracts/trade_pick_scores.md) | [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | deterministic draft-pick score output |
+| `trade_pick_scores_current` | [contract](../../bigquery/contracts/trade_pick_scores_current.md) | [view](../../bigquery/views/trade_pick_scores_current.sql), [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | current draft-pick score view |
+| `compat_trade_pick_scores_current` | [contract](../../bigquery/contracts/compat_trade_pick_scores_current.md) | [view](../../bigquery/views/compat_trade_pick_scores_current.sql), [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | future safe draft-pick score read surface |
 
 ## Compatibility Rules
 
@@ -337,3 +343,15 @@ Phase 22.6 adds the default-off deterministic Trade Analyzer score contract:
 | `compat_trade_player_scores_current` | [contract](../../bigquery/contracts/compat_trade_player_scores_current.md) | [view](../../bigquery/views/compat_trade_player_scores_current.sql), [migration](../../bigquery/migrations/0025__trade_analyzer_score_v0.sql) | Future safe Streamlit and Pigskin read surface. Runtime flags remain default off. |
 
 Future score wiring must use `USE_TRADE_ANALYZER_SCORE_V0=false` and `USE_COMPAT_TRADE_PLAYER_SCORE=false` by default. The compatibility view reads only `trade_player_scores_current`, which reads only `trade_player_scores`.
+
+## Phase 28.3 Draft Pick Score Contract
+
+Phase 28.3 adds the default-off deterministic draft-pick score contract:
+
+| Object | Contract | View or migration | Runtime status |
+| --- | --- | --- | --- |
+| `trade_pick_scores` | [contract](../../bigquery/contracts/trade_pick_scores.md) | [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | Output table for future bounded pick-score materialization. Not wired to runtime. |
+| `trade_pick_scores_current` | [contract](../../bigquery/contracts/trade_pick_scores_current.md) | [view](../../bigquery/views/trade_pick_scores_current.sql), [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | Current view over pick-score output rows. Not a raw/source view. |
+| `compat_trade_pick_scores_current` | [contract](../../bigquery/contracts/compat_trade_pick_scores_current.md) | [view](../../bigquery/views/compat_trade_pick_scores_current.sql), [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | Future safe Streamlit and Pigskin read surface. Runtime flags remain default off. |
+
+The draft-pick lane is separate from the player-score lane. Generic picks are not player rows, college context is neutral and unavailable in v0, and the compatibility view reads only `trade_pick_scores_current`. It does not expose `draft_picks`, `college_player_stats`, `rookie_scouting_metrics`, or raw/source tables.

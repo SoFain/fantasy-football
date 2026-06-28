@@ -164,3 +164,13 @@ Tables to remove from Pigskin schema text:
 | `compat_trade_player_scores_current` | output | View created by `0025__trade_analyzer_score_v0.sql` and mirrored in `bigquery/views/compat_trade_player_scores_current.sql`. | Safe future read contract for Trade Lab and Pigskin after default-off helper wiring and validation. |
 
 These objects are not raw/source tables. They do not replace the existing Trade Lab value path until future default-off flags are explicitly enabled in staging.
+
+## Phase 28.3 Draft Pick Score Tables
+
+| Table or view | Classification | Writer or definition | UI or Pigskin status |
+| --- | --- | --- | --- |
+| `trade_pick_scores` | output | Created by `0026__trade_pick_score_v0.sql`; future bounded pick-score builder will write deterministic draft-pick rows. | Not safe for direct Pigskin exposure. Prefer compatibility view. |
+| `trade_pick_scores_current` | output | View created by `0026__trade_pick_score_v0.sql` and mirrored in `bigquery/views/trade_pick_scores_current.sql`. | Internal current view over pick score output rows. |
+| `compat_trade_pick_scores_current` | output | View created by `0026__trade_pick_score_v0.sql` and mirrored in `bigquery/views/compat_trade_pick_scores_current.sql`. | Future safe read contract for Trade Lab and Pigskin after default-off helper wiring and validation. |
+
+These objects are a separate draft-pick score lane. Generic picks are not player rows and must not be materialized into `trade_player_scores`. The compatibility view reads only `trade_pick_scores_current`; it must not expose `draft_picks`, `college_player_stats`, `rookie_scouting_metrics`, or other raw/source tables. Production score exposure remains default-off until a separate rollout approves it.

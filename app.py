@@ -18,6 +18,8 @@ from src.compat_flags import (
     USE_CONTENT_BRIEF_REVIEW_UI,
     USE_TRADE_ANALYZER_SCORE_V0,
     USE_COMPAT_TRADE_PLAYER_SCORE,
+    USE_TRADE_PICK_SCORE_V0,
+    USE_COMPAT_TRADE_PICK_SCORE,
     USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS,
     DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER,
     compat_flag_enabled,
@@ -41,10 +43,17 @@ from src.pigskin_context_tools import (
 )
 from src.ui_data_guards import (
     collect_selected_trade_assets,
+    attach_trade_pick_scores_to_assets,
     attach_trade_scores_to_assets,
     ensure_player_profile_display_columns,
     ensure_sleeper_watch_display_columns,
+    is_trade_pick_asset,
+    summarize_trade_pick_score_side,
     summarize_trade_score_side,
+    trade_asset_selector_count_with_blank,
+    trade_pick_slot_display,
+    trade_pick_warning_labels,
+    trade_side_has_mixed_player_and_pick_assets,
     unresolved_trade_asset_labels,
 )
 from src.trade_player_scores import (
@@ -108,6 +117,18 @@ def use_compat_trade_player_score():
 
 def use_trade_score_ui():
     return use_trade_analyzer_score_v0() and use_compat_trade_player_score()
+
+
+def use_trade_pick_score_v0():
+    return compat_flag_enabled(USE_TRADE_PICK_SCORE_V0)
+
+
+def use_compat_trade_pick_score():
+    return compat_flag_enabled(USE_COMPAT_TRADE_PICK_SCORE)
+
+
+def use_trade_pick_score_ui():
+    return use_trade_pick_score_v0() and use_compat_trade_pick_score()
 
 
 def use_cloud_run_jobs_for_data_ops():
@@ -1945,6 +1966,8 @@ def load_compat_trade_assets():
         return df
     out = pd.DataFrame(index=df.index)
     out["player_display_name"] = _compat_column(df, "display_name")
+    out["source_pick_key"] = _compat_column(df, "source_player_key")
+    out["source_player_key"] = _compat_column(df, "source_player_key")
     out["position"] = _compat_column(df, "position")
     out["team"] = _compat_column(df, "team")
     out["market_value"] = _compat_column(df, "market_value").combine_first(_compat_column(df, "risk_adjusted_trade_value"))
@@ -1971,6 +1994,20 @@ def load_trade_player_scores_current():
     from src.trade_player_scores import get_current_trade_player_scores
 
     rows = get_current_trade_player_scores(
+        scoring_profile_id="ppr",
+        league_type_id="redraft",
+        roster_format_id="one_qb",
+        limit=500,
+    )
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_trade_pick_scores_current():
+    import pandas as pd
+    from src.trade_pick_scores import get_current_trade_pick_scores
+
+    rows = get_current_trade_pick_scores(
         scoring_profile_id="ppr",
         league_type_id="redraft",
         roster_format_id="one_qb",
@@ -4212,8 +4249,18 @@ def render_value_analyzer():
 
         assets_A = collect_selected_trade_assets(selected_labels_A, player_map, empty_asset_label)
         unresolved_assets_A = unresolved_trade_asset_labels(selected_labels_A, player_map, empty_asset_label)
-        if len(assets_A) == st.session_state.num_a:
-            st.session_state.num_a += 1
+        next_num_a = trade_asset_selector_count_with_blank(st.session_state.num_a, len(assets_A))
+        if next_num_a > st.session_state.num_a:
+            for i in range(st.session_state.num_a, next_num_a):
+                selected = st.selectbox(
+                    f"Select Asset A {i+1}",
+                    [empty_asset_label] + player_options,
+                    key=f"sel_a_{i}"
+                )
+                selected_labels_A.append(selected)
+            st.session_state.num_a = next_num_a
+            assets_A = collect_selected_trade_assets(selected_labels_A, player_map, empty_asset_label)
+            unresolved_assets_A = unresolved_trade_asset_labels(selected_labels_A, player_map, empty_asset_label)
 
     with col_sel_B:
         st.markdown("#### 🟦 Side B (Assets)")
@@ -4228,8 +4275,18 @@ def render_value_analyzer():
 
         assets_B = collect_selected_trade_assets(selected_labels_B, player_map, empty_asset_label)
         unresolved_assets_B = unresolved_trade_asset_labels(selected_labels_B, player_map, empty_asset_label)
-        if len(assets_B) == st.session_state.num_b:
-            st.session_state.num_b += 1
+        next_num_b = trade_asset_selector_count_with_blank(st.session_state.num_b, len(assets_B))
+        if next_num_b > st.session_state.num_b:
+            for i in range(st.session_state.num_b, next_num_b):
+                selected = st.selectbox(
+                    f"Select Asset B {i+1}",
+                    [empty_asset_label] + player_options,
+                    key=f"sel_b_{i}"
+                )
+                selected_labels_B.append(selected)
+            st.session_state.num_b = next_num_b
+            assets_B = collect_selected_trade_assets(selected_labels_B, player_map, empty_asset_label)
+            unresolved_assets_B = unresolved_trade_asset_labels(selected_labels_B, player_map, empty_asset_label)
 
     if unresolved_assets_A:
         st.warning(f"Side A selected asset could not be resolved: {', '.join(map(str, unresolved_assets_A))}")
@@ -4296,10 +4353,16 @@ def render_value_analyzer():
         </div>
         """, unsafe_allow_html=True)
 
-    if use_trade_score_ui():
+    player_score_ui_enabled = use_trade_score_ui()
+    pick_score_ui_enabled = use_trade_pick_score_ui()
+    if player_score_ui_enabled or pick_score_ui_enabled:
         st.markdown("#### 🧮 Pigskin Trade Score")
+        st.caption("Market-value totals remain separate from Player Trade Score totals and Pick Score totals.")
+        if trade_side_has_mixed_player_and_pick_assets(assets_A) or trade_side_has_mixed_player_and_pick_assets(assets_B):
+            st.warning("Mixed player and draft-pick assets selected. Market totals stay combined, score totals stay separate.")
+
+    if player_score_ui_enabled:
         st.caption("Pigskin Trade Score source: compat_trade_player_scores_current")
-        st.caption("Market-value totals remain separate from Pigskin Trade Score totals.")
 
         score_rows = []
         try:
@@ -4315,8 +4378,10 @@ def render_value_analyzer():
         if model_context:
             st.caption(trade_score_model_context_label(model_context))
 
-        attached_scores_A = attach_trade_scores_to_assets(assets_A, score_rows)
-        attached_scores_B = attach_trade_scores_to_assets(assets_B, score_rows)
+        player_assets_A = [asset for asset in assets_A if not (pick_score_ui_enabled and is_trade_pick_asset(asset))]
+        player_assets_B = [asset for asset in assets_B if not (pick_score_ui_enabled and is_trade_pick_asset(asset))]
+        attached_scores_A = attach_trade_scores_to_assets(player_assets_A, score_rows)
+        attached_scores_B = attach_trade_scores_to_assets(player_assets_B, score_rows)
         score_summary_A = summarize_trade_score_side(attached_scores_A)
         score_summary_B = summarize_trade_score_side(attached_scores_B)
         score_total_A = score_summary_A["total_trade_score"] if score_summary_A["scored_count"] else None
@@ -4324,17 +4389,17 @@ def render_value_analyzer():
 
         score_col_A, score_col_B, score_col_delta = st.columns(3)
         with score_col_A:
-            st.metric("Side A Pigskin Trade Score", score_total_A if score_total_A is not None else "N/A")
-            st.caption(f"Scored assets: {score_summary_A['scored_count']} of {score_summary_A['asset_count']}")
+            st.metric("Side A Player Trade Score", score_total_A if score_total_A is not None else "N/A")
+            st.caption(f"Scored player assets: {score_summary_A['scored_count']} of {score_summary_A['asset_count']}")
         with score_col_B:
-            st.metric("Side B Pigskin Trade Score", score_total_B if score_total_B is not None else "N/A")
-            st.caption(f"Scored assets: {score_summary_B['scored_count']} of {score_summary_B['asset_count']}")
+            st.metric("Side B Player Trade Score", score_total_B if score_total_B is not None else "N/A")
+            st.caption(f"Scored player assets: {score_summary_B['scored_count']} of {score_summary_B['asset_count']}")
         with score_col_delta:
             if score_total_A is not None and score_total_B is not None:
-                st.metric("Pigskin Score Fairness Delta", round(abs(score_total_A - score_total_B), 2))
+                st.metric("Player Score Fairness Delta", round(abs(score_total_A - score_total_B), 2))
             else:
-                st.metric("Pigskin Score Fairness Delta", "N/A")
-            st.caption("Lower delta means the score model sees the sides as closer.")
+                st.metric("Player Score Fairness Delta", "N/A")
+            st.caption("Lower delta means the player score model sees the sides as closer.")
 
         for side_label, attached_scores in (("Side A", attached_scores_A), ("Side B", attached_scores_B)):
             missing_score_assets = []
@@ -4348,9 +4413,9 @@ def render_value_analyzer():
             if missing_score_assets:
                 st.warning(f"Pigskin Trade Score unavailable for {side_label}: {', '.join(missing_score_assets)}")
 
-            with st.expander(f"{side_label} score component breakdown", expanded=False):
+            with st.expander(f"{side_label} player score component breakdown", expanded=False):
                 if not attached_scores:
-                    st.caption("No assets selected.")
+                    st.caption("No player assets selected.")
                     continue
                 for item in attached_scores:
                     asset = item["asset"]
@@ -4403,6 +4468,122 @@ def render_value_analyzer():
                     freshness_rows = trade_score_source_freshness_rows(score)
                     if freshness_rows:
                         with st.expander(f"{safe_display(asset_name)} source freshness", expanded=False):
+                            st.dataframe(freshness_rows, hide_index=True, width="stretch")
+
+    if pick_score_ui_enabled:
+        st.caption("Pick Score source: compat_trade_pick_scores_current")
+        st.caption("Pick Score is shown separately from player Pigskin Trade Score.")
+
+        pick_score_rows = []
+        try:
+            pick_score_df = load_trade_pick_scores_current()
+            if pick_score_df is not None and not pick_score_df.empty:
+                pick_score_rows = pick_score_df.to_dict("records")
+            else:
+                st.warning("Pick Score unavailable: compat_trade_pick_scores_current returned no rows.")
+        except Exception as pick_score_error:
+            st.warning(f"Pick Score unavailable: {pick_score_error}")
+
+        attached_pick_scores_A = attach_trade_pick_scores_to_assets(assets_A, pick_score_rows)
+        attached_pick_scores_B = attach_trade_pick_scores_to_assets(assets_B, pick_score_rows)
+        pick_summary_A = summarize_trade_pick_score_side(attached_pick_scores_A)
+        pick_summary_B = summarize_trade_pick_score_side(attached_pick_scores_B)
+        pick_total_A = pick_summary_A["total_pick_score"] if pick_summary_A["scored_count"] else None
+        pick_total_B = pick_summary_B["total_pick_score"] if pick_summary_B["scored_count"] else None
+
+        pick_col_A, pick_col_B, pick_col_delta = st.columns(3)
+        with pick_col_A:
+            st.metric("Side A Pick Score", pick_total_A if pick_total_A is not None else "N/A")
+            st.caption(f"Scored picks: {pick_summary_A['scored_count']} of {pick_summary_A['asset_count']}")
+        with pick_col_B:
+            st.metric("Side B Pick Score", pick_total_B if pick_total_B is not None else "N/A")
+            st.caption(f"Scored picks: {pick_summary_B['scored_count']} of {pick_summary_B['asset_count']}")
+        with pick_col_delta:
+            if pick_total_A is not None and pick_total_B is not None:
+                st.metric("Pick Score Fairness Delta", round(abs(pick_total_A - pick_total_B), 2))
+            else:
+                st.metric("Pick Score Fairness Delta", "N/A")
+            st.caption("Pick Score is not added to the player score total.")
+
+        for side_label, attached_pick_scores in (("Side A", attached_pick_scores_A), ("Side B", attached_pick_scores_B)):
+            missing_pick_scores = []
+            for item in attached_pick_scores:
+                if item.get("score") is not None:
+                    continue
+                asset = item["asset"]
+                pick_name = asset.get("player_display_name") if hasattr(asset, "get") else asset
+                missing_pick_scores.append(
+                    f"{safe_display(pick_name)} (No compatible pick score row for this scoring context)"
+                )
+            if missing_pick_scores:
+                st.warning(f"Pick Score unavailable for {side_label}: {', '.join(missing_pick_scores)}")
+
+            with st.expander(f"{side_label} pick score component breakdown", expanded=False):
+                if not attached_pick_scores:
+                    st.caption("No pick assets selected.")
+                    continue
+                for item in attached_pick_scores:
+                    asset = item["asset"]
+                    score = item.get("score")
+                    pick_name = asset.get("player_display_name") if hasattr(asset, "get") else str(asset)
+                    if not score:
+                        st.caption(
+                            f"{safe_display(pick_name)}: Pick Score N/A. "
+                            "Reason: No compatible pick score row for this scoring context."
+                        )
+                        continue
+                    try:
+                        missing_flags = json.loads(score.get("missing_flags_json") or "[]")
+                    except Exception:
+                        missing_flags = []
+
+                    pick_slot_text = trade_pick_slot_display(score)
+                    st.markdown(
+                        f"**{safe_display(pick_name)}** Pick Score: "
+                        f"`{safe_display(score.get('pick_score'))}`, "
+                        f"tier `{safe_display(score.get('score_tier'))}`, "
+                        f"confidence `{safe_display(score.get('confidence_score'))}`, "
+                        f"model `{safe_display(score.get('model_version'))}`"
+                    )
+                    st.caption(
+                        f"Year `{safe_display(score.get('pick_year'))}`, "
+                        f"round `{safe_display(score.get('pick_round'))}`, "
+                        f"slot `{pick_slot_text}`, "
+                        f"class `{safe_display(score.get('pick_class'))}`, "
+                        f"bucket `{safe_display(score.get('pick_bucket'))}`"
+                    )
+                    st.caption(
+                        f"Market value `{safe_display(score.get('current_market_value'))}`, "
+                        f"risk-adjusted trade value `{safe_display(score.get('risk_adjusted_trade_value'))}`"
+                    )
+                    pick_component_rows = [
+                        {"component": key, "score": score.get(key)}
+                        for key in (
+                            "market_score",
+                            "slot_capital_score",
+                            "time_discount_score",
+                            "liquidity_certainty_score",
+                            "college_context_score",
+                            "uncertainty_risk_score",
+                        )
+                    ]
+                    st.caption("Components: market, slot capital, time discount, liquidity, college context, uncertainty.")
+                    st.dataframe(pick_component_rows, hide_index=True, width="stretch")
+                    warning_rows = trade_score_warning_summary_rows(missing_flags)
+                    if warning_rows:
+                        warning_label_text = trade_pick_warning_labels(missing_flags)
+                        if warning_label_text:
+                            st.caption(f"Warnings: {warning_label_text}")
+                        warning_categories = ", ".join(
+                            f"{row['category']} ({row['count']})" for row in warning_rows
+                        )
+                        st.caption(f"Pick warning categories: {warning_categories}")
+                        with st.expander(f"{safe_display(pick_name)} pick warning details", expanded=False):
+                            st.dataframe(warning_rows, hide_index=True, width="stretch")
+
+                    freshness_rows = trade_score_source_freshness_rows(score)
+                    if freshness_rows:
+                        with st.expander(f"{safe_display(pick_name)} pick source freshness", expanded=False):
                             st.dataframe(freshness_rows, hide_index=True, width="stretch")
 
     # Difference & recommendation

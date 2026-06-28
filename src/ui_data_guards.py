@@ -96,6 +96,15 @@ def unresolved_trade_asset_labels(
     return unresolved
 
 
+def trade_asset_selector_count_with_blank(current_count: int, selected_asset_count: int) -> int:
+    """Keep one blank selector visible after every filled trade side."""
+    safe_current_count = max(int(current_count or 0), 1)
+    safe_selected_count = max(int(selected_asset_count or 0), 0)
+    if safe_selected_count >= safe_current_count:
+        return safe_current_count + 1
+    return safe_current_count
+
+
 def attach_trade_scores_to_assets(
     assets: Sequence[Any],
     score_rows: Sequence[Mapping[str, Any]],
@@ -104,8 +113,22 @@ def attach_trade_scores_to_assets(
     score_index = _build_trade_score_index(score_rows)
     attached: list[dict[str, Any]] = []
     for asset in assets:
-        score = _resolve_trade_score_for_asset(asset, score_index)
+        score = None if is_trade_pick_asset(asset) else _resolve_trade_score_for_asset(asset, score_index)
         attached.append({"asset": asset, "score": score})
+    return attached
+
+
+def attach_trade_pick_scores_to_assets(
+    assets: Sequence[Any],
+    pick_score_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach current draft-pick score rows to selected pick assets only."""
+    score_index = _build_trade_pick_score_index(pick_score_rows)
+    attached: list[dict[str, Any]] = []
+    for asset in assets:
+        if not is_trade_pick_asset(asset):
+            continue
+        attached.append({"asset": asset, "score": _resolve_trade_pick_score_for_asset(asset, score_index)})
     return attached
 
 
@@ -127,6 +150,66 @@ def summarize_trade_score_side(attached_assets: Sequence[Mapping[str, Any]]) -> 
         "total_trade_score": total_score,
         "average_trade_score": average_score,
     }
+
+
+def summarize_trade_pick_score_side(attached_assets: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Summarize draft-pick score rows for one selected trade side."""
+    scores = [
+        _numeric_value((item.get("score") or {}).get("pick_score"), None)
+        for item in attached_assets
+        if item.get("score")
+    ]
+    scores = [score for score in scores if score is not None]
+    missing_count = sum(1 for item in attached_assets if item.get("score") is None)
+    total_score = round(sum(scores), 2)
+    average_score = round(total_score / len(scores), 2) if scores else None
+    return {
+        "asset_count": len(attached_assets),
+        "scored_count": len(scores),
+        "missing_count": missing_count,
+        "total_pick_score": total_score,
+        "average_pick_score": average_score,
+    }
+
+
+def trade_side_has_mixed_player_and_pick_assets(assets: Sequence[Any]) -> bool:
+    """Return whether a selected side mixes player assets and draft-pick assets."""
+    has_pick = any(is_trade_pick_asset(asset) for asset in assets)
+    has_non_pick = any(not is_trade_pick_asset(asset) for asset in assets)
+    return has_pick and has_non_pick
+
+
+def is_trade_pick_asset(asset: Any) -> bool:
+    """Identify draft-pick trade assets without treating them as player rows."""
+    position = _asset_field(asset, "position").strip().upper()
+    source_pick_key = _asset_field(asset, "source_pick_key").strip().upper()
+    source_player_key = _asset_field(asset, "source_player_key").strip().upper()
+    return position == "PICK" or ":PICK:" in source_pick_key or ":PICK:" in source_player_key
+
+
+def trade_pick_slot_display(score: Mapping[str, Any]) -> str:
+    """Return browser-readable slot copy without implying certainty for round-only picks."""
+    pick_class = _asset_field(score, "pick_class").strip().lower()
+    pick_slot = score.get("pick_slot")
+    if pick_class == "round_only" or pick_slot in (None, "") or pd.isna(pick_slot):
+        return "round-only"
+    numeric_slot = _numeric_value(pick_slot, None)
+    if numeric_slot is not None and numeric_slot.is_integer():
+        return str(int(numeric_slot))
+    return _asset_field(score, "pick_slot")
+
+
+def trade_pick_warning_labels(missing_flags: Sequence[Any], limit: int = 12) -> str:
+    """Return compact warning labels that are visible outside Streamlit dataframes."""
+    labels = []
+    for flag in missing_flags:
+        label = _asset_field({"flag": flag}, "flag")
+        if not label:
+            continue
+        labels.append(label.replace("_", " "))
+        if len(labels) >= limit:
+            break
+    return ", ".join(labels)
 
 
 def _resolve_trade_asset_label(label: str, player_map: Mapping[str, Any]) -> Any | None:
@@ -170,8 +253,24 @@ def _build_trade_score_index(score_rows: Sequence[Mapping[str, Any]]) -> dict[st
     return index
 
 
+def _build_trade_pick_score_index(score_rows: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
+    index: dict[str, Mapping[str, Any]] = {}
+    for row in score_rows:
+        for key in _pick_score_row_keys(row):
+            index.setdefault(key, row)
+    return index
+
+
 def _resolve_trade_score_for_asset(asset: Any, score_index: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any] | None:
     for key in _asset_score_keys(asset):
+        score = score_index.get(key)
+        if score is not None:
+            return score
+    return None
+
+
+def _resolve_trade_pick_score_for_asset(asset: Any, score_index: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    for key in _asset_pick_score_keys(asset):
         score = score_index.get(key)
         if score is not None:
             return score
@@ -188,11 +287,31 @@ def _score_row_keys(row: Mapping[str, Any]) -> list[str]:
     return [_score_lookup_key(value) for value in values if _score_lookup_key(value)]
 
 
+def _pick_score_row_keys(row: Mapping[str, Any]) -> list[str]:
+    values = [
+        row.get("source_pick_key"),
+        row.get("pick_label"),
+    ]
+    return [_score_lookup_key(value) for value in values if _score_lookup_key(value)]
+
+
 def _asset_score_keys(asset: Any) -> list[str]:
     values = [
         _asset_field(asset, "player_id_internal"),
         _asset_field(asset, "source_player_key"),
         _asset_field(asset, "player_id"),
+        _asset_field(asset, "player_display_name"),
+        _asset_field(asset, "display_name"),
+        _asset_field(asset, "market_player_name"),
+        _asset_field(asset, "normalized_name"),
+    ]
+    return [_score_lookup_key(value) for value in values if _score_lookup_key(value)]
+
+
+def _asset_pick_score_keys(asset: Any) -> list[str]:
+    values = [
+        _asset_field(asset, "source_pick_key"),
+        _asset_field(asset, "source_player_key"),
         _asset_field(asset, "player_display_name"),
         _asset_field(asset, "display_name"),
         _asset_field(asset, "market_player_name"),

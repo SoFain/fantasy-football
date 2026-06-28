@@ -9,6 +9,8 @@ from src.compat_flags import (
     USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS,
     USE_TRADE_ANALYZER_SCORE_V0,
     USE_COMPAT_TRADE_PLAYER_SCORE,
+    USE_TRADE_PICK_SCORE_V0,
+    USE_COMPAT_TRADE_PICK_SCORE,
     compat_flag_enabled,
 )
 from src import cloud_run_jobs
@@ -40,6 +42,8 @@ class DataOpsLocalControlTests(unittest.TestCase):
         self.assertFalse(compat_flag_enabled(USE_COMPAT_TRADE_PLAYER_HISTORY, {}))
         self.assertFalse(compat_flag_enabled(USE_TRADE_ANALYZER_SCORE_V0, {}))
         self.assertFalse(compat_flag_enabled(USE_COMPAT_TRADE_PLAYER_SCORE, {}))
+        self.assertFalse(compat_flag_enabled(USE_TRADE_PICK_SCORE_V0, {}))
+        self.assertFalse(compat_flag_enabled(USE_COMPAT_TRADE_PICK_SCORE, {}))
 
     def test_data_ops_local_buttons_are_disabled_by_local_gate(self):
         expected_button_snippets = (
