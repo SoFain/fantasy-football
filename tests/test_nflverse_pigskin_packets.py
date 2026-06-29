@@ -189,6 +189,8 @@ class NflversePigskinPacketsTests(unittest.TestCase):
         self.assertIn("MERGE `fantasy-football-498121.fantasy_football_brain.pigskin_player_context_packet_current`", merge_sql)
         self.assertNotIn("raw_nflverse_", merge_sql)
         self.assertNotIn("compat_pigskin_player_context_current", merge_sql)
+        self.assertNotIn("as of 2014 week", merge_sql)
+        self.assertIn("COALESCE(CAST(as_of_season AS STRING), 'null'), ' week '", merge_sql)
 
     def test_player_universe_filter_is_fantasy_and_opportunity_based(self):
         args = self._args()
@@ -233,6 +235,26 @@ class NflversePigskinPacketsTests(unittest.TestCase):
         self.assertIn("route_share", packet["blocked_metrics"])
         self.assertIn("missing WOPR or air yards share", packet["warnings"])
         self.assertIn("missing snap share", packet["warnings"])
+
+    def test_packet_text_uses_row_season(self):
+        row = {
+            "player_name": "O.Beckham",
+            "position": "WR",
+            "team": "NYG",
+            "as_of_season": 2015,
+            "as_of_week": 17,
+            "weighted_opportunity": 52.5,
+            "target_share": 0.42,
+            "wopr": 1.04,
+            "epa_per_opportunity": 0.57,
+            "player_week_missing_data_flags": "{}",
+        }
+
+        packet_json = packets.packet_json_for_row(row)
+        text = packets.packet_text_for_row(row, packet_json)
+
+        self.assertIn("as of 2015 week 17", text)
+        self.assertNotIn("as of 2014 week", text)
 
     def test_build_summary_runs_read_only_queries_and_examples(self):
         args = self._args("--limit", "1")

@@ -98,7 +98,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dry-run Pigskin packets from nflverse advanced metrics.")
     parser.add_argument("--dry-run", action="store_true", help="Run read-only packet diagnostics. Default.")
     parser.add_argument("--plan-only", action="store_true", help="Build SQL without querying BigQuery.")
-    parser.add_argument("--write", action="store_true", help="Blocked in Phase 29.11.")
+    parser.add_argument("--write", action="store_true", help="Write Pigskin packets when the refresh gate is enabled.")
     parser.add_argument("--season-start", type=int, required=True)
     parser.add_argument("--season-end", type=int, required=True)
     parser.add_argument("--as-of-week", type=int)
@@ -467,7 +467,8 @@ SELECT
     ) AS packet_warnings
   )) AS missing_data_flags,
   CONCAT(
-    COALESCE(player_name, 'Unknown player'), ' (', COALESCE(position, 'UNK'), ', ', COALESCE(team, 'UNK'), ') as of 2014 week ',
+    COALESCE(player_name, 'Unknown player'), ' (', COALESCE(position, 'UNK'), ', ', COALESCE(team, 'UNK'), ') as of ',
+    COALESCE(CAST(as_of_season AS STRING), 'null'), ' week ',
     COALESCE(CAST(as_of_week AS STRING), 'null'), ': weighted opportunity ', COALESCE(CAST(weighted_opportunity AS STRING), 'null'),
     ', target share ', COALESCE(CAST(target_share AS STRING), 'null'),
     ', WOPR ', COALESCE(CAST(wopr AS STRING), 'null'),
@@ -734,7 +735,7 @@ def packet_text_for_row(row: dict[str, Any], packet_json: dict[str, Any]) -> str
     position = row.get("position") or "UNK"
     team = row.get("team") or "UNK"
     bits = [
-        f"{name} ({position}, {team}) as of 2014 week {row.get('as_of_week')}:",
+        f"{name} ({position}, {team}) as of {row.get('as_of_season')} week {row.get('as_of_week')}:",
         f"weighted opportunity {row.get('weighted_opportunity')}",
         f"target share {row.get('target_share')}",
         f"WOPR {row.get('wopr')}",
