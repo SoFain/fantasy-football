@@ -174,3 +174,41 @@ These objects are not raw/source tables. They do not replace the existing Trade 
 | `compat_trade_pick_scores_current` | output | View created by `0026__trade_pick_score_v0.sql` and mirrored in `bigquery/views/compat_trade_pick_scores_current.sql`. | Future safe read contract for Trade Lab and Pigskin after default-off helper wiring and validation. |
 
 These objects are a separate draft-pick score lane. Generic picks are not player rows and must not be materialized into `trade_player_scores`. The compatibility view reads only `trade_pick_scores_current`; it must not expose `draft_picks`, `college_player_stats`, `rookie_scouting_metrics`, or other raw/source tables. Production score exposure remains default-off until a separate rollout approves it.
+
+## Phase 29.3 nflverse Historical Feature Warehouse
+
+| Table or view | Classification | Writer or definition | UI or Pigskin status |
+| --- | --- | --- | --- |
+| `raw_nflverse_pbp` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`; future bounded nflreadpy backfill will write source play rows. | Not Pigskin/UI safe. |
+| `raw_nflverse_weekly` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`; future bounded nflreadpy backfill will write source player-week rows. | Not Pigskin/UI safe. |
+| `raw_nflverse_rosters` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_rosters_weekly` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_players` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_ff_playerids` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_schedules` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_teams` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_team_stats` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_injuries` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_depth_charts` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_snap_counts` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_participation` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`; future source inspection must prove route fields before any route metric. | Not Pigskin/UI safe. |
+| `raw_nflverse_ngs_passing` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_ngs_rushing` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_ngs_receiving` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `raw_nflverse_ftn_charting` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`; pressure-adjacent fields stay source-labeled until true pressure source is verified. | Not Pigskin/UI safe. |
+| `raw_nflverse_draft_picks` | raw/source | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Not Pigskin/UI safe. |
+| `stg_player_identity` | staging | Created by `0027__nflverse_historical_feature_warehouse.sql`; future builder will normalize nflverse, GSIS, fantasy, and Sleeper IDs. | Internal staging only. |
+| `stg_game_context` | staging | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Internal staging only. |
+| `stg_player_week_stats` | staging | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Internal staging only. |
+| `stg_team_week_stats` | staging | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Internal staging only. |
+| `stg_play_player_events` | staging | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Internal staging only. |
+| `stg_participation_context` | staging | Created by `0027__nflverse_historical_feature_warehouse.sql`; route fields stay null and flagged until true route source exists. | Internal staging only. |
+| `player_week_advanced_metrics` | feature-like mart | Created by `0027__nflverse_historical_feature_warehouse.sql`; future materializer will write player-week metrics. | Safe only as derived input after validation. |
+| `player_recent_advanced_metrics_current` | feature-like mart | View created by `0027__nflverse_historical_feature_warehouse.sql` and mirrored in `bigquery/views/player_recent_advanced_metrics_current.sql`. | Safe derived current input after validation. |
+| `team_week_context_metrics` | feature-like mart | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Safe derived input after validation. |
+| `qb_week_environment_metrics` | feature-like mart | Created by `0027__nflverse_historical_feature_warehouse.sql`. | Safe derived input after validation. |
+| `player_role_usage_metrics_current` | feature-like mart | View created by `0027__nflverse_historical_feature_warehouse.sql` and mirrored in `bigquery/views/player_role_usage_metrics_current.sql`. | Safe derived current input after validation. |
+| `pigskin_player_context_packet_current` | output | Created by `0027__nflverse_historical_feature_warehouse.sql`; future packet refresh writes deterministic current Pigskin packets. | Safe packet table after validation. |
+| `compat_pigskin_player_context_current` | output | View created by `0027__nflverse_historical_feature_warehouse.sql` and mirrored in `bigquery/views/compat_pigskin_player_context_current.sql`. | Safe Pigskin/UI read surface after validation. Must not depend on raw/source tables. |
+
+Phase 29.3 does not ingest data, apply migrations, materialize advanced metrics, refresh Pigskin packets, or change runtime feature exposure. Raw nflverse tables replace the source role of legacy `play_by_play`, `weekly_metrics`, `ngs_*`, `ftn_charting`, `weekly_snap_counts`, `injury_reports`, `depth_charts`, `draft_picks`, and related source tables only after a future authorized backfill and cutover.

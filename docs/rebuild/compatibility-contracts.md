@@ -60,6 +60,7 @@ Streamlit rollout details live in [docs/rebuild/streamlit-compat-rollout.md](str
 | `trade_pick_scores` | [contract](../../bigquery/contracts/trade_pick_scores.md) | [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | deterministic draft-pick score output |
 | `trade_pick_scores_current` | [contract](../../bigquery/contracts/trade_pick_scores_current.md) | [view](../../bigquery/views/trade_pick_scores_current.sql), [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | current draft-pick score view |
 | `compat_trade_pick_scores_current` | [contract](../../bigquery/contracts/compat_trade_pick_scores_current.md) | [view](../../bigquery/views/compat_trade_pick_scores_current.sql), [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | future safe draft-pick score read surface |
+| `compat_pigskin_player_context_current` | [contract](../../bigquery/contracts/compat_pigskin_player_context_current.md) | [view](../../bigquery/views/compat_pigskin_player_context_current.sql), [migration](../../bigquery/migrations/0027__nflverse_historical_feature_warehouse.sql) | future safe Pigskin advanced metrics context surface |
 
 ## Compatibility Rules
 
@@ -355,3 +356,18 @@ Phase 28.3 adds the default-off deterministic draft-pick score contract:
 | `compat_trade_pick_scores_current` | [contract](../../bigquery/contracts/compat_trade_pick_scores_current.md) | [view](../../bigquery/views/compat_trade_pick_scores_current.sql), [migration](../../bigquery/migrations/0026__trade_pick_score_v0.sql) | Future safe Streamlit and Pigskin read surface. Runtime flags remain default off. |
 
 The draft-pick lane is separate from the player-score lane. Generic picks are not player rows, college context is neutral and unavailable in v0, and the compatibility view reads only `trade_pick_scores_current`. It does not expose `draft_picks`, `college_player_stats`, `rookie_scouting_metrics`, or raw/source tables.
+
+## Phase 29.3 nflverse Advanced Metrics Contract
+
+Phase 29.3 adds scaffolding for the nflverse historical feature warehouse:
+
+| Object | Contract | View or migration | Runtime status |
+| --- | --- | --- | --- |
+| `player_recent_advanced_metrics_current` | [contract](../../bigquery/contracts/player_recent_advanced_metrics_current.md) | [view](../../bigquery/views/player_recent_advanced_metrics_current.sql), [migration](../../bigquery/migrations/0027__nflverse_historical_feature_warehouse.sql) | Future derived current metrics surface. Not populated in Phase 29.3. |
+| `player_role_usage_metrics_current` | [contract](../../bigquery/contracts/player_role_usage_metrics_current.md) | [view](../../bigquery/views/player_role_usage_metrics_current.sql), [migration](../../bigquery/migrations/0027__nflverse_historical_feature_warehouse.sql) | Future role and usage surface. Route share remains null and flagged until true route data exists. |
+| `pigskin_player_context_packet_current` | [contract](../../bigquery/contracts/pigskin_player_context_packet_current.md) | [migration](../../bigquery/migrations/0027__nflverse_historical_feature_warehouse.sql) | Future deterministic packet table for Pigskin context. Not populated in Phase 29.3. |
+| `compat_pigskin_player_context_current` | [contract](../../bigquery/contracts/compat_pigskin_player_context_current.md) | [view](../../bigquery/views/compat_pigskin_player_context_current.sql), [migration](../../bigquery/migrations/0027__nflverse_historical_feature_warehouse.sql) | Future safe Pigskin and Streamlit read surface. |
+
+Compatibility views in this lane must not directly read `raw_nflverse_*`, `play_by_play`, `weekly_metrics`, `ngs_*`, `ftn_charting`, `weekly_snap_counts`, `injury_reports`, `depth_charts`, `source_*`, or `raw_*`.
+
+Phase 29.3 is contract and migration scaffolding only. It does not apply the migration, backfill nflverse data, materialize metrics, build rankings, refresh Pigskin packets, or change runtime feature flags.
