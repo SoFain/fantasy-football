@@ -44,6 +44,27 @@ class FakeClient:
             )
         if "GROUP BY position" in sql:
             return FakeQueryJob([{"position": "WR", "candidate_count": 1, "null_wopr_rows": 0}])
+        if "GROUP BY player_id_internal, player_name, position, team" in sql:
+            return FakeQueryJob(
+                [
+                    {
+                        "player_id_internal": "00-0032187",
+                        "player_name": "Da.Johnson",
+                        "position": "RB",
+                        "team": "ARI",
+                        "row_count": 1,
+                        "weighted_opportunity": 33.5,
+                    },
+                    {
+                        "player_id_internal": "00-0026957",
+                        "player_name": "D.Johnson",
+                        "position": "TE",
+                        "team": "PIT",
+                        "row_count": 1,
+                        "weighted_opportunity": 2.5,
+                    },
+                ]
+            )
         if "table_name" in sql and "player_recent_advanced_metrics_current" in sql and "UNION ALL" in sql:
             return FakeQueryJob(
                 [
@@ -135,7 +156,7 @@ class NflversePigskinPacketsTests(unittest.TestCase):
         with self.assertRaisesRegex(packets.PigskinPacketPlanError, packets.PIGSKIN_PACKET_GATE):
             packets.build_summary(args, client_factory=FakeClient)
 
-    def test_unrelated_gate_is_not_sufficient_for_phase_29_12_write(self):
+    def test_unrelated_gate_is_not_sufficient_for_packet_write(self):
         args = self._args("--write")
 
         with patch.dict(os.environ, {"ALLOW_ADVANCED_METRICS_MATERIALIZATION": "true"}, clear=False):
@@ -156,7 +177,7 @@ class NflversePigskinPacketsTests(unittest.TestCase):
             summary = packets.build_summary(args, client_factory=lambda: client)
 
         self.assertTrue(summary["wrote"])
-        self.assertEqual(summary["phase"], "29.12")
+        self.assertEqual(summary["phase"], "nflverse_pigskin_packets")
         merge_sql = next(query for query in client.queries if "MERGE " in query)
         self.assertIn(".pigskin_player_context_packet_current` AS T", merge_sql)
         self.assertIn("player_recent_advanced_metrics_current", merge_sql)
@@ -273,6 +294,48 @@ class NflversePigskinPacketsTests(unittest.TestCase):
 
         self.assertIn("'arodgers'", sql)
         self.assertIn("'aaronrodgers'", sql)
+
+    def test_player_name_filter_supports_two_letter_first_name_variant(self):
+        args = self._args("--player-name", "Julio Jones")
+        sql = packets.build_packet_sql(args)
+
+        self.assertIn("'juliojones'", sql)
+        self.assertIn("'jjones'", sql)
+        self.assertIn("'jujones'", sql)
+
+    def test_team_position_and_player_id_disambiguation_filters(self):
+        args = self._args(
+            "--player-name",
+            "David Johnson",
+            "--team",
+            "ARI",
+            "--position",
+            "RB",
+            "--player-id",
+            "00-0032187",
+        )
+        sql = packets.build_packet_sql(args)
+
+        self.assertIn("UPPER(role.team) = 'ARI'", sql)
+        self.assertIn("role.position IN ('RB')", sql)
+        self.assertIn("role.player_id_internal = '00-0032187'", sql)
+
+    def test_ambiguous_player_lookup_is_reported(self):
+        args = self._args("--player-name", "David Johnson")
+        summary = packets.build_summary(args, client_factory=FakeClient)
+
+        self.assertEqual(len(summary["lookup_candidates"]), 2)
+        self.assertIn("Ambiguous player lookup", summary["lookup_warnings"][0])
+        self.assertIn("--team", summary["lookup_warnings"][0])
+
+    def test_current_warning_text_has_no_stale_phase_labels(self):
+        args = self._args("--plan-only")
+        summary = packets.build_summary(args, client_factory=FakeClient, run_diagnostics=False)
+        warning_text = "\n".join(summary["warnings"])
+
+        self.assertNotIn("Phase 29.11", warning_text)
+        self.assertNotIn("Phase 29.12", warning_text)
+        self.assertIn("Pigskin packet diagnostics are read-only", warning_text)
 
 
 if __name__ == "__main__":

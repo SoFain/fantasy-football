@@ -104,6 +104,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--as-of-week", type=int)
     parser.add_argument("--position", action="append", choices=DEFAULT_POSITIONS)
     parser.add_argument("--player-name")
+    parser.add_argument("--team", help="Optional team disambiguation for player-name lookups.")
+    parser.add_argument("--player-id", help="Optional player_id_internal disambiguation for player-name lookups.")
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
@@ -132,6 +134,8 @@ def _name_variants(name: str | None) -> tuple[str, ...]:
     variants = {"".join(tokens)}
     if len(tokens) >= 2:
         variants.add(tokens[0][0] + tokens[-1])
+        if len(tokens[0]) >= 2:
+            variants.add(tokens[0][:2] + tokens[-1])
     return tuple(sorted(variants))
 
 
@@ -158,12 +162,26 @@ def _player_name_filter(player_name: str | None) -> str:
     return f"{normalized} IN ({quoted})"
 
 
+def _team_filter(team: str | None) -> str:
+    if not team:
+        return "TRUE"
+    return f"UPPER(role.team) = {_quote(team.upper())}"
+
+
+def _player_id_filter(player_id: str | None) -> str:
+    if not player_id:
+        return "TRUE"
+    return f"role.player_id_internal = {_quote(player_id)}"
+
+
 def candidate_cte(args: argparse.Namespace) -> str:
     positions = tuple(args.position or DEFAULT_POSITIONS)
     where_clauses = [
         _bounds_filter(args),
         _position_filter(positions),
         _player_name_filter(args.player_name),
+        _team_filter(args.team),
+        _player_id_filter(args.player_id),
         """(
       COALESCE(pw.targets, 0) > 0
       OR COALESCE(pw.carries, 0) > 0
@@ -331,6 +349,35 @@ SELECT
 FROM candidate
 GROUP BY position
 ORDER BY position
+"""
+
+
+def build_lookup_diagnostics_sql(args: argparse.Namespace) -> str:
+    return candidate_cte(args) + """
+SELECT
+  player_id_internal,
+  player_name,
+  position,
+  team,
+  COUNT(1) AS row_count,
+  MIN(as_of_season) AS min_season,
+  MAX(as_of_season) AS max_season,
+  MIN(as_of_week) AS min_week,
+  MAX(as_of_week) AS max_week,
+  SUM(COALESCE(targets, 0)) AS targets,
+  SUM(COALESCE(carries, 0)) AS carries,
+  SUM(COALESCE(weighted_opportunity, 0)) AS weighted_opportunity,
+  SUM(COALESCE(dropbacks, 0)) AS dropbacks,
+  SUM(COALESCE(pass_attempts, 0)) AS pass_attempts
+FROM candidate
+GROUP BY player_id_internal, player_name, position, team
+ORDER BY
+  COALESCE(weighted_opportunity, 0) DESC,
+  COALESCE(dropbacks, 0) DESC,
+  player_name,
+  team,
+  position
+LIMIT 100
 """
 
 
@@ -804,6 +851,7 @@ def build_summary(
     diagnostics: dict[str, Any] = {}
     position_diagnostics: list[dict[str, Any]] = []
     view_diagnostics: list[dict[str, Any]] = []
+    lookup_candidates: list[dict[str, Any]] = []
     write_result: dict[str, Any] | None = None
     errors: list[str] = []
     if (run_diagnostics or args.write) and not args.plan_only:
@@ -816,6 +864,10 @@ def build_summary(
             diagnostics = query_one(client, plan.diagnostics_sql)
             position_diagnostics = query_many(client, build_position_diagnostics_sql(args))
             view_diagnostics = query_many(client, build_view_diagnostics_sql(args.project, args.dataset))
+            if args.player_name:
+                lookup_sql = build_lookup_diagnostics_sql(args)
+                _assert_safe_sql(lookup_sql)
+                lookup_candidates = query_many(client, lookup_sql)
             packet_rows = query_many(client, plan.sql)
         except Exception as exc:
             errors.append(f"{type(exc).__name__}: {exc}")
@@ -837,10 +889,18 @@ def build_summary(
                 "post_write": post_write,
             }
     packet_examples = [packet_preview_for_row(row) for row in packet_rows]
+    lookup_warnings: list[str] = []
+    if args.player_name and not lookup_candidates and not errors:
+        lookup_warnings.append(f"No packet candidates matched player lookup: {args.player_name}")
+    if args.player_name and len(lookup_candidates) > 1:
+        lookup_warnings.append(
+            f"Ambiguous player lookup for {args.player_name}: {len(lookup_candidates)} distinct candidates. "
+            "Use --team, --position, or --player-id to disambiguate."
+        )
     return {
         "dry_run": not args.write,
         "wrote": bool(args.write),
-        "phase": "29.12" if args.write else "29.11",
+        "phase": "nflverse_pigskin_packets",
         "future_write_gate": PIGSKIN_PACKET_GATE,
         "write_supported": True,
         "project": args.project,
@@ -853,6 +913,8 @@ def build_summary(
         "as_of_week": args.as_of_week,
         "positions": list(args.position or DEFAULT_POSITIONS),
         "player_name": args.player_name,
+        "team": args.team,
+        "player_id": args.player_id,
         "limit": max(1, min(args.limit or 25, 500)),
         "candidate_universe": "QB/RB/WR/TE with at least one offensive opportunity or QB environment sample.",
         "source_tables": list(plan.source_tables),
@@ -863,15 +925,18 @@ def build_summary(
         "diagnostics": diagnostics,
         "position_diagnostics": position_diagnostics,
         "view_diagnostics": view_diagnostics,
+        "lookup_candidates": lookup_candidates,
+        "lookup_warnings": lookup_warnings,
         "packet_examples": packet_examples,
         "write_result": write_result,
         "errors": errors,
         "warnings": [
             (
-                "Phase 29.12 Pigskin packet writes were authorized by ALLOW_PIGSKIN_PACKET_REFRESH."
+                "Pigskin packet writes were authorized by ALLOW_PIGSKIN_PACKET_REFRESH."
                 if args.write
-                else "Phase 29.11 is read-only and dry-run only."
+                else "Pigskin packet diagnostics are read-only unless --write is explicitly authorized."
             ),
+            "This command is scoped by the provided season range and packet version.",
             "Pigskin packet writes are limited to pigskin_player_context_packet_current.",
             "Packet SQL reads current/base feature marts only, not raw or legacy source tables.",
         ],
