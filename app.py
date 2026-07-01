@@ -41,6 +41,7 @@ from src.pigskin_context_tools import (
     execute_pigskin_context_tool,
     get_pigskin_context_tool_declarations,
 )
+from src.pigskin_packet_guardrails import PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL
 from src.ui_data_guards import (
     collect_selected_trade_assets,
     attach_trade_pick_scores_to_assets,
@@ -3895,6 +3896,7 @@ def render_ai_cohost():
     The active BigQuery project ID is '{active_project_id}' and the dataset is 'fantasy_football_brain'.
     Do not expose project internals to the user unless needed to explain a missing-data problem.
     {context_tool_protocol}
+    {PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL}
     {render_pigskin_chat_schema()}
 
     ### The Analytical Filter Protocol ###
