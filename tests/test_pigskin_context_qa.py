@@ -278,8 +278,13 @@ class PigskinContextQaTests(unittest.TestCase):
         self.assertEqual(result["historical_team"], "MIA")
         self.assertEqual(result["current_team"], "LV")
         self.assertTrue(result["team_mismatch"])
+        self.assertEqual(result["identity_diagnostics"]["status"], "identity_match")
         self.assertEqual(result["merged_context"]["historical_context"]["historical_team"], "MIA")
         self.assertEqual(result["merged_context"]["current_roster_context"]["current_team"], "LV")
+        self.assertEqual(
+            result["merged_context"]["identity_diagnostics"]["current_team"],
+            "LV",
+        )
 
     def test_current_team_is_sourced_only_from_current_roster_result(self):
         with patch.object(

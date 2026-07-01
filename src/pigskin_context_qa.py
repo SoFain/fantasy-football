@@ -7,6 +7,7 @@ from typing import Any
 
 from src.pigskin_current_roster_lookup import lookup_current_roster_context
 from src.pigskin_current_roster_merge import merge_historical_packet_with_current_roster
+from src.pigskin_identity_bridge import reconcile_packet_and_current_identity
 from src.pigskin_packet_retrieval import retrieve_historical_pigskin_packets
 
 
@@ -111,7 +112,13 @@ def build_historical_packet_current_roster_context(
             "warnings": current_result.get("warnings") or [],
         }
 
+    identity_diagnostics = reconcile_packet_and_current_identity(
+        _selected_packet(packet_result),
+        current_payload,
+    )
     merged_context = merge_historical_packet_with_current_roster(packet_result, current_payload)
+    if isinstance(merged_context, dict):
+        merged_context["identity_diagnostics"] = identity_diagnostics
     warnings = _dedupe(
         [QA_POLICY]
         + _as_list(packet_result.get("warnings"))
@@ -133,6 +140,7 @@ def build_historical_packet_current_roster_context(
         "packet_result": packet_result,
         "current_roster_result": current_result,
         "merged_context": merged_context,
+        "identity_diagnostics": identity_diagnostics,
         "historical_team": merged_context.get("historical_team"),
         "current_team": merged_context.get("current_team"),
         "current_roster_status": merged_context.get("current_roster_status"),
