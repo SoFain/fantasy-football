@@ -7,6 +7,7 @@ import json
 import re
 import streamlit as st
 
+from src.app_auth import render_login_gate, render_logout_control
 from src.compat_flags import (
     USE_COMPAT_PLAYER_PROFILES,
     USE_COMPAT_SLEEPER_WATCH,
@@ -161,54 +162,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-def check_password():
-    """Returns True if the user entered the correct credentials."""
-    target_user = os.environ.get("DASHBOARD_USERNAME", "admin")
-    target_pass = os.environ.get("DASHBOARD_PASSWORD", "fantasy2026")
-
-    def password_entered():
-        # Strip whitespaces defensively to prevent copy-paste space typos
-        u_input = st.session_state.get("username", "").strip()
-        p_input = st.session_state.get("password", "").strip()
-
-        # Log attempts securely for diagnostic debugging
-        import logging
-        login_logger = logging.getLogger("app.login")
-        login_logger.info(
-            f"Login check - Entered User: '{u_input}' (len={len(u_input)}), "
-            f"Expected User: '{target_user}' (len={len(target_user)}), "
-            f"Pass len={len(p_input)} (Expected len={len(target_pass)}), "
-            f"Match: {u_input == target_user and p_input == target_pass}"
-        )
-
-        if u_input == target_user and p_input == target_pass:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-            del st.session_state["username"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        # Align login layout elegantly
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown("### 🔑 Data Studio Login")
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Log In", on_click=password_entered)
-        return False
-    elif not st.session_state["password_correct"]:
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown("### 🔑 Data Studio Login")
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Log In", on_click=password_entered)
-            st.error("❌ Username or password incorrect")
-        return False
-    return True
-
-if not check_password():
+if not render_login_gate(st, os.environ):
     st.stop()
 
 # Custom Sleek CSS Styles
@@ -4887,10 +4841,7 @@ if view_mode == "broadcast":
 # --- COLLAPSED SETTINGS DRAWER ---
 st.sidebar.title("Settings")
 
-# Low-profile Logout Button
-if st.sidebar.button("🔒 Logout", key="logout_btn", width="stretch"):
-    st.session_state.clear()
-    st.rerun()
+render_logout_control(st, os.environ)
 
 st.sidebar.caption("Credential overrides for local development and emergency runtime changes.")
 
