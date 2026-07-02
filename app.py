@@ -22,6 +22,7 @@ from src.compat_flags import (
     USE_COMPAT_TRADE_PICK_SCORE,
     USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS,
     DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER,
+    USE_PIGSKIN_PACKET_QA_UI,
     compat_flag_enabled,
 )
 from src.cloud_run_jobs import (
@@ -42,6 +43,7 @@ from src.pigskin_context_tools import (
     get_pigskin_context_tool_declarations,
 )
 from src.pigskin_packet_guardrails import PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL
+from src.pigskin_packet_qa_ui import run_pigskin_packet_qa_lookup
 from src.ui_data_guards import (
     collect_selected_trade_assets,
     attach_trade_pick_scores_to_assets,
@@ -146,6 +148,10 @@ def data_ops_local_subprocess_trigger_allowed():
 
 def data_ops_local_subprocess_controls_enabled():
     return use_data_ops_local_subprocess_controls() and data_ops_local_subprocess_trigger_allowed()
+
+
+def use_pigskin_packet_qa_ui():
+    return compat_flag_enabled(USE_PIGSKIN_PACKET_QA_UI)
 
 # Set Streamlit Page Configuration
 st.set_page_config(
@@ -879,6 +885,142 @@ def render_data_ops_local_subprocess_gate():
         st.warning("Local subprocess controls are visible and executable. Use only in an authorized admin session.")
 
     return controls_visible, controls_can_run
+
+
+def render_pigskin_packet_qa_panel():
+    st.markdown("#### Historical Packet + Current Roster QA")
+    st.caption(
+        "Read-only admin QA. Historical packet team is `historical_team`; current roster status and `current_team` come only from current roster sources."
+    )
+    st.info(
+        "This panel calls deterministic helpers only. It does not call Pigskin chat, Gemini, live Sleeper APIs, materializers, or write paths."
+    )
+
+    with st.form("pigskin_packet_qa_form"):
+        col_season, col_week, col_limit = st.columns(3)
+        with col_season:
+            season = st.number_input("Season", min_value=2014, max_value=2026, value=2025, step=1)
+        with col_week:
+            week = st.number_input("Week", min_value=1, max_value=22, value=15, step=1)
+        with col_limit:
+            limit = st.number_input("Limit", min_value=1, max_value=10, value=5, step=1)
+
+        include_postseason = st.checkbox("Include postseason", value=False)
+        col_player, col_internal = st.columns(2)
+        with col_player:
+            player_name = st.text_input("Player name", value="Patrick Mahomes")
+        with col_internal:
+            player_id_internal = st.text_input("Player ID internal", value="00-0033873")
+
+        col_sleeper, col_gsis = st.columns(2)
+        with col_sleeper:
+            sleeper_player_id = st.text_input("Sleeper player ID", value="")
+        with col_gsis:
+            gsis_id = st.text_input("GSIS ID", value="")
+
+        col_team, col_position = st.columns(2)
+        with col_team:
+            team = st.text_input("Historical packet team filter", value="")
+        with col_position:
+            position = st.text_input("Historical packet position filter", value="")
+
+        col_league, col_available = st.columns(2)
+        with col_league:
+            league_id = st.text_input("League ID for roster/available lookup", value="")
+        with col_available:
+            include_available_players = st.checkbox("Include available-player source", value=False)
+
+        submitted = st.form_submit_button("Run read-only QA lookup", type="secondary")
+
+    if not submitted:
+        st.caption("Try Patrick Mahomes, 2025 week 15, or Tyreek Hill, 2025 week 4. Week 22 stays excluded unless postseason is enabled.")
+        return
+
+    form_values = {
+        "season": int(season),
+        "week": int(week),
+        "include_postseason": bool(include_postseason),
+        "player_name": player_name,
+        "player_id_internal": player_id_internal,
+        "sleeper_player_id": sleeper_player_id,
+        "gsis_id": gsis_id,
+        "team": team,
+        "position": position,
+        "league_id": league_id,
+        "include_available_players": bool(include_available_players),
+        "limit": int(limit),
+    }
+
+    try:
+        summary = run_pigskin_packet_qa_lookup(form_values, dataset_id="fantasy_football_brain")
+    except Exception as ex:
+        st.error(f"Read-only Pigskin packet QA failed: {ex}")
+        return
+
+    status_cols = st.columns(4)
+    with status_cols[0]:
+        st.metric("Status", str(summary.get("status") or "unknown"))
+    with status_cols[1]:
+        st.metric("Historical team", str(summary.get("historical_team") or "unknown"))
+    with status_cols[2]:
+        st.metric("Current team", str(summary.get("current_team") or "unknown"))
+    with status_cols[3]:
+        st.metric("Current source", str(summary.get("current_roster_source") or "unavailable"))
+
+    st.caption(summary.get("safe_wording") or "Historical and current context are separate.")
+    if summary.get("blocked_reason"):
+        st.warning(f"Blocked reason: `{summary['blocked_reason']}`")
+
+    detail_cols = st.columns(4)
+    with detail_cols[0]:
+        st.write("Current roster status")
+        st.code(str(summary.get("current_roster_status") or "unavailable"))
+    with detail_cols[1]:
+        st.write("Current roster as-of")
+        st.code(str(summary.get("current_roster_as_of") or "unavailable"))
+    with detail_cols[2]:
+        st.write("Packet season")
+        st.code(str(summary.get("packet_season") or "unavailable"))
+    with detail_cols[3]:
+        st.write("Packet week")
+        st.code(str(summary.get("packet_week") or "unavailable"))
+
+    warnings = summary.get("warnings") or []
+    if warnings:
+        st.markdown("##### Warnings")
+        for warning in warnings:
+            st.warning(str(warning))
+
+    st.markdown("##### Blocked Metrics")
+    st.caption(summary.get("blocked_metric_policy") or "Blocked metrics are unavailable, not zero.")
+    blocked_metrics = summary.get("blocked_metrics") or []
+    if blocked_metrics:
+        st.write(", ".join(str(metric) for metric in blocked_metrics))
+    else:
+        st.caption("No blocked metrics returned for this lookup.")
+
+    historical_candidates = summary.get("historical_candidates") or []
+    current_candidates = summary.get("current_roster_candidates") or []
+    if historical_candidates or current_candidates:
+        st.markdown("##### Candidate Review")
+        if historical_candidates:
+            st.caption("Historical packet candidates")
+            st.dataframe(historical_candidates, hide_index=True, width="stretch")
+        if current_candidates:
+            st.caption("Current roster candidates")
+            st.dataframe(current_candidates, hide_index=True, width="stretch")
+
+    with st.expander("Identity diagnostics", expanded=False):
+        st.json(summary.get("identity_diagnostics") or {})
+    with st.expander("Source freshness and missing flags", expanded=False):
+        st.json(
+            {
+                "source_freshness": summary.get("source_freshness"),
+                "missing_data_flags": summary.get("missing_data_flags"),
+            }
+        )
+    with st.expander("Raw structured QA JSON", expanded=False):
+        st.json(summary.get("raw_result") or {})
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -5272,6 +5414,7 @@ with tab_data_ops:
         ("Cloud Jobs", "cloud-run-jobs"),
         ("Local Gates", "local-admin-controls"),
         ("Safe Checks", "safe-checks"),
+        ("Packet QA", "pigskin-packet-qa"),
         ("External API", "external-api"),
         ("Warehouse Writes", "warehouse-writes"),
     ])
@@ -5318,6 +5461,15 @@ with tab_data_ops:
 
             if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
                 mark_successful_run("validation_sweep")
+
+    if use_pigskin_packet_qa_ui():
+        render_section_header(
+            "Pigskin Packet QA",
+            "pigskin-packet-qa",
+            "Read-only historical packet plus current roster inspection for admin staging review.",
+        )
+        with st.container(border=True):
+            render_pigskin_packet_qa_panel()
 
     render_section_header(
         "External API Refreshes",
