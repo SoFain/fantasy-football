@@ -38,6 +38,7 @@ APPROVED_SOURCES = (
 UNSAFE_INPUT_KEYS = {"sql", "query", "sql_query", "raw_sql"}
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:.-]*[A-Za-z0-9]$")
+RAW_GSIS_ID_RE = re.compile(r"^00-\d+$")
 STABLE_ID_FIELDS = ("player_id_internal", "sleeper_player_id", "gsis_id")
 
 
@@ -162,6 +163,7 @@ def build_current_roster_lookup_query(
 ) -> tuple[str, bigquery.QueryJobConfig]:
     """Build the only BigQuery query used by the current roster lookup helper."""
 
+    player_id_internal_variants = _player_id_internal_lookup_variants(player_id_internal)
     player_identity_bridge = _table_id(project_id, dataset_id, "player_identity_bridge")
     dim_players_current = _table_id(project_id, dataset_id, "dim_players_current")
     sleeper_players_current = _table_id(project_id, dataset_id, "sleeper_players_current")
@@ -351,8 +353,8 @@ def build_current_roster_lookup_query(
         SELECT *
         FROM all_candidates
         WHERE (
-                @player_id_internal IS NULL
-                OR player_id_internal = @player_id_internal
+                COALESCE(ARRAY_LENGTH(@player_id_internal_variants), 0) = 0
+                OR player_id_internal IN UNNEST(@player_id_internal_variants)
             )
             AND (
                 @sleeper_player_id IS NULL
@@ -405,19 +407,42 @@ def build_current_roster_lookup_query(
     LIMIT @limit
     """
 
-    return sql, _job_config(
-        [
-            ("player_id_internal", "STRING", player_id_internal),
-            ("sleeper_player_id", "STRING", sleeper_player_id),
-            ("gsis_id", "STRING", gsis_id),
-            ("normalized_name", "STRING", _normalize_name(player_name)),
-            ("team", "STRING", team),
-            ("position", "STRING", position),
-            ("league_id", "STRING", league_id),
-            ("include_available_players", "BOOL", bool(include_available_players)),
-            ("limit", "INT64", _clamp_limit(limit)),
-        ]
+    return sql, bigquery.QueryJobConfig(
+        maximum_bytes_billed=DEFAULT_MAX_BYTES_BILLED,
+        query_parameters=[
+            bigquery.ArrayQueryParameter(
+                "player_id_internal_variants",
+                "STRING",
+                player_id_internal_variants,
+            ),
+            bigquery.ScalarQueryParameter("sleeper_player_id", "STRING", sleeper_player_id),
+            bigquery.ScalarQueryParameter("gsis_id", "STRING", gsis_id),
+            bigquery.ScalarQueryParameter("normalized_name", "STRING", _normalize_name(player_name)),
+            bigquery.ScalarQueryParameter("team", "STRING", team),
+            bigquery.ScalarQueryParameter("position", "STRING", position),
+            bigquery.ScalarQueryParameter("league_id", "STRING", league_id),
+            bigquery.ScalarQueryParameter(
+                "include_available_players",
+                "BOOL",
+                bool(include_available_players),
+            ),
+            bigquery.ScalarQueryParameter("limit", "INT64", _clamp_limit(limit)),
+        ],
     )
+
+
+def _player_id_internal_lookup_variants(player_id_internal: str | None) -> list[str]:
+    cleaned = _clean_optional(player_id_internal)
+    if not cleaned:
+        return []
+    variants = [cleaned]
+    if RAW_GSIS_ID_RE.fullmatch(cleaned):
+        variants.append(f"gsis:{cleaned}")
+    elif cleaned.startswith("gsis:"):
+        raw_gsis = cleaned.removeprefix("gsis:")
+        if RAW_GSIS_ID_RE.fullmatch(raw_gsis):
+            variants.append(raw_gsis)
+    return _dedupe(variants)
 
 
 def _response_from_candidate_rows(
@@ -686,16 +711,6 @@ def _request_summary(
         "include_available_players": bool(include_available_players),
         "limit": _clamp_limit(limit),
     }
-
-
-def _job_config(params: list[tuple[str, str, Any]]) -> bigquery.QueryJobConfig:
-    return bigquery.QueryJobConfig(
-        maximum_bytes_billed=DEFAULT_MAX_BYTES_BILLED,
-        query_parameters=[
-            bigquery.ScalarQueryParameter(name, type_name, value)
-            for name, type_name, value in params
-        ],
-    )
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

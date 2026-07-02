@@ -92,6 +92,8 @@ class PigskinCurrentRosterLookupTests(unittest.TestCase):
         self.assertIn("@normalized_name", rendered)
         self.assertIn("@league_id", rendered)
         self.assertIn("@include_available_players", rendered)
+        self.assertIn("@player_id_internal_variants", rendered)
+        self.assertIn("coalesce(array_length(@player_id_internal_variants), 0) = 0", rendered)
         self.assertNotIn("raw_nflverse_", rendered)
         self.assertNotIn("weekly_metrics", rendered)
         self.assertNotIn("compat_pigskin_player_context_current", rendered)
@@ -114,6 +116,47 @@ class PigskinCurrentRosterLookupTests(unittest.TestCase):
         self.assertEqual(result["current_roster_context"]["current_roster_source"], "sleeper_players_current")
         self.assertEqual(result["player_id_internal"], "00-0032764")
         self.assertEqual(len(client.calls), 1)
+
+    def test_raw_gsis_internal_id_lookup_includes_prefixed_variant(self):
+        client = FakeClient([candidate_row(player_id_internal="gsis:00-0033040")])
+
+        result = lookup.lookup_current_roster_context(
+            player_id_internal="00-0033040",
+            client=client,
+            dataset_id="fantasy_football_brain",
+        )
+        _, job_config = client.calls[0]
+        params = params_by_name(job_config)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(params["player_id_internal_variants"].values, ["00-0033040", "gsis:00-0033040"])
+        self.assertEqual(result["player_id_internal"], "gsis:00-0033040")
+
+    def test_prefixed_gsis_internal_id_lookup_includes_raw_variant(self):
+        client = FakeClient([candidate_row(player_id_internal="gsis:00-0033873")])
+
+        lookup.lookup_current_roster_context(
+            player_id_internal="gsis:00-0033873",
+            client=client,
+            dataset_id="fantasy_football_brain",
+        )
+        _, job_config = client.calls[0]
+        params = params_by_name(job_config)
+
+        self.assertEqual(params["player_id_internal_variants"].values, ["gsis:00-0033873", "00-0033873"])
+
+    def test_non_gsis_internal_id_lookup_stays_exact_only(self):
+        client = FakeClient([candidate_row(player_id_internal="custom-id-1")])
+
+        lookup.lookup_current_roster_context(
+            player_id_internal="custom-id-1",
+            client=client,
+            dataset_id="fantasy_football_brain",
+        )
+        _, job_config = client.calls[0]
+        params = params_by_name(job_config)
+
+        self.assertEqual(params["player_id_internal_variants"].values, ["custom-id-1"])
 
     def test_sleeper_player_id_lookup_is_parameterized(self):
         client = FakeClient([candidate_row()])
