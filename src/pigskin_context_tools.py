@@ -21,6 +21,7 @@ from src.llm_context_packets import (
     search_player_context_packets,
 )
 from src.load import get_bigquery_client
+from src import pigskin_packet_guardrails
 from src.trade_history import get_trade_player_history as load_trade_player_history
 
 
@@ -43,7 +44,7 @@ PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:.-]*[A-Za-z0-9]$")
 def get_pigskin_context_tool_declarations() -> list[dict[str, Any]]:
     """Return the only model-visible Pigskin context tools."""
 
-    return [
+    declarations = [
         {
             "name": "get_player_context_packet",
             "description": (
@@ -154,6 +155,8 @@ def get_pigskin_context_tool_declarations() -> list[dict[str, Any]]:
             },
         },
     ]
+    declarations.extend(pigskin_packet_guardrails.get_historical_packet_tool_declarations())
+    return declarations
 
 
 def execute_pigskin_context_tool(
@@ -175,6 +178,8 @@ def execute_pigskin_context_tool(
         "compare_players": compare_players_tool,
         "get_context_event_leads": get_context_event_leads_tool,
     }
+    if pigskin_packet_guardrails.historical_packet_tool_enabled():
+        handlers["get_historical_pigskin_packet_context"] = _historical_packet_context_tool
     if tool_name not in handlers:
         raise ValueError(f"Unknown Pigskin context tool: {tool_name}")
 
@@ -182,7 +187,7 @@ def execute_pigskin_context_tool(
         "pigskin_context_tool_called",
         extra={
             "tool_name": tool_name,
-            "args": _loggable_args(args),
+            "tool_args": _loggable_args(args),
             "dataset_id": dataset_id or get_bigquery_dataset(),
         },
     )
@@ -193,7 +198,7 @@ def execute_pigskin_context_tool(
             "pigskin_context_tool_failed",
             extra={
                 "tool_name": tool_name,
-                "args": _loggable_args(args),
+                "tool_args": _loggable_args(args),
                 "dataset_id": dataset_id or get_bigquery_dataset(),
             },
         )
@@ -204,6 +209,19 @@ def execute_pigskin_context_tool(
             "status": "ok",
             "result": result,
         }
+    )
+
+
+def _historical_packet_context_tool(
+    *,
+    client: Any | None = None,
+    dataset_id: str | None = None,
+    **args: Any,
+) -> dict[str, Any]:
+    return pigskin_packet_guardrails.execute_historical_packet_context_lookup(
+        args,
+        client=client,
+        dataset_id=dataset_id,
     )
 
 

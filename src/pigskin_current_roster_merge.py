@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any
 
 from src.pigskin_packet_guardrails import (
@@ -38,6 +39,7 @@ CURRENT_AS_OF_FIELDS = (
     "snapshot_timestamp",
     "updated_at",
 )
+RAW_GSIS_ID_RE = re.compile(r"^00-\d+$")
 
 
 def merge_historical_packet_with_current_roster(
@@ -278,11 +280,33 @@ def _identity_status(packet: dict[str, Any], current_context: dict[str, Any] | N
         current_value = _clean(current_context.get(field))
         if packet_value and current_value:
             compared = True
-            if packet_value != current_value:
+            if not _stable_id_values_match(field, packet_value, current_value):
                 return "mismatch"
     if compared:
         return "match"
     return "weak"
+
+
+def _stable_id_values_match(field: str, left: str, right: str) -> bool:
+    left_values = _stable_id_comparison_values(field, left)
+    right_values = _stable_id_comparison_values(field, right)
+    return bool(left_values & right_values)
+
+
+def _stable_id_comparison_values(field: str, value: str) -> set[str]:
+    cleaned = _clean(value)
+    if not cleaned:
+        return set()
+    if field != "player_id_internal":
+        return {cleaned}
+    values = {cleaned}
+    if RAW_GSIS_ID_RE.fullmatch(cleaned):
+        values.add(f"gsis:{cleaned}")
+    elif cleaned.startswith("gsis:"):
+        raw_gsis = cleaned.removeprefix("gsis:")
+        if RAW_GSIS_ID_RE.fullmatch(raw_gsis):
+            values.add(raw_gsis)
+    return values
 
 
 def _provenance(

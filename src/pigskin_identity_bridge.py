@@ -515,7 +515,9 @@ def reconcile_packet_and_current_identity(
     compared_fields = [
         field
         for field in STABLE_ID_FIELDS
-        if packet_ids.get(field) and current_ids.get(field)
+        if packet_ids.get(field)
+        and current_ids.get(field)
+        and _stable_id_values_match(field, packet_ids[field], current_ids[field])
     ]
     if compared_fields:
         return {
@@ -547,7 +549,11 @@ def explain_identity_mismatch(
     for field in STABLE_ID_FIELDS:
         packet_value = packet_ids.get(field)
         current_value = current_ids.get(field)
-        if packet_value and current_value and packet_value != current_value:
+        if packet_value and current_value and not _stable_id_values_match(
+            field,
+            packet_value,
+            current_value,
+        ):
             diagnostics.append(
                 {
                     "field": field,
@@ -557,6 +563,21 @@ def explain_identity_mismatch(
                 }
             )
     return diagnostics
+
+
+def _stable_id_values_match(field: str, left: str, right: str) -> bool:
+    left_values = _stable_id_comparison_values(field, left)
+    right_values = _stable_id_comparison_values(field, right)
+    return bool(left_values & right_values)
+
+
+def _stable_id_comparison_values(field: str, value: str) -> set[str]:
+    cleaned = _clean_optional(value)
+    if not cleaned:
+        return set()
+    if field == "player_id_internal":
+        return set(_player_id_internal_lookup_variants(cleaned))
+    return {cleaned}
 
 
 def normalize_player_name(value: Any) -> str | None:

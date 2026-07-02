@@ -391,6 +391,34 @@ class PigskinIdentityBridgeTests(unittest.TestCase):
         self.assertEqual(result["historical_team"], "MIA")
         self.assertEqual(result["current_team"], "LV")
 
+    def test_reconcile_matches_raw_packet_id_to_prefixed_current_id(self):
+        packet = {"display_name": "P.Mahomes", "player_id_internal": "00-0033873", "historical_team": "KC"}
+        current = {
+            "display_name": "Patrick Mahomes",
+            "player_id_internal": "gsis:00-0033873",
+            "current_team": "KC",
+        }
+
+        result = bridge.reconcile_packet_and_current_identity(packet, current)
+
+        self.assertEqual(result["status"], "identity_match")
+        self.assertEqual(result["matched_stable_id_fields"], ["player_id_internal"])
+        self.assertFalse(result["needs_identity_confirmation"])
+
+    def test_reconcile_matches_prefixed_packet_id_to_raw_current_id(self):
+        packet = {
+            "display_name": "P.Mahomes",
+            "player_id_internal": "gsis:00-0033873",
+            "historical_team": "KC",
+        }
+        current = {"display_name": "Patrick Mahomes", "player_id_internal": "00-0033873", "current_team": "KC"}
+
+        result = bridge.reconcile_packet_and_current_identity(packet, current)
+
+        self.assertEqual(result["status"], "identity_match")
+        self.assertEqual(result["matched_stable_id_fields"], ["player_id_internal"])
+        self.assertFalse(result["needs_identity_confirmation"])
+
     def test_reconcile_reads_nested_stable_ids_from_bridge_selected_identity(self):
         packet = {"display_name": "T.Hill", "player_id_internal": "00-0033040", "historical_team": "MIA"}
         current = {

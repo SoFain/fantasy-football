@@ -125,6 +125,28 @@ class PigskinCurrentRosterMergeTests(unittest.TestCase):
         self.assertTrue(result["needs_identity_confirmation"])
         self.assertIn("identity does not match", " ".join(result["warnings"]))
 
+    def test_raw_packet_internal_id_matches_prefixed_current_internal_id(self):
+        result = merge.merge_historical_packet_with_current_roster(
+            historical_packet(player_id_internal="00-0033873", historical_team="KC"),
+            current_payload(player_id_internal="gsis:00-0033873", current_team="KC"),
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["needs_identity_confirmation"])
+        self.assertEqual(result["historical_team"], "KC")
+        self.assertEqual(result["current_team"], "KC")
+
+    def test_prefixed_packet_internal_id_matches_raw_current_internal_id(self):
+        result = merge.merge_historical_packet_with_current_roster(
+            historical_packet(player_id_internal="gsis:00-0033873", historical_team="KC"),
+            current_payload(player_id_internal="00-0033873", current_team="KC"),
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["needs_identity_confirmation"])
+        self.assertEqual(result["historical_team"], "KC")
+        self.assertEqual(result["current_team"], "KC")
+
     def test_ambiguous_packet_result_is_not_merged(self):
         result = merge.merge_historical_packet_with_current_roster(
             {

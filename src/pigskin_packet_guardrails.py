@@ -43,14 +43,18 @@ PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL = """
 """
 
 SAFE_HISTORICAL_PACKET_TOOL_DESCRIPTION = (
-    "Load bounded historical nflverse Pigskin packet context. Requires explicit "
-    "season or season_start/season_end. Returns historical_team, source freshness, "
-    "missing-data flags, unavailable blocked metrics, and ambiguity candidates. "
-    "Does not answer current roster, free-agent, or current-team status."
+    "Load bounded historical nflverse Pigskin packet context as completed-season "
+    "evidence only. Requires explicit season or season_start/season_end. Returns "
+    "historical_team, source freshness, missing-data flags, unavailable blocked "
+    "metrics, and ambiguity candidates. Does not answer current roster, "
+    "free-agent, or current-team status."
 )
 
 REQUEST_BLOCKED_REASONS = {
     "missing_historical_window": "season or season_start/season_end is required",
+    "missing_current_roster_identity": (
+        "player_id_internal or player_name is required for current roster identity"
+    ),
     "arbitrary_sql_not_allowed": "arbitrary SQL is not accepted by this wrapper",
 }
 
@@ -105,6 +109,14 @@ def get_historical_packet_tool_declarations(*, enabled: bool | None = None) -> l
                     "roster_format_id": {"type": "string"},
                     "limit": {"type": "integer"},
                 },
+                "anyOf": [
+                    {"required": ["season"]},
+                    {"required": ["season_start", "season_end"]},
+                ],
+                "oneOf": [
+                    {"required": ["player_id_internal"]},
+                    {"required": ["player_name"]},
+                ],
             },
         }
     ]
@@ -125,10 +137,16 @@ def execute_historical_packet_context_lookup(
         return _blocked_response("arbitrary_sql_not_allowed", unsafe_keys=unsafe_keys)
     if not _has_historical_window(args):
         return _blocked_response("missing_historical_window", unsafe_keys=unsafe_keys)
+    if not _has_current_roster_identity(args):
+        return _blocked_response("missing_current_roster_identity", unsafe_keys=unsafe_keys)
 
     safe_args = {key: value for key, value in args.items() if key in ALLOWED_TOOL_ARGS}
-    result = pigskin_packet_retrieval.retrieve_historical_pigskin_packets(
-        **safe_args,
+    from src import pigskin_context_qa
+
+    current_roster_request = _current_roster_request_from_tool_args(safe_args)
+    result = pigskin_context_qa.build_historical_packet_current_roster_context(
+        safe_args,
+        current_roster_request,
         client=client,
         dataset_id=dataset_id,
     )
@@ -142,7 +160,7 @@ def execute_historical_packet_context_lookup(
 def enforce_historical_packet_result_guardrails(result: dict[str, Any]) -> dict[str, Any]:
     """Apply output policy so historical packet results cannot masquerade as current state."""
 
-    guarded = _remove_current_team(copy.deepcopy(result))
+    guarded = _remove_packet_current_team(copy.deepcopy(result))
     guarded["source_policy"] = HISTORICAL_PACKET_SOURCE_POLICY
     guarded["historical_context_only"] = True
     guarded["current_roster_status_source_required"] = True
@@ -166,6 +184,23 @@ def _has_historical_window(args: dict[str, Any]) -> bool:
     return args.get("season_start") not in (None, "") and args.get("season_end") not in (None, "")
 
 
+def _has_current_roster_identity(args: dict[str, Any]) -> bool:
+    return args.get("player_id_internal") not in (None, "") or args.get("player_name") not in (
+        None,
+        "",
+    )
+
+
+def _current_roster_request_from_tool_args(args: dict[str, Any]) -> dict[str, Any]:
+    request: dict[str, Any] = {}
+    for key in ("player_id_internal", "player_name", "limit"):
+        if args.get(key) not in (None, ""):
+            request[key] = args[key]
+    if request.get("player_name") and not request.get("player_id_internal") and not request.get("limit"):
+        request["limit"] = 5
+    return request
+
+
 def _blocked_response(reason: str, *, unsafe_keys: list[str] | None = None) -> dict[str, Any]:
     return enforce_historical_packet_result_guardrails(
         {
@@ -178,6 +213,21 @@ def _blocked_response(reason: str, *, unsafe_keys: list[str] | None = None) -> d
             "warnings": [REQUEST_BLOCKED_REASONS[reason]],
         }
     )
+
+
+def _remove_packet_current_team(value: dict[str, Any]) -> dict[str, Any]:
+    for key in ("packet", "packets", "candidates", "historical_candidates"):
+        if key in value:
+            value[key] = _remove_current_team(value[key])
+    packet_result = value.get("packet_result")
+    if isinstance(packet_result, dict):
+        value["packet_result"] = _remove_current_team(packet_result)
+    merged_context = value.get("merged_context")
+    if isinstance(merged_context, dict) and "historical_context" in merged_context:
+        merged_context["historical_context"] = _remove_current_team(
+            merged_context["historical_context"]
+        )
+    return value
 
 
 def _remove_current_team(value: Any) -> Any:
