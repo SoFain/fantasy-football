@@ -130,6 +130,75 @@ class PigskinIdentityBridgeTests(unittest.TestCase):
         self.assertIn("player_identity_bridge", result["identity_sources"])
         self.assertEqual(result["current_team"], "MIA")
 
+    def test_raw_gsis_like_internal_id_lookup_includes_prefixed_variant(self):
+        for raw_id, prefixed_id in (
+            ("00-0033040", "gsis:00-0033040"),
+            ("00-0033873", "gsis:00-0033873"),
+        ):
+            with self.subTest(raw_id=raw_id):
+                sql, job_config = bridge.build_identity_bridge_query(
+                    project_id="fantasy-football-498121",
+                    dataset_id="fantasy_football_brain",
+                    player_id_internal=raw_id,
+                )
+                params = params_by_name(job_config)
+
+                self.assertIn("player_id_internal IN UNNEST(@player_id_internal_variants)", sql)
+                self.assertEqual(params["player_id_internal_variants"].values, [raw_id, prefixed_id])
+                self.assertEqual(params["stable_filter_count"].value, 1)
+
+    def test_prefixed_gsis_internal_id_lookup_keeps_exact_and_raw_variant(self):
+        for raw_id, prefixed_id in (
+            ("00-0033040", "gsis:00-0033040"),
+            ("00-0033873", "gsis:00-0033873"),
+        ):
+            with self.subTest(prefixed_id=prefixed_id):
+                _, job_config = bridge.build_identity_bridge_query(
+                    project_id="fantasy-football-498121",
+                    dataset_id="fantasy_football_brain",
+                    player_id_internal=prefixed_id,
+                )
+
+                self.assertEqual(
+                    params_by_name(job_config)["player_id_internal_variants"].values,
+                    [prefixed_id, raw_id],
+                )
+
+    def test_raw_gsis_internal_id_response_reports_lookup_variants(self):
+        client = FakeClient([
+            identity_row(
+                player_id_internal="gsis:00-0033040",
+                gsis_id="00-0033040",
+                sleeper_player_id="3321",
+            ),
+        ])
+
+        result = bridge.resolve_player_identity(
+            player_id_internal="00-0033040",
+            client=client,
+            dataset_id="fantasy_football_brain",
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["stable_ids"]["player_id_internal"], "gsis:00-0033040")
+        self.assertEqual(
+            result["request"]["player_id_internal_lookup_variants"],
+            ["00-0033040", "gsis:00-0033040"],
+        )
+        self.assertIn("raw/prefixed GSIS variants", " ".join(result["warnings"]))
+
+    def test_non_gsis_internal_id_is_not_blindly_prefixed(self):
+        _, job_config = bridge.build_identity_bridge_query(
+            project_id="fantasy-football-498121",
+            dataset_id="fantasy_football_brain",
+            player_id_internal="source:abc123",
+        )
+
+        self.assertEqual(
+            params_by_name(job_config)["player_id_internal_variants"].values,
+            ["source:abc123"],
+        )
+
     def test_sleeper_player_id_lookup_is_parameterized(self):
         client = FakeClient([identity_row()])
 
@@ -141,6 +210,7 @@ class PigskinIdentityBridgeTests(unittest.TestCase):
         _, job_config = client.calls[0]
 
         self.assertEqual(params_by_name(job_config)["sleeper_player_id"].value, "1166")
+        self.assertEqual(params_by_name(job_config)["player_id_internal_variants"].values, [])
 
     def test_gsis_id_lookup_is_parameterized(self):
         client = FakeClient([identity_row()])
@@ -153,6 +223,31 @@ class PigskinIdentityBridgeTests(unittest.TestCase):
         _, job_config = client.calls[0]
 
         self.assertEqual(params_by_name(job_config)["gsis_id"].value, "00-0032764")
+        self.assertEqual(params_by_name(job_config)["player_id_internal_variants"].values, [])
+
+    def test_sleeper_id_1166_stays_exact_and_is_not_remapped_to_tyreek(self):
+        client = FakeClient([
+            identity_row(
+                display_name="Kirk Cousins",
+                full_name="Kirk Cousins",
+                player_id_internal="gsis:00-0029604",
+                gsis_id="00-0029604",
+                sleeper_player_id="1166",
+                position="QB",
+                current_team="LV",
+            ),
+        ])
+
+        result = bridge.resolve_player_identity(
+            sleeper_player_id="1166",
+            client=client,
+            dataset_id="fantasy_football_brain",
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["display_name"], "Kirk Cousins")
+        self.assertEqual(result["stable_ids"]["sleeper_player_id"], "1166")
+        self.assertNotEqual(result["display_name"], "Tyreek Hill")
 
     def test_full_name_lookup_returns_candidates_when_multiple_identities_match(self):
         client = FakeClient([

@@ -44,6 +44,7 @@ NAME_FIELDS = ("player_name", "full_name", "display_name", "compact_name")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:.-]*[A-Za-z0-9]$")
 TOKEN_RE = re.compile(r"[a-z0-9]+")
+RAW_GSIS_ID_RE = re.compile(r"^00-\d+$")
 
 
 def resolve_player_identity(
@@ -164,8 +165,9 @@ def build_identity_bridge_query(
     sleeper_available_players = _table_id(project_id, dataset_id, "sleeper_available_players")
     name_values = _name_lookup_values(player_name, full_name, display_name)
     compact_values = _compact_lookup_values(player_name, full_name, display_name, compact_name)
-    stable_filter_count = sum(
-        1 for value in (player_id_internal, sleeper_player_id, gsis_id) if _clean_optional(value)
+    player_id_internal_variants = _player_id_internal_lookup_variants(player_id_internal)
+    stable_filter_count = int(bool(player_id_internal_variants)) + sum(
+        1 for value in (sleeper_player_id, gsis_id) if _clean_optional(value)
     )
     has_name_lookup = bool(name_values or compact_values)
 
@@ -366,7 +368,10 @@ def build_identity_bridge_query(
         FROM enriched_candidates
         WHERE (
                 @stable_filter_count = 0
-                OR (@player_id_internal IS NOT NULL AND player_id_internal = @player_id_internal)
+                OR (
+                    ARRAY_LENGTH(@player_id_internal_variants) > 0
+                    AND player_id_internal IN UNNEST(@player_id_internal_variants)
+                )
                 OR (@sleeper_player_id IS NOT NULL AND sleeper_player_id = @sleeper_player_id)
                 OR (@gsis_id IS NOT NULL AND gsis_id = @gsis_id)
             )
@@ -419,7 +424,11 @@ def build_identity_bridge_query(
     """
 
     query_parameters: list[Any] = [
-        bigquery.ScalarQueryParameter("player_id_internal", "STRING", player_id_internal),
+        bigquery.ArrayQueryParameter(
+            "player_id_internal_variants",
+            "STRING",
+            player_id_internal_variants,
+        ),
         bigquery.ScalarQueryParameter("sleeper_player_id", "STRING", sleeper_player_id),
         bigquery.ScalarQueryParameter("gsis_id", "STRING", gsis_id),
         bigquery.ScalarQueryParameter("team", "STRING", team),
@@ -436,6 +445,20 @@ def build_identity_bridge_query(
         maximum_bytes_billed=DEFAULT_MAX_BYTES_BILLED,
         query_parameters=query_parameters,
     )
+
+
+def _player_id_internal_lookup_variants(player_id_internal: str | None) -> list[str]:
+    cleaned = _clean_optional(player_id_internal)
+    if not cleaned:
+        return []
+    variants = [cleaned]
+    if RAW_GSIS_ID_RE.fullmatch(cleaned):
+        variants.append(f"gsis:{cleaned}")
+    elif cleaned.startswith("gsis:"):
+        raw_gsis = cleaned.removeprefix("gsis:")
+        if RAW_GSIS_ID_RE.fullmatch(raw_gsis):
+            variants.append(raw_gsis)
+    return _dedupe(variants)
 
 
 def reconcile_packet_and_current_identity(
@@ -579,7 +602,7 @@ def _response_from_identity_rows(
     *,
     request: dict[str, Any],
 ) -> dict[str, Any]:
-    warnings = [LOOKUP_POLICY]
+    warnings = [LOOKUP_POLICY] + _lookup_normalization_warnings(request)
     if not candidate_rows:
         return {
             "status": "not_found",
@@ -814,7 +837,8 @@ def _request_summary(
     include_available_players: bool,
     limit: int,
 ) -> dict[str, Any]:
-    return {
+    player_id_internal_variants = _player_id_internal_lookup_variants(player_id_internal)
+    summary = {
         "player_id_internal": _clean_optional(player_id_internal),
         "sleeper_player_id": _clean_optional(sleeper_player_id),
         "gsis_id": _clean_optional(gsis_id),
@@ -830,6 +854,18 @@ def _request_summary(
         "include_available_players": bool(include_available_players),
         "limit": _clamp_limit(limit),
     }
+    if player_id_internal_variants:
+        summary["player_id_internal_lookup_variants"] = player_id_internal_variants
+    return summary
+
+
+def _lookup_normalization_warnings(request: dict[str, Any]) -> list[str]:
+    variants = request.get("player_id_internal_lookup_variants")
+    if not isinstance(variants, list) or len(variants) <= 1:
+        return []
+    return [
+        "player_id_internal lookup included raw/prefixed GSIS variants for read-only matching."
+    ]
 
 
 def _identifier_set(row: dict[str, Any]) -> set[str]:
