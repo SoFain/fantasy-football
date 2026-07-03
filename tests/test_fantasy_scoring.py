@@ -9,6 +9,7 @@ from src.fantasy_scoring import (
     calculate_fantasy_breakdown,
     calculate_fantasy_points,
     get_default_scoring_profile,
+    get_gng_keeper_scoring_profile,
     normalize_stat_row,
 )
 
@@ -85,6 +86,26 @@ class FantasyScoringTests(unittest.TestCase):
         self.assertEqual(profile["settings"]["interceptions"], -3.0)
         self.assertEqual(profile["settings"]["receptions"], 1.0)
         self.assertEqual(profile["unmapped_settings"], {"mystery_bonus": 2})
+
+    def test_gng_keeper_profile_preserves_te_premium_and_source_metadata(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        self.assertEqual(profile["scoring_profile_id"], "gng_keeper")
+        self.assertEqual(profile["display_name"], "GNG Keeper")
+        self.assertEqual(profile["settings"]["passing_yards"], 0.02)
+        self.assertEqual(profile["settings"]["passing_tds"], 5.0)
+        self.assertEqual(profile["settings"]["rushing_yards"], 0.04)
+        self.assertEqual(profile["settings"]["receiving_yards"], 0.04)
+        self.assertEqual(profile["settings"]["receptions"], 0.1)
+        self.assertEqual(profile["unmapped_settings"]["bonus_rec_te"], 0.2)
+        self.assertEqual(profile["unmapped_settings"]["bonus_rec_wr"], 0.1)
+        self.assertEqual(profile["source_metadata"]["source_league_id"], "1369406895588143104")
+
+    def test_default_scoring_profile_includes_gng_keeper(self):
+        profile = get_default_scoring_profile("gng_keeper")
+
+        self.assertEqual(profile["scoring_profile_id"], "gng_keeper")
+        self.assertIn("bonus_rec_te", profile["unmapped_settings"])
 
     def test_missing_stat_fields_default_to_zero(self):
         normalized = normalize_stat_row({"receptions": 3})

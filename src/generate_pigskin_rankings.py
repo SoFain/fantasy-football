@@ -52,6 +52,15 @@ RANKING_MAX_VALUE_TABLES = (
     "analytics_pigskin_rankings_candidates",
     "analytics_player_weekly_truth",
 )
+SCORING_PROFILE_LABELS = {
+    "ppr": "PPR",
+    "standard": "Standard",
+    "gng_keeper": "GNG Keeper",
+}
+
+
+def scoring_profile_label(scoring_profile_id):
+    return SCORING_PROFILE_LABELS.get(str(scoring_profile_id), str(scoring_profile_id).replace("_", " ").title())
 
 
 def parse_positions(value):
@@ -68,17 +77,19 @@ def get_position_limit(position, override):
     return DEFAULT_POSITION_LIMITS[position]
 
 
-def fetch_candidates(client, dataset_id, position, limit):
+def fetch_candidates(client, dataset_id, position, limit, scoring_profile_id=DEFAULT_SCORING_PROFILE_ID):
     query = f"""
     SELECT
         *
     FROM `{client.project}.{dataset_id}.analytics_pigskin_rankings_candidates`
     WHERE position = @position
+      AND scoring_profile_id = @scoring_profile_id
     ORDER BY rank ASC, ranking_score DESC, sleeper_search_rank ASC
     LIMIT @limit
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("position", "STRING", position),
+        bigquery.ScalarQueryParameter("scoring_profile_id", "STRING", scoring_profile_id),
         bigquery.ScalarQueryParameter("limit", "INT64", int(limit)),
     ])
     return client.query(query, job_config=job_config).result().to_dataframe()
@@ -158,6 +169,7 @@ def build_evidence_lines(df):
                 f"candidate_score={format_num(row.ranking_score)}",
                 f"raw_score={format_num(row.raw_ranking_score)}",
                 f"depth_penalty={format_num(row.depth_chart_penalty)}",
+                f"profile_pts_pg={format_num(getattr(row, 'avg_profile_points', row.avg_ppr))}",
                 f"ppr_pg={format_num(row.avg_ppr)}",
                 f"grade={format_num(row.avg_grade)}",
                 f"opp={format_num(row.avg_opportunity)}",
@@ -182,7 +194,8 @@ def build_evidence_lines(df):
     return "\n".join(lines)
 
 
-def build_prompt(position, df, ranking_version):
+def build_prompt(position, df, ranking_version, scoring_profile_id=DEFAULT_SCORING_PROFILE_ID):
+    profile_label = scoring_profile_label(scoring_profile_id)
     tier_contract = {
         "QB": "elite QB1, QB1, QB2 or streamer, backup or handcuff, bench or watchlist",
         "RB": "elite, front-line starter, starter, flex or matchup, deep or watchlist",
@@ -193,7 +206,7 @@ def build_prompt(position, df, ranking_version):
     player_count = len(df)
     return f"""
 You are Pigskin, the analytical co-host for AI vs Vibes.
-You are generating the official 2026 PPR {position} rankings for the show.
+    You are generating the official 2026 {profile_label} {position} rankings for the show.
 
 This is not a vibes list and not a popularity list. Use the candidate board as evidence, not as an order you must obey.
 The SQL rank is only `candidate_rank`. It is not your final ranking.
@@ -311,7 +324,7 @@ def normalize_model_rankings(position, candidates_df, model_payload, ranking_ver
 
 
 def generate_position_rows(api_key, model_name, position, candidates_df, ranking_version, run_metadata):
-    prompt = build_prompt(position, candidates_df, ranking_version)
+    prompt = build_prompt(position, candidates_df, ranking_version, run_metadata["scoring_profile_id"])
     last_error = None
     for attempt in range(1, 4):
         try:
@@ -422,6 +435,57 @@ def write_rankings(client, dataset_id, rows):
     logger.info("Loaded %s LLM-authored Pigskin ranking rows.", len(df))
 
 
+def build_profile_aware_rankings_replace_sql(project_id, dataset_id, staging_table_name):
+    """Return a future-safe selected-profile replace plan for active rankings."""
+
+    final_table_id = f"`{project_id}.{dataset_id}.analytics_pigskin_rankings`"
+    staging_table_id = f"`{project_id}.{dataset_id}.{staging_table_name}`"
+    delete_sql = f"""
+    DELETE FROM {final_table_id} target_board
+    WHERE EXISTS (
+        SELECT 1
+        FROM {staging_table_id} source_board
+        WHERE target_board.scoring_profile_id = source_board.scoring_profile_id
+          AND target_board.league_type_id = source_board.league_type_id
+          AND target_board.roster_format_id = source_board.roster_format_id
+          AND target_board.position = source_board.position
+    )
+    """.strip()
+    insert_sql = f"""
+    INSERT INTO {final_table_id}
+    SELECT *
+    FROM {staging_table_id}
+    """.strip()
+    return delete_sql, insert_sql
+
+
+def build_candidate_historical_metrics_gap_query(project_id, dataset_id, scoring_profile_id=DEFAULT_SCORING_PROFILE_ID):
+    return f"""
+    SELECT
+        candidate.position,
+        candidate.player_id,
+        candidate.player_name,
+        candidate.current_team,
+        candidate.sleeper_player_id,
+        candidate.weekly_rows,
+        COUNT(DISTINCT CONCAT(CAST(metrics.season AS STRING), '-', CAST(metrics.week AS STRING))) AS metric_week_count
+    FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings_candidates` candidate
+    JOIN `{project_id}.{dataset_id}.player_week_advanced_metrics` metrics
+        ON metrics.player_id_internal = candidate.player_id
+    WHERE candidate.scoring_profile_id = @scoring_profile_id
+      AND COALESCE(candidate.weekly_rows, 0) = 0
+    GROUP BY
+        candidate.position,
+        candidate.player_id,
+        candidate.player_name,
+        candidate.current_team,
+        candidate.sleeper_player_id,
+        candidate.weekly_rows
+    HAVING metric_week_count > 0
+    ORDER BY metric_week_count DESC, candidate.position, candidate.player_name
+    """.strip()
+
+
 def generate_rankings(
     dataset_id=DEFAULT_DATASET,
     project_id=None,
@@ -449,7 +513,14 @@ def generate_rankings(
         load_realtime_news()
 
     logger.info("Materializing Pigskin ranking candidate evidence.")
-    materialize_pigskin_rankings(client, dataset_id=dataset_id, dry_run=False)
+    materialize_pigskin_rankings(
+        client,
+        dataset_id=dataset_id,
+        dry_run=False,
+        scoring_profile_id=scoring_profile_id,
+        league_type_id=league_type_id,
+        roster_format_id=roster_format_id,
+    )
 
     ranking_version = f"pigskin-llm-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     generation_context = fetch_generation_context(client, dataset_id)
@@ -506,7 +577,7 @@ def generate_rankings(
         final_rows = []
         for position in positions or list(VALID_POSITIONS):
             limit = get_position_limit(position, position_limit)
-            candidates_df = fetch_candidates(client, dataset_id, position, limit)
+            candidates_df = fetch_candidates(client, dataset_id, position, limit, scoring_profile_id=scoring_profile_id)
             if candidates_df.empty:
                 logger.warning("No candidate rows found for %s.", position)
                 continue

@@ -16,6 +16,22 @@ class PigskinRankingsMaterializeIdentityTests(unittest.TestCase):
         self.assertIn("ON rp.metrics_player_id = ms.player_id", sql)
         self.assertIn("CONCAT('sleeper:', sc.sleeper_player_id)", sql)
 
+    def test_candidate_sql_is_scoring_profile_aware(self):
+        sql = materialize.build_pigskin_rankings_sql(
+            "project-id",
+            "dataset_id",
+            scoring_profile_id="gng_keeper",
+            league_type_id="keeper",
+            roster_format_id="one_qb",
+        )
+
+        self.assertIn("'gng_keeper' AS scoring_profile_id", sql)
+        self.assertIn("'GNG Keeper' AS scoring_profile_label", sql)
+        self.assertIn("'keeper' AS league_type_id", sql)
+        self.assertIn("analytics_player_fantasy_points_by_profile", sql)
+        self.assertIn("avg_profile_points", sql)
+        self.assertIn("missing selected scoring profile sample", sql)
+
     def test_pigskin_rankings_materialization_requires_identity_bridge(self):
         class FakeClient:
             project = "project-id"

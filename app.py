@@ -45,6 +45,7 @@ from src.pigskin_context_tools import (
 )
 from src.pigskin_packet_guardrails import PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL
 from src.pigskin_packet_qa_ui import run_pigskin_packet_qa_lookup
+from src import player_profile_ranking_profiles as profile_ranking_profiles
 from src.ui_data_guards import (
     collect_selected_trade_assets,
     attach_trade_pick_scores_to_assets,
@@ -2674,58 +2675,36 @@ def fetch_player_profiles_data():
     return ensure_player_profile_display_columns(df)
 
 
+PLAYER_PROFILE_SCORING_PROFILE_OPTIONS = profile_ranking_profiles.PLAYER_PROFILE_SCORING_PROFILE_OPTIONS
+PLAYER_PROFILE_SCORING_PROFILE_DEFAULT = profile_ranking_profiles.PLAYER_PROFILE_SCORING_PROFILE_DEFAULT
+PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE = profile_ranking_profiles.PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE
+
+
+def get_player_profile_scoring_profile_options():
+    return profile_ranking_profiles.get_player_profile_scoring_profile_options()
+
+
+def resolve_player_profile_scoring_profile(label_or_id):
+    return profile_ranking_profiles.resolve_player_profile_scoring_profile(label_or_id)
+
+
+def build_pigskin_rankings_query(scoring_profile_id):
+    return profile_ranking_profiles.build_pigskin_rankings_query(
+        BIGQUERY_PROJECT_ID,
+        "fantasy_football_brain",
+        scoring_profile_id,
+    )
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_pigskin_rankings_data():
+def fetch_pigskin_rankings_data(scoring_profile_id=PLAYER_PROFILE_SCORING_PROFILE_DEFAULT):
     import pandas as pd
     from google.cloud import bigquery
 
-    sql_query = f"""
-    SELECT
-        player_id,
-        position,
-        rank AS pigskin_rank,
-        tier AS pigskin_tier,
-        ranking_score AS pigskin_ranking_score,
-        confidence_score AS pigskin_confidence_score,
-        sleeper_team,
-        sleeper_status,
-        sleeper_depth_chart_position,
-        sleeper_depth_chart_order,
-        raw_ranking_score,
-        depth_chart_penalty,
-        avg_passing_epa,
-        season_passing_epa,
-        avg_rushing_epa,
-        season_rushing_epa,
-        avg_receiving_epa,
-        season_receiving_epa,
-        latest_season_wopr,
-        previous_season_wopr,
-        two_years_ago_wopr,
-        latest_season_target_share,
-        previous_season_target_share,
-        latest_season_carry_share,
-        previous_season_carry_share,
-        candidate_rank,
-        candidate_ranking_score,
-        rank_source,
-        adjudicated_at,
-        ranking_eligibility,
-        pigskin_verdict,
-        rank_rationale,
-        risk_flags,
-        what_would_change_mind,
-        ranking_version,
-        generated_at AS ranking_generated_at,
-        model_name AS ranking_model_name,
-        prompt_version AS ranking_prompt_version,
-        data_snapshot_label AS ranking_data_snapshot
-    FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_pigskin_rankings`
-    WHERE is_active = TRUE
-    """
+    sql_query, job_config = build_pigskin_rankings_query(scoring_profile_id)
     try:
         client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
-        return client.query(sql_query).result().to_dataframe()
+        return client.query(sql_query, job_config=job_config).result().to_dataframe()
     except Exception as ex:
         logging.getLogger("app.rankings").warning(f"Could not load canonical Pigskin rankings: {ex}")
         return pd.DataFrame()
@@ -2896,13 +2875,28 @@ def render_player_profiles_tab():
     if using_compat_profiles:
         render_compat_metadata(df, "Player Profiles")
 
-    rankings_df = fetch_pigskin_rankings_data()
+    scoring_options = get_player_profile_scoring_profile_options()
+    scoring_labels = [option["label"] for option in scoring_options]
+    default_option = resolve_player_profile_scoring_profile(
+        st.session_state.get("player_profiles_scoring_profile", PLAYER_PROFILE_SCORING_PROFILE_DEFAULT)
+    )
+    selected_scoring_label = st.selectbox(
+        "Scoring system",
+        scoring_labels,
+        index=scoring_labels.index(default_option["label"]),
+        key="player_profiles_scoring_profile_label",
+    )
+    selected_scoring_option = resolve_player_profile_scoring_profile(selected_scoring_label)
+    st.session_state["player_profiles_scoring_profile"] = selected_scoring_option["scoring_profile_id"]
+
+    rankings_df = fetch_pigskin_rankings_data(selected_scoring_option["scoring_profile_id"])
     if not rankings_df.empty:
         df = df.merge(rankings_df, on=["player_id", "position"], how="left")
 
     ranking_defaults = {
         "pigskin_rank": pd.NA,
         "pigskin_tier": pd.NA,
+        "scoring_profile_id": selected_scoring_option["scoring_profile_id"],
         "pigskin_ranking_score": pd.NA,
         "pigskin_confidence_score": pd.NA,
         "pigskin_verdict": pd.NA,
@@ -2954,11 +2948,17 @@ def render_player_profiles_tab():
     if has_pigskin_rankings:
         version_values = df["ranking_version"].dropna().unique()
         version_label = str(version_values[0]) if len(version_values) else "unknown"
-        st.caption(f"Canonical Pigskin rankings loaded from `analytics_pigskin_rankings`, version `{version_label}`.")
-    else:
-        st.warning(
-            "Canonical Pigskin rankings are not materialized yet. Showing legacy analytical grade order until Data Ops publishes Pigskin rankings."
+        st.caption(
+            f"Canonical Pigskin {selected_scoring_option['label']} rankings loaded from "
+            f"`analytics_pigskin_rankings`, version `{version_label}`."
         )
+    else:
+        if selected_scoring_option["scoring_profile_id"] == PLAYER_PROFILE_SCORING_PROFILE_DEFAULT:
+            st.warning(
+                "Canonical Pigskin rankings are not materialized yet. Showing legacy analytical grade order until Data Ops publishes Pigskin rankings."
+            )
+        else:
+            st.warning(PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE)
 
     # Helpers for rendering
     def format_currency(val):
@@ -3143,7 +3143,7 @@ def render_player_profiles_tab():
             grade_val = player_row["display_score"] if not pd.isna(player_row["display_score"]) else 0.0
             rank_val = player_row["display_rank"] if not pd.isna(player_row["display_rank"]) else player_row["pos_rank"]
             rank_label = f"#{int(float(rank_val))} {player_row['position']}" if not pd.isna(rank_val) else "Unranked"
-            grade_title = "Pigskin Score" if has_player_pigskin_rank else "Overall Grade"
+            grade_title = f"Pigskin Score ({selected_scoring_option['label']})" if has_player_pigskin_rank else "Overall Grade"
             st.markdown(f"""
             <div class="grade-badge-container">
                 <div class="grade-badge-title">{grade_title}</div>
@@ -3181,7 +3181,7 @@ def render_player_profiles_tab():
             st.markdown('</div>', unsafe_allow_html=True)
 
         if not pd.isna(player_row.get("pigskin_rank")):
-            st.markdown("### 🏆 Canonical Pigskin Ranking")
+            st.markdown(f"### 🏆 Canonical Pigskin Ranking ({selected_scoring_option['label']})")
             confidence_val = player_row.get("pigskin_confidence_score")
             confidence_display = float(confidence_val) if not pd.isna(confidence_val) else 0.0
             depth_order = player_row.get("sleeper_depth_chart_order")

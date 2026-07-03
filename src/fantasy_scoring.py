@@ -37,6 +37,47 @@ DEFAULT_PROFILE_RECEPTION_POINTS = {
     "ppr": 1.0,
 }
 
+GNG_KEEPER_SOURCE_METADATA = {
+    "source": "owner-supplied Sleeper league report",
+    "source_league_id": "1369406895588143104",
+    "season": 2026,
+}
+
+GNG_KEEPER_SLEEPER_SCORING_SETTINGS = {
+    "pass_yd": 0.02,
+    "pass_td": 5.0,
+    "pass_td_50p": 0.5,
+    "pass_2pt": 2.0,
+    "pass_int": -2.0,
+    "pass_int_td": -4.0,
+    "pass_sack": -1.0,
+    "pass_cmp_40p": 0.5,
+    "bonus_pass_cmp_25": 1.0,
+    "bonus_pass_yd_300": 1.0,
+    "bonus_pass_yd_400": 2.0,
+    "rush_yd": 0.04,
+    "rush_td": 6.0,
+    "rush_td_50p": 1.0,
+    "rush_40p": 1.0,
+    "rush_fd": 0.1,
+    "rush_2pt": 2.0,
+    "bonus_rush_att_20": 1.0,
+    "bonus_rush_yd_100": 1.0,
+    "bonus_rush_yd_200": 2.0,
+    "bonus_rush_rec_yd_200": 1.0,
+    "rec": 0.1,
+    "bonus_rec_wr": 0.1,
+    "bonus_rec_te": 0.2,
+    "rec_yd": 0.04,
+    "rec_td": 6.0,
+    "rec_td_50p": 0.5,
+    "rec_40p": 0.5,
+    "rec_fd": 0.1,
+    "rec_2pt": 2.0,
+    "bonus_rec_yd_100": 1.0,
+    "bonus_rec_yd_200": 2.0,
+}
+
 PROFILE_SETTING_ALIASES = {
     "reception": "receptions",
     "passing_td": "passing_tds",
@@ -121,6 +162,8 @@ def _settings_from_profile(scoring_profile: dict[str, Any]) -> dict[str, Any]:
 def get_default_scoring_profile(profile_id: str) -> dict[str, Any]:
     """Return the local copy of the BigQuery seed scoring profile for offline use."""
 
+    if profile_id == "gng_keeper":
+        return get_gng_keeper_scoring_profile()
     if profile_id not in DEFAULT_PROFILE_RECEPTION_POINTS:
         raise ValueError(f"Unknown default scoring profile: {profile_id}")
     settings = copy.deepcopy(DEFAULT_SCORING_SETTINGS)
@@ -135,6 +178,16 @@ def get_default_scoring_profile(profile_id: str) -> dict[str, Any]:
         "settings": settings,
         "unmapped_settings": {},
     }
+
+
+def get_gng_keeper_scoring_profile() -> dict[str, Any]:
+    """Return the owner-approved GNG Keeper Sleeper scoring profile."""
+
+    profile = build_scoring_profile_from_sleeper_settings(GNG_KEEPER_SLEEPER_SCORING_SETTINGS)
+    profile["scoring_profile_id"] = "gng_keeper"
+    profile["display_name"] = "GNG Keeper"
+    profile["source_metadata"] = dict(GNG_KEEPER_SOURCE_METADATA)
+    return profile
 
 
 def _parse_profile_json(value: Any) -> dict[str, Any]:

@@ -96,7 +96,14 @@ class PigskinRankingModelRunTests(unittest.TestCase):
 
         self.assertTrue(ranking_version.startswith("pigskin-llm-"))
         self.assertEqual(row_count, 1)
-        materialize.assert_called_once_with(fake_client, dataset_id="test_dataset", dry_run=False)
+        materialize.assert_called_once_with(
+            fake_client,
+            dataset_id="test_dataset",
+            dry_run=False,
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+        )
         snapshot.assert_called_once()
         create_run.assert_called_once()
         create_kwargs = create_run.call_args.kwargs
@@ -185,6 +192,35 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         self.assertEqual(row["prompt_version"], "prompt-test")
         self.assertEqual(row["candidate_rank"], 12)
 
+    def test_final_pool_candidate_omission_is_rejected(self):
+        candidates = pd.DataFrame([
+            {"player_id": "p1", "rank": 1, "ranking_score": 90, "data_snapshot_label": "snapshot"},
+            {"player_id": "p2", "rank": 2, "ranking_score": 80, "data_snapshot_label": "snapshot"},
+        ])
+        payload = {
+            "rankings": [
+                {"player_id": "p1", "rank": 1, "ranking_score": 90},
+            ]
+        }
+
+        with self.assertRaisesRegex(ValueError, "omitted 1 candidates"):
+            rankings.normalize_model_rankings(
+                "TE",
+                candidates,
+                payload,
+                "rank-v1",
+                "test-model",
+                {
+                    "model_run_id": "run-1",
+                    "scoring_profile_id": "ppr",
+                    "league_type_id": "redraft",
+                    "roster_format_id": "one_qb",
+                    "feature_config_version_id": None,
+                    "source_freshness_snapshot_id": "fresh-1",
+                    "prompt_version": "prompt-test",
+                },
+            )
+
     def test_write_rankings_reuses_history_schema_for_truncate_load(self):
         client = FakeLoadClient()
         rows = [{
@@ -206,6 +242,105 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         schema_by_name = {field.name: field.field_type for field in final_config.schema}
         self.assertEqual(schema_by_name["generated_at"], "TIMESTAMP")
         self.assertEqual(schema_by_name["adjudicated_at"], "TIMESTAMP")
+
+    def test_candidate_query_filters_selected_scoring_profile(self):
+        class QueryClient:
+            project = "test-project"
+
+            def __init__(self):
+                self.calls = []
+
+            def query(self, sql, job_config=None):
+                self.calls.append((sql, job_config))
+
+                class ResultJob:
+                    def result(self):
+                        return self
+
+                    def to_dataframe(self):
+                        return pd.DataFrame()
+
+                return ResultJob()
+
+        client = QueryClient()
+        rankings.fetch_candidates(client, "test_dataset", "TE", 60, scoring_profile_id="gng_keeper")
+
+        sql, job_config = client.calls[0]
+        self.assertIn("scoring_profile_id = @scoring_profile_id", sql)
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["scoring_profile_id"], "gng_keeper")
+
+    def test_prompt_uses_selected_scoring_profile_label(self):
+        df = pd.DataFrame([{
+            "player_id": "p1",
+            "player_name": "Player One",
+            "current_team": "ARI",
+            "sleeper_team": "ARI",
+            "sleeper_active": True,
+            "sleeper_status": "Active",
+            "sleeper_depth_chart_position": "TE",
+            "sleeper_depth_chart_order": 1,
+            "rank": 1,
+            "ranking_score": 90,
+            "raw_ranking_score": 91,
+            "depth_chart_penalty": 0,
+            "avg_profile_points": 12.5,
+            "avg_ppr": 11.5,
+            "avg_grade": 80,
+            "avg_opportunity": 70,
+            "avg_efficiency": 60,
+            "avg_epa_per_opportunity": 0.2,
+            "season_total_epa": 10,
+            "season_passing_epa": 0,
+            "season_rushing_epa": 0,
+            "season_receiving_epa": 10,
+            "avg_role_quality": 70,
+            "avg_role_fragility": 20,
+            "avg_wopr": 0.5,
+            "latest_season_wopr": 0.5,
+            "previous_season_wopr": 0.4,
+            "two_years_ago_wopr": 0.3,
+            "avg_target_share": 0.2,
+            "latest_season_target_share": 0.2,
+            "previous_season_target_share": 0.18,
+            "avg_carry_share": 0,
+            "latest_season_carry_share": 0,
+            "previous_season_carry_share": 0,
+            "latest_season_ppr": 12,
+            "previous_season_ppr": 10,
+            "risk_flags": "no major Pigskin ranking flag",
+        }])
+
+        prompt = rankings.build_prompt("TE", df, "rank-v1", scoring_profile_id="gng_keeper")
+
+        self.assertIn("official 2026 GNG Keeper TE rankings", prompt)
+        self.assertIn("profile_pts_pg=12.50", prompt)
+
+    def test_profile_aware_replace_design_does_not_use_global_truncate(self):
+        delete_sql, insert_sql = rankings.build_profile_aware_rankings_replace_sql(
+            "test-project",
+            "test_dataset",
+            "staging_board",
+        )
+        combined = f"{delete_sql}\n{insert_sql}"
+
+        self.assertIn("scoring_profile_id", combined)
+        self.assertIn("league_type_id", combined)
+        self.assertIn("roster_format_id", combined)
+        self.assertNotIn("WRITE_TRUNCATE", combined)
+        self.assertNotIn("TRUNCATE TABLE", combined)
+
+    def test_candidate_historical_metrics_gap_query_uses_neutral_aliases(self):
+        sql = rankings.build_candidate_historical_metrics_gap_query(
+            "test-project",
+            "test_dataset",
+            scoring_profile_id="ppr",
+        )
+
+        self.assertIn("player_week_advanced_metrics", sql)
+        self.assertIn("metric_week_count", sql)
+        self.assertIn("candidate.scoring_profile_id = @scoring_profile_id", sql)
+        self.assertNotIn(" AS rows", sql)
 
 
 if __name__ == "__main__":
