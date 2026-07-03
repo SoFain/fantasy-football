@@ -379,6 +379,17 @@ def ensure_history_table(client, final_table_id, history_table_id):
         client.update_table(history_table, ["schema"])
 
 
+def ranking_load_schema(client, final_table_id, history_table_id):
+    for table_id in (history_table_id, final_table_id):
+        try:
+            table = client.get_table(table_id)
+        except NotFound:
+            continue
+        if table.schema:
+            return list(table.schema)
+    return None
+
+
 def write_rankings(client, dataset_id, rows):
     if not rows:
         raise RuntimeError("No Pigskin ranking rows were generated.")
@@ -386,11 +397,15 @@ def write_rankings(client, dataset_id, rows):
     df = pd.DataFrame(rows)
     final_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings"
     history_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings_history"
+    load_schema = ranking_load_schema(client, final_table_id, history_table_id)
 
     final_job = client.load_table_from_dataframe(
         df,
         final_table_id,
-        job_config=bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE),
+        job_config=bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            schema=load_schema,
+        ),
     )
     final_job.result()
 
@@ -398,7 +413,10 @@ def write_rankings(client, dataset_id, rows):
     history_job = client.load_table_from_dataframe(
         df,
         history_table_id,
-        job_config=bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND),
+        job_config=bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            schema=load_schema,
+        ),
     )
     history_job.result()
     logger.info("Loaded %s LLM-authored Pigskin ranking rows.", len(df))

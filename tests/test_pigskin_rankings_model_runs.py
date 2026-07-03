@@ -12,6 +12,44 @@ class FakeClient:
     project = "test-project"
 
 
+class FakeJob:
+    def result(self):
+        return None
+
+
+class FakeTable:
+    def __init__(self, schema):
+        self.schema = schema
+
+
+class FakeLoadClient:
+    project = "test-project"
+
+    def __init__(self):
+        self.load_calls = []
+        self.history_schema = [
+            rankings.bigquery.SchemaField("ranking_version", "STRING"),
+            rankings.bigquery.SchemaField("generated_at", "TIMESTAMP"),
+            rankings.bigquery.SchemaField("adjudicated_at", "TIMESTAMP"),
+        ]
+        self.final_schema = [
+            rankings.bigquery.SchemaField("ranking_version", "STRING"),
+            rankings.bigquery.SchemaField("generated_at", "INTEGER"),
+            rankings.bigquery.SchemaField("adjudicated_at", "INTEGER"),
+        ]
+
+    def get_table(self, table_id):
+        if table_id.endswith(".analytics_pigskin_rankings_history"):
+            return FakeTable(self.history_schema)
+        if table_id.endswith(".analytics_pigskin_rankings"):
+            return FakeTable(self.final_schema)
+        raise AssertionError(f"unexpected table {table_id}")
+
+    def load_table_from_dataframe(self, df, table_id, job_config):
+        self.load_calls.append((table_id, job_config))
+        return FakeJob()
+
+
 class PigskinRankingModelRunTests(unittest.TestCase):
     def test_successful_generation_creates_complete_model_run_and_writes_metadata(self):
         fake_client = FakeClient()
@@ -146,6 +184,28 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         self.assertEqual(row["model_run_id"], "run-1")
         self.assertEqual(row["prompt_version"], "prompt-test")
         self.assertEqual(row["candidate_rank"], 12)
+
+    def test_write_rankings_reuses_history_schema_for_truncate_load(self):
+        client = FakeLoadClient()
+        rows = [{
+            "ranking_version": "pigskin-llm-test",
+            "generated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "adjudicated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+        }]
+
+        rankings.write_rankings(client, "test_dataset", rows)
+
+        self.assertEqual(len(client.load_calls), 2)
+        final_table_id, final_config = client.load_calls[0]
+        history_table_id, history_config = client.load_calls[1]
+        self.assertTrue(final_table_id.endswith(".analytics_pigskin_rankings"))
+        self.assertTrue(history_table_id.endswith(".analytics_pigskin_rankings_history"))
+        self.assertEqual(final_config.write_disposition, rankings.bigquery.WriteDisposition.WRITE_TRUNCATE)
+        self.assertEqual(history_config.write_disposition, rankings.bigquery.WriteDisposition.WRITE_APPEND)
+
+        schema_by_name = {field.name: field.field_type for field in final_config.schema}
+        self.assertEqual(schema_by_name["generated_at"], "TIMESTAMP")
+        self.assertEqual(schema_by_name["adjudicated_at"], "TIMESTAMP")
 
 
 if __name__ == "__main__":
