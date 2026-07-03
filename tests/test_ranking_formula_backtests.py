@@ -9,22 +9,26 @@ from src import ranking_formula_backtests as rfb
 
 
 class _Done:
+    def __init__(self, rows=None):
+        self._rows = rows or []
+
     def result(self):
-        return None
+        return self._rows
 
 
 class _FakeClient:
-    def __init__(self):
+    def __init__(self, rows=None):
         self.loaded = []
         self.queries = []
+        self.rows = rows or []
 
     def load_table_from_json(self, rows, table):
         self.loaded.append((rows, table))
         return _Done()
 
-    def query(self, sql):
-        self.queries.append(sql)
-        return _Done()
+    def query(self, sql, job_config=None):
+        self.queries.append((sql, job_config))
+        return _Done(self.rows)
 
 
 class RankingFormulaBacktestTests(unittest.TestCase):
@@ -170,7 +174,7 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertEqual(result["write_summary"]["candidate_summary_row_count"], 1)
         self.assertEqual(len(fake.loaded), 3)
         self.assertEqual(len(fake.queries), 3)
-        joined_sql = "\n".join(fake.queries)
+        joined_sql = "\n".join(sql for sql, _ in fake.queries)
         self.assertIn("ranking_formula_candidates", joined_sql)
         self.assertIn("ranking_backtest_runs", joined_sql)
         self.assertIn("ranking_backtest_candidate_summaries", joined_sql)
@@ -218,6 +222,167 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertIn("target.backtest_run_id = source.backtest_run_id", sql)
         self.assertIn("target.player_id_internal = source.player_id_internal", sql)
         self.assertIn("WHEN NOT MATCHED THEN INSERT", sql)
+
+    def test_seeded_candidate_loader_uses_parameterized_query(self):
+        candidate = rfb.build_candidate_row(
+            rfb.default_formula("QB"),
+            formula_name="QB Seed",
+            candidate_id="candidate-qb",
+            formula_set_id="set-1",
+        )
+        fake = _FakeClient(rows=[candidate])
+
+        loaded = rfb.load_ranking_formula_candidates(
+            client=fake,
+            position="QB",
+            candidate_ids=["candidate-qb"],
+            status="draft",
+        )
+
+        self.assertEqual(loaded[0]["candidate_id"], "candidate-qb")
+        sql, job_config = fake.queries[0]
+        self.assertIn("@status", sql)
+        self.assertIn("@candidate_ids", sql)
+        parameter_names = {param.name for param in job_config.query_parameters}
+        self.assertIn("status", parameter_names)
+        self.assertIn("candidate_ids", parameter_names)
+
+    def test_loader_validates_returned_formula_json(self):
+        candidate = rfb.build_candidate_row(
+            rfb.default_formula("QB"),
+            formula_name="QB Seed",
+            candidate_id="candidate-qb",
+            formula_set_id="set-1",
+        )
+        candidate["formula_json"] = json.dumps(
+            {
+                "version": "x",
+                "position": "QB",
+                "score_expression": "weighted_linear",
+                "features": ["weekly_metrics"],
+                "weights": {"weekly_metrics": 1},
+                "normalization": {"method": "position_percentile"},
+            }
+        )
+        fake = _FakeClient(rows=[candidate])
+
+        with self.assertRaisesRegex(rfb.FormulaValidationError, "SQL or executable code"):
+            rfb.load_ranking_formula_candidates(client=fake, position="QB")
+
+    def test_formula_set_loader_returns_candidate_references(self):
+        formula_set = {
+            "formula_set_id": "set-1",
+            "formula_set_name": "Set",
+            "formula_set_version": "v1",
+            "qb_candidate_id": "qb",
+            "rb_candidate_id": "rb",
+            "wr_candidate_id": "wr",
+            "te_candidate_id": "te",
+            "status": "draft",
+            "description": None,
+            "created_by": "test",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": None,
+            "notes": None,
+        }
+        fake = _FakeClient(rows=[formula_set])
+
+        loaded = rfb.load_ranking_formula_set(client=fake, formula_set_id="set-1")
+
+        self.assertEqual(loaded["qb_candidate_id"], "qb")
+        self.assertEqual(loaded["te_candidate_id"], "te")
+
+    def test_invalid_status_rejected(self):
+        with self.assertRaisesRegex(rfb.FormulaValidationError, "Unsupported candidate status"):
+            rfb.load_ranking_formula_candidates(client=_FakeClient(), status="archived")
+
+    def test_unbounded_real_data_dry_run_rejected(self):
+        with self.assertRaisesRegex(rfb.FormulaValidationError, "season span"):
+            rfb.load_bounded_feature_rows(
+                client=_FakeClient(),
+                position="QB",
+                season_start=2014,
+                season_end=2016,
+                week_start=1,
+                week_end=4,
+                scoring_profile_id="ppr",
+                league_type_id="redraft",
+                roster_format_id="one_qb",
+                limit=100,
+            )
+
+    def test_result_shape_and_missing_feature_flags(self):
+        candidate = rfb.build_candidate_row(
+            rfb.default_formula("QB"),
+            formula_name="QB Seed",
+            candidate_id="candidate-qb",
+            formula_set_id="set-1",
+        )
+        feature_rows = [
+            {
+                "season": 2014,
+                "week": 1,
+                "player_id_internal": "00-1",
+                "player_name": "QB One",
+                "position": "QB",
+                "team": "ABC",
+                "actual_points": 20.0,
+                "passing_epa_per_play": None,
+                "passing_success_rate": None,
+                "cpoe": 0.05,
+            }
+        ]
+
+        result_rows = rfb.build_result_rows_for_candidates(
+            candidates=[candidate],
+            feature_rows=feature_rows,
+            backtest_run_id="run-1",
+            formula_set_id="set-1",
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            target_name="top_12_position",
+        )
+
+        row = result_rows[0]
+        self.assertEqual(row["candidate_id"], "candidate-qb")
+        self.assertEqual(row["season"], 2014)
+        self.assertIn("feature_values_json", row)
+        missing = json.loads(row["missing_flags_json"])["missing_features"]
+        self.assertIn("passing_epa_per_play", missing)
+        self.assertIn("pigskin_context_score", missing)
+
+    def test_summary_shape_includes_candidate_level_metrics(self):
+        candidate = rfb.build_candidate_row(
+            rfb.default_formula("RB"),
+            formula_name="RB Seed",
+            candidate_id="candidate-rb",
+            formula_set_id="set-1",
+        )
+        result_rows = [
+            {
+                "candidate_id": "candidate-rb",
+                "predicted_score": 50.0,
+                "predicted_rank_position": 1,
+                "actual_rank_position": 1,
+                "target_hit": True,
+                "missing_flags_json": json.dumps({"missing_features": ["pigskin_context_score"]}),
+            }
+        ]
+
+        summary = rfb.build_summary_from_results(
+            candidate_row=candidate,
+            result_rows=result_rows,
+            backtest_run_id="run-1",
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            target_name="top_12_position",
+        )
+
+        self.assertEqual(summary["sample_size"], 1)
+        self.assertEqual(summary["top_n_hit_rate"], 1.0)
+        self.assertIn("missing_input_rate", summary)
 
 
 if __name__ == "__main__":
