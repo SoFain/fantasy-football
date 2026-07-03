@@ -205,6 +205,21 @@ RANKING_TABLES = {
         "source_freshness_json",
         "created_at",
     ),
+    "ranking_formula_sets": (
+        "formula_set_id",
+        "formula_set_name",
+        "formula_set_version",
+        "qb_candidate_id",
+        "rb_candidate_id",
+        "wr_candidate_id",
+        "te_candidate_id",
+        "status",
+        "description",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "notes",
+    ),
 }
 
 
