@@ -108,16 +108,24 @@ ALLOWED_CANDIDATE_STATUSES = ("draft", "reviewed", "approved")
 FEATURE_SOURCE_MAP = {
     "actual_points": "actual_points",
     "fantasy_points_ppr": "actual_points",
+    "recent_points_avg": "recent_points_avg",
     "targets": "targets",
     "carries": "carries",
     "receiving_yards": "receiving_yards",
     "receiving_epa": "receiving_epa",
     "red_zone_targets": "red_zone_targets",
     "success_rate": "success_rate",
+    "passing_success_rate": "passing_success_rate",
     "cpoe": "cpoe",
+    "dropbacks": "dropbacks",
+    "rushing_attempts": "rushing_attempts",
+    "rush_success_rate": "rush_success_rate",
+    "receiving_usage": "receiving_usage",
     "usage_volume": "usage_volume",
     "epa_per_play": "epa_per_play",
+    "passing_epa_per_play": "passing_epa_per_play",
     "red_zone_opportunities": "red_zone_opportunities",
+    "goal_line_opportunities": "goal_line_opportunities",
     "snap_share_proxy": "snap_share_proxy",
     "air_yards": "air_yards",
 }
@@ -380,6 +388,7 @@ def load_ranking_formula_candidates(
     position: str | None = None,
     candidate_ids: list[str] | tuple[str, ...] | None = None,
     formula_version: str | None = None,
+    formula_set_id: str | None = None,
     status: str = "draft",
 ) -> list[dict[str, Any]]:
     normalized_position = _normalize_position(position) if position else None
@@ -389,6 +398,8 @@ def load_ranking_formula_candidates(
         _reject_executable_text(candidate_id)
     if formula_version is not None:
         _reject_executable_text(formula_version)
+    if formula_set_id is not None:
+        _reject_executable_text(formula_set_id)
     query = f"""
 SELECT
     candidate_id,
@@ -409,6 +420,7 @@ FROM `{table_id(project_id, dataset_id, "ranking_formula_candidates")}`
 WHERE status = @status
   AND (@position IS NULL OR position = @position)
   AND (@formula_version IS NULL OR formula_version = @formula_version)
+  AND (@formula_set_id IS NULL OR formula_set_id = @formula_set_id)
   AND (@candidate_ids_empty OR candidate_id IN UNNEST(@candidate_ids))
 ORDER BY position, candidate_id
 """.strip()
@@ -419,6 +431,7 @@ ORDER BY position, candidate_id
             _scalar_param("status", "STRING", normalized_status),
             _scalar_param("position", "STRING", normalized_position),
             _scalar_param("formula_version", "STRING", formula_version),
+            _scalar_param("formula_set_id", "STRING", formula_set_id),
             _scalar_param("candidate_ids_empty", "BOOL", not normalized_candidate_ids),
             _array_param("candidate_ids", "STRING", normalized_candidate_ids),
         ],
@@ -508,6 +521,35 @@ def load_candidates_for_formula_set(
     return candidates
 
 
+def load_all_position_candidates_for_formula_set(
+    *,
+    client: Any,
+    formula_set_id: str,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    position: str,
+    status: str = "draft",
+) -> list[dict[str, Any]]:
+    load_ranking_formula_set(
+        client=client,
+        formula_set_id=formula_set_id,
+        project_id=project_id,
+        dataset_id=dataset_id,
+        status=status,
+    )
+    candidates = load_ranking_formula_candidates(
+        client=client,
+        project_id=project_id,
+        dataset_id=dataset_id,
+        position=position,
+        formula_set_id=formula_set_id,
+        status=status,
+    )
+    if not candidates:
+        raise FormulaValidationError(f"No {position} candidates found for formula set {formula_set_id}")
+    return candidates
+
+
 def load_bounded_feature_rows(
     *,
     client: Any,
@@ -543,16 +585,24 @@ SELECT
     metrics.league_type_id,
     metrics.roster_format_id,
     COALESCE(profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points) AS actual_points,
+    COALESCE(truth.rolling_3_week_ppr, profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points) AS recent_points_avg,
     COALESCE(metrics.targets, truth.targets) AS targets,
     COALESCE(metrics.carries, truth.carries) AS carries,
     truth.receiving_yards AS receiving_yards,
     truth.receiving_epa AS receiving_epa,
     metrics.red_zone_targets AS red_zone_targets,
     metrics.success_rate AS success_rate,
+    metrics.success_rate AS passing_success_rate,
+    truth.pass_attempts AS dropbacks,
+    truth.carries AS rushing_attempts,
+    metrics.success_rate AS rush_success_rate,
+    COALESCE(metrics.targets, truth.targets) AS receiving_usage,
     metrics.cpoe AS cpoe,
     metrics.opportunities AS usage_volume,
     metrics.epa_per_opportunity AS epa_per_play,
+    SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0)) AS passing_epa_per_play,
     metrics.red_zone_touches AS red_zone_opportunities,
+    metrics.inside_5_carries AS goal_line_opportunities,
     metrics.snap_share AS snap_share_proxy,
     truth.receiving_air_yards AS air_yards,
     metrics.source_freshness_json AS metrics_source_freshness_json,
@@ -848,7 +898,7 @@ def run_seeded_candidate_real_data_dry_run(
     if target_name not in TARGET_DEFINITIONS:
         raise FormulaValidationError(f"Unknown target definition: {target_name}")
     normalized_position = _normalize_position(position)
-    candidates = load_candidates_for_formula_set(
+    candidates = load_all_position_candidates_for_formula_set(
         client=client,
         formula_set_id=formula_set_id,
         project_id=project_id,
@@ -916,6 +966,8 @@ def run_seeded_candidate_real_data_dry_run(
         "input_row_count": len(feature_rows),
         "result_shape_count": len(result_rows),
         "candidate_summary_count": len(summary_rows),
+        "feature_availability": build_feature_availability_report(candidates, feature_rows),
+        "target_availability": build_target_availability_report(feature_rows),
         "positions": [normalized_position],
         "season_start": season_start,
         "season_end": season_end,
@@ -931,6 +983,38 @@ def run_seeded_candidate_real_data_dry_run(
         "backtest_run_row": run_row,
         "result_rows": result_rows,
         "candidate_summary_rows": summary_rows,
+    }
+
+
+def build_feature_availability_report(
+    candidates: list[Mapping[str, Any]],
+    feature_rows: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    reports: dict[str, Any] = {}
+    for candidate in candidates:
+        formula = validate_formula(json.loads(candidate["formula_json"]))
+        feature_reports = {}
+        for feature in formula["features"]:
+            source_field = FEATURE_SOURCE_MAP.get(feature)
+            available_count = 0
+            if source_field:
+                available_count = sum(1 for row in feature_rows if _safe_float(row.get(source_field)) is not None)
+            feature_reports[feature] = {
+                "source_field": source_field,
+                "available_count": available_count,
+                "missing_count": max(len(feature_rows) - available_count, 0),
+            }
+        reports[str(candidate["candidate_id"])] = feature_reports
+    return reports
+
+
+def build_target_availability_report(feature_rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    target_count = sum(1 for row in feature_rows if _safe_float(row.get("actual_points")) is not None)
+    return {
+        "input_row_count": len(feature_rows),
+        "target_row_count": target_count,
+        "missing_target_count": max(len(feature_rows) - target_count, 0),
+        "target_available": target_count > 0,
     }
 
 
@@ -1518,6 +1602,8 @@ def _cli_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "formula_set_id": result.get("formula_set_id"),
         "input_row_count": result.get("input_row_count"),
         "result_shape_count": result.get("result_shape_count"),
+        "target_availability": result.get("target_availability"),
+        "feature_availability": result.get("feature_availability"),
         "sample_size": _first_summary_value(result, "sample_size"),
         "missing_input_rate": _first_summary_value(result, "missing_input_rate"),
         "top_n_hit_rate": _first_summary_value(result, "top_n_hit_rate"),

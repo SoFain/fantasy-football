@@ -31,6 +31,18 @@ class _FakeClient:
         return _Done(self.rows)
 
 
+class _SequencedFakeClient:
+    def __init__(self, row_batches):
+        self.row_batches = list(row_batches)
+        self.queries = []
+
+    def query(self, sql, job_config=None):
+        self.queries.append((sql, job_config))
+        if not self.row_batches:
+            return _Done([])
+        return _Done(self.row_batches.pop(0))
+
+
 class RankingFormulaBacktestTests(unittest.TestCase):
     def test_default_qb_formula_validates(self):
         formula = rfb.validate_formula(rfb.default_formula("QB"))
@@ -292,6 +304,45 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertEqual(loaded["qb_candidate_id"], "qb")
         self.assertEqual(loaded["te_candidate_id"], "te")
 
+    def test_all_position_candidates_for_formula_set_loads_three_draft_rows(self):
+        formula_set = {
+            "formula_set_id": "set-1",
+            "formula_set_name": "Set",
+            "formula_set_version": "v1",
+            "qb_candidate_id": "qb-balanced",
+            "rb_candidate_id": "rb-balanced",
+            "wr_candidate_id": "wr-balanced",
+            "te_candidate_id": "te-balanced",
+            "status": "draft",
+            "description": None,
+            "created_by": "test",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": None,
+            "notes": None,
+        }
+        candidates = [
+            rfb.build_candidate_row(
+                rfb.default_formula("TE"),
+                formula_name=f"TE {index}",
+                candidate_id=f"te-{index}",
+                formula_set_id="set-1",
+            )
+            for index in range(3)
+        ]
+        fake = _SequencedFakeClient([ [formula_set], candidates ])
+
+        loaded = rfb.load_all_position_candidates_for_formula_set(
+            client=fake,
+            formula_set_id="set-1",
+            position="TE",
+        )
+
+        self.assertEqual(len(loaded), 3)
+        candidate_sql, candidate_job_config = fake.queries[1]
+        self.assertIn("formula_set_id = @formula_set_id", candidate_sql)
+        parameter_names = {param.name for param in candidate_job_config.query_parameters}
+        self.assertIn("formula_set_id", parameter_names)
+
     def test_invalid_status_rejected(self):
         with self.assertRaisesRegex(rfb.FormulaValidationError, "Unsupported candidate status"):
             rfb.load_ranking_formula_candidates(client=_FakeClient(), status="archived")
@@ -383,6 +434,43 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertEqual(summary["sample_size"], 1)
         self.assertEqual(summary["top_n_hit_rate"], 1.0)
         self.assertIn("missing_input_rate", summary)
+
+    def test_feature_and_target_availability_reports_missing_inputs(self):
+        candidate = rfb.build_candidate_row(
+            {
+                "version": "ranking_formula_v0_2026_001",
+                "position": "TE",
+                "score_expression": "weighted_linear",
+                "features": ["targets", "receiving_yards", "pigskin_context_score"],
+                "weights": {"targets": 0.4, "receiving_yards": 0.4, "pigskin_context_score": 0.2},
+                "normalization": {"method": "position_percentile"},
+                "source_flags": {},
+            },
+            formula_name="TE Seed",
+            candidate_id="candidate-te",
+            formula_set_id="set-1",
+        )
+        feature_rows = [
+            {
+                "season": 2025,
+                "week": 18,
+                "player_id_internal": "00-0037744",
+                "player_name": "Trey McBride",
+                "position": "TE",
+                "targets": 8,
+                "receiving_yards": 50,
+                "actual_points": 16.2,
+            }
+        ]
+
+        feature_report = rfb.build_feature_availability_report([candidate], feature_rows)
+        target_report = rfb.build_target_availability_report(feature_rows)
+
+        candidate_report = feature_report["candidate-te"]
+        self.assertEqual(candidate_report["targets"]["available_count"], 1)
+        self.assertEqual(candidate_report["pigskin_context_score"]["available_count"], 0)
+        self.assertTrue(target_report["target_available"])
+        self.assertEqual(target_report["target_row_count"], 1)
 
 
 if __name__ == "__main__":

@@ -770,9 +770,20 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             ) AS player_name_key
         FROM roster_players_raw
     ),
+    identity_bridge AS (
+        SELECT
+            sleeper_player_id,
+            ARRAY_AGG(gsis_id IGNORE NULLS ORDER BY source_confidence DESC, updated_at DESC LIMIT 1)[SAFE_OFFSET(0)] AS gsis_id,
+            ARRAY_AGG(player_id_internal IGNORE NULLS ORDER BY source_confidence DESC, updated_at DESC LIMIT 1)[SAFE_OFFSET(0)] AS player_id_internal
+        FROM `{project_id}.{dataset_id}.player_identity_bridge`
+        WHERE sleeper_player_id IS NOT NULL
+            AND position IN ('QB', 'RB', 'WR', 'TE')
+        GROUP BY sleeper_player_id
+    ),
     active_roster_players AS (
         SELECT
-            COALESCE(rp.player_id, sc.gsis_id, sc.sleeper_player_id) AS player_id,
+            COALESCE(rp.player_id, sc.gsis_id, ib.gsis_id, ib.player_id_internal, CONCAT('sleeper:', sc.sleeper_player_id), sc.sleeper_player_id) AS player_id,
+            COALESCE(rp.player_id, sc.gsis_id, ib.gsis_id) AS metrics_player_id,
             sc.sleeper_player_id,
             COALESCE(rp.player_name, sc.player_name) AS player_name,
             sc.position,
@@ -787,6 +798,8 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             sc.search_rank AS sleeper_search_rank,
             'eligible_current_sleeper_player' AS ranking_eligibility
         FROM sleeper_current sc
+        LEFT JOIN identity_bridge ib
+            ON sc.sleeper_player_id = ib.sleeper_player_id
         LEFT JOIN roster_players rp
             ON (
                 sc.gsis_id IS NOT NULL
@@ -979,13 +992,13 @@ def build_pigskin_rankings_sql(project_id, dataset_id):
             ) AS confidence_score
         FROM active_roster_players rp
         LEFT JOIN player_weekly_agg agg
-            ON rp.player_id = agg.player_id
+            ON rp.metrics_player_id = agg.player_id
             OR (
                 LOWER(rp.player_name) = LOWER(agg.player_name)
                 AND rp.position = agg.position
             )
         LEFT JOIN player_multi_season ms
-            ON rp.player_id = ms.player_id
+            ON rp.metrics_player_id = ms.player_id
         CROSS JOIN run_context rc
     ),
     scored AS (
@@ -1434,6 +1447,11 @@ def materialize_pigskin_rankings(client, dataset_id="fantasy_football_brain", dr
         raise RuntimeError(
             f"Missing required table: {dataset_id}.sleeper_players_current. "
             "Run the Sleeper news/current-player ingest before materializing Pigskin rankings."
+        )
+    if "player_identity_bridge" not in existing_tables:
+        raise RuntimeError(
+            f"Missing required table: {dataset_id}.player_identity_bridge. "
+            "Run the identity bridge materialization before materializing Pigskin rankings."
         )
 
     queries = [build_pigskin_rankings_sql(client.project, dataset_id)]
