@@ -945,6 +945,92 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertEqual(recommendations[0]["candidate_id"], "b")
         self.assertNotIn("active", recommendations[0])
 
+    def test_tournament_family_includes_required_algorithm_ids(self):
+        candidates = rfb.tournament_formula_candidates("tournament-set")
+        ids = {row["candidate_id"] for row in candidates}
+
+        self.assertIn("ranking_formula_qb_current_pigskin_candidate_score_v1_2026_001", ids)
+        self.assertIn("ranking_formula_rb_equal_weight_normalized_blend_v0_2026_001", ids)
+        self.assertIn("ranking_formula_wr_value_over_replacement_baseline_v0_2026_001", ids)
+        self.assertIn("ranking_formula_te_scarcity_adjusted_draft_value_v0_2026_001", ids)
+        self.assertIn("ranking_formula_qb_simple_projection_points_baseline_v0_2026_001", ids)
+        self.assertIn("ranking_formula_qb_v1_improved_mapping_2026_001", ids)
+        self.assertIn("ranking_formula_wr_trend_breakout_v2_trend_2026_001", ids)
+        self.assertTrue(all(row["formula_set_id"] == "tournament-set" for row in candidates))
+
+    def test_current_pigskin_candidate_baseline_uses_no_blocked_metrics(self):
+        candidates = rfb.tournament_formula_candidates("tournament-set")
+        baseline = next(
+            row
+            for row in candidates
+            if row["candidate_id"] == "ranking_formula_qb_current_pigskin_candidate_score_v1_2026_001"
+        )
+        formula = rfb.validate_formula(json.loads(baseline["formula_json"]))
+
+        self.assertEqual(formula["version"], "current_pigskin_candidate_score_v1")
+        self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
+        self.assertIn("profile_points_score", formula["features"])
+
+    def test_no_lookahead_backtest_uses_tournament_candidates(self):
+        formula_set = self._formula_set()
+        fake = _SequencedFakeClient([[formula_set], [], []])
+
+        result = rfb.run_no_lookahead_backtest(
+            client=fake,
+            formula_set_id="set-1",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_ids=["ppr"],
+            positions=["QB"],
+            backtest_version="ranking_backtest_tournament_v0_rolling_2017_2025",
+            source_window_years=3,
+            candidate_family="tournament_v0",
+            dry_run=True,
+        )
+
+        self.assertEqual(result["candidate_family"], "tournament_v0")
+        self.assertGreater(result["candidate_count"], 3)
+        self.assertTrue(
+            any(row["candidate_id"] == "ranking_formula_qb_current_pigskin_candidate_score_v1_2026_001" for row in result["candidate_rows"])
+        )
+        self.assertEqual(result["candidate_summary_count"], result["candidate_count"])
+
+    def test_tournament_feature_query_exposes_current_baseline_proxy_fields(self):
+        fake = _FakeClient(rows=[])
+
+        rfb.load_no_lookahead_feature_rows(
+            client=fake,
+            position="RB",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            source_window_years=3,
+        )
+
+        sql, _ = fake.queries[0]
+        self.assertIn("profile_points_score", sql)
+        self.assertIn("opportunity_score_proxy", sql)
+        self.assertIn("efficiency_score_proxy", sql)
+        self.assertIn("analytical_grade_proxy", sql)
+        self.assertIn("role_stability_score", sql)
+
+    def test_scorecard_append_preserves_previous_entries(self):
+        existing = "# Scorecard\n\n## Tournament History\n\n- Phase 32.3: previous run\n"
+        updated = rfb.append_scorecard_tournament_entry(existing, "- Phase 32.5: tournament run")
+
+        self.assertIn("Phase 32.3: previous run", updated)
+        self.assertIn("Phase 32.5: tournament run", updated)
+        self.assertEqual(
+            updated,
+            rfb.append_scorecard_tournament_entry(updated, "- Phase 32.5: tournament run"),
+        )
+
     def _formula_set(self):
         return {
             "formula_set_id": "set-1",

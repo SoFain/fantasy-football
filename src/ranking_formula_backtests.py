@@ -54,6 +54,11 @@ COMMON_FEATURES = {
     "actual_points",
     "fantasy_points_ppr",
     "recent_points_avg",
+    "profile_points_score",
+    "analytical_grade_proxy",
+    "opportunity_score_proxy",
+    "efficiency_score_proxy",
+    "role_stability_score",
     "epa_per_play",
     "success_rate",
     "usage_volume",
@@ -140,6 +145,11 @@ FEATURE_SOURCE_MAP = {
     "actual_points": "actual_points",
     "fantasy_points_ppr": "actual_points",
     "recent_points_avg": "recent_points_avg",
+    "profile_points_score": "profile_points_score",
+    "analytical_grade_proxy": "analytical_grade_proxy",
+    "opportunity_score_proxy": "opportunity_score_proxy",
+    "efficiency_score_proxy": "efficiency_score_proxy",
+    "role_stability_score": "role_stability_score",
     "targets": "targets",
     "carries": "carries",
     "receiving_yards": "receiving_yards",
@@ -506,6 +516,160 @@ def trend_formula_candidates(formula_set_id: str = "ranking_formula_set_v2_trend
         )
         for position, style, name, weights in candidate_specs
     ]
+
+
+def tournament_formula_candidates(formula_set_id: str = "ranking_formula_set_tournament_v0_2026_001") -> list[dict[str, Any]]:
+    """Build the Phase 32.5 in-memory tournament registry.
+
+    The current Pigskin baseline mirrors the deterministic candidate-score weights
+    in materialize.py using the historical features available to this runner. The
+    live depth-chart penalty is documented as unavailable, not zero-filled.
+    """
+
+    specs: list[tuple[str, str, str, str, dict[str, float]]] = []
+    for position in POSITIONS:
+        specs.extend(
+            [
+                (
+                    position,
+                    "current_pigskin_candidate_score_v1",
+                    "Current Pigskin Candidate Score v1",
+                    "current_pigskin_candidate_score_v1",
+                    {
+                        "analytical_grade_proxy": 0.55,
+                        "opportunity_score_proxy": 0.15,
+                        "efficiency_score_proxy": 0.10,
+                        "role_stability_score": 0.10,
+                        "profile_points_score": 0.10,
+                    },
+                ),
+                (
+                    position,
+                    "equal_weight_normalized_blend_v0",
+                    "Equal Weight Normalized Blend v0",
+                    "equal_weight_normalized_blend_v0",
+                    {
+                        "recent_points_avg": 0.20,
+                        "usage_volume": 0.20,
+                        "epa_per_play": 0.20,
+                        "availability_rate_3yr": 0.20,
+                        "profile_points_score": 0.20,
+                    },
+                ),
+                (
+                    position,
+                    "value_over_replacement_baseline_v0",
+                    "Value Over Replacement Baseline v0",
+                    "value_over_replacement_baseline_v0",
+                    {
+                        "profile_points_score": 0.45,
+                        "recent_points_avg": 0.35,
+                        "availability_rate_3yr": 0.20,
+                    },
+                ),
+                (
+                    position,
+                    "scarcity_adjusted_draft_value_v0",
+                    "Scarcity Adjusted Draft Value v0",
+                    "scarcity_adjusted_draft_value_v0",
+                    {
+                        "usage_volume": 0.25,
+                        "profile_points_score": 0.30,
+                        "role_stability_score": 0.20,
+                        "opportunity_slope_3yr": 0.15,
+                        "availability_rate_3yr": 0.10,
+                    },
+                ),
+                (
+                    position,
+                    "simple_projection_points_baseline_v0",
+                    "Simple Projection Points Baseline v0",
+                    "simple_projection_points_baseline_v0",
+                    {"profile_points_score": 1.0},
+                ),
+            ]
+        )
+
+    specs.extend(_seeded_v0_tournament_specs())
+    specs.extend(_v1_improved_tournament_specs())
+
+    candidates = [
+        _tournament_candidate(
+            position=position,
+            family=family,
+            name=name,
+            version=version,
+            weights=weights,
+            formula_set_id=formula_set_id,
+        )
+        for position, family, name, version, weights in specs
+    ]
+    candidates.extend(
+        {
+            **row,
+            "formula_set_id": formula_set_id,
+            "formula_version": "ranking_formula_v2_trend_2026_001",
+            "notes": "Phase 32.5 tournament challenger. Trend-aware deterministic formula, not a champion.",
+        }
+        for row in trend_formula_candidates(formula_set_id=formula_set_id)
+    )
+    return candidates
+
+
+def _seeded_v0_tournament_specs() -> list[tuple[str, str, str, str, dict[str, float]]]:
+    return [
+        ("QB", "seeded_v0_balanced", "QB Seeded v0 Balanced", "ranking_formula_v0_2026_001", {"recent_points_avg": 0.30, "passing_epa_per_play": 0.25, "passing_success_rate": 0.20, "cpoe": 0.10, "pigskin_context_score": 0.15}),
+        ("QB", "seeded_v0_volume", "QB Seeded v0 Volume", "ranking_formula_v0_2026_001", {"recent_points_avg": 0.25, "dropbacks": 0.30, "rushing_attempts": 0.15, "usage_volume": 0.15, "pigskin_context_score": 0.15}),
+        ("QB", "seeded_v0_efficiency", "QB Seeded v0 Efficiency", "ranking_formula_v0_2026_001", {"passing_epa_per_play": 0.35, "passing_success_rate": 0.25, "cpoe": 0.20, "team_epa_per_play": 0.10, "pigskin_context_score": 0.10}),
+        ("RB", "seeded_v0_balanced", "RB Seeded v0 Balanced", "ranking_formula_v0_2026_001", {"recent_points_avg": 0.30, "usage_volume": 0.25, "rush_success_rate": 0.15, "receiving_usage": 0.15, "pigskin_context_score": 0.15}),
+        ("RB", "seeded_v0_volume", "RB Seeded v0 Volume", "ranking_formula_v0_2026_001", {"carries": 0.30, "targets": 0.20, "goal_line_opportunities": 0.20, "usage_volume": 0.20, "pigskin_context_score": 0.10}),
+        ("RB", "seeded_v0_efficiency", "RB Seeded v0 Efficiency", "ranking_formula_v0_2026_001", {"rush_success_rate": 0.30, "receiving_usage": 0.20, "epa_per_play": 0.20, "success_rate": 0.15, "pigskin_context_score": 0.15}),
+        ("WR", "seeded_v0_balanced", "WR Seeded v0 Balanced", "ranking_formula_v0_2026_001", {"recent_points_avg": 0.30, "targets": 0.25, "air_yards": 0.15, "receiving_epa": 0.15, "pigskin_context_score": 0.15}),
+        ("WR", "seeded_v0_volume", "WR Seeded v0 Volume", "ranking_formula_v0_2026_001", {"targets": 0.35, "air_yards": 0.25, "red_zone_targets": 0.15, "usage_volume": 0.15, "pigskin_context_score": 0.10}),
+        ("WR", "seeded_v0_efficiency", "WR Seeded v0 Efficiency", "ranking_formula_v0_2026_001", {"receiving_epa": 0.30, "receiving_yards": 0.20, "epa_per_play": 0.20, "success_rate": 0.15, "pigskin_context_score": 0.15}),
+        ("TE", "seeded_v0_balanced", "TE Seeded v0 Balanced", "ranking_formula_v0_2026_001", {"recent_points_avg": 0.30, "targets": 0.25, "receiving_yards": 0.15, "team_pass_rate": 0.15, "pigskin_context_score": 0.15}),
+        ("TE", "seeded_v0_volume", "TE Seeded v0 Volume", "ranking_formula_v0_2026_001", {"targets": 0.35, "red_zone_targets": 0.20, "air_yards": 0.15, "usage_volume": 0.15, "pigskin_context_score": 0.15}),
+        ("TE", "seeded_v0_efficiency", "TE Seeded v0 Efficiency", "ranking_formula_v0_2026_001", {"receiving_epa": 0.30, "receiving_yards": 0.20, "team_pass_rate": 0.15, "epa_per_play": 0.15, "pigskin_context_score": 0.20}),
+    ]
+
+
+def _v1_improved_tournament_specs() -> list[tuple[str, str, str, str, dict[str, float]]]:
+    return [
+        ("QB", "v1_improved_mapping", "QB v1 Improved Mapping", "ranking_formula_v1_improved_2026_001", {"recent_points_avg": 0.25, "passing_epa_per_play": 0.25, "passing_success_rate": 0.20, "usage_volume": 0.15, "availability_rate_3yr": 0.15}),
+        ("RB", "v1_improved_mapping", "RB v1 Improved Mapping", "ranking_formula_v1_improved_2026_001", {"recent_points_avg": 0.25, "usage_volume": 0.25, "carry_share_slope_3yr": 0.20, "receiving_usage": 0.15, "availability_rate_3yr": 0.15}),
+        ("WR", "v1_improved_mapping", "WR v1 Improved Mapping", "ranking_formula_v1_improved_2026_001", {"recent_points_avg": 0.25, "targets": 0.20, "wopr_slope_3yr": 0.20, "air_yards": 0.15, "availability_rate_3yr": 0.20}),
+        ("TE", "v1_improved_mapping", "TE v1 Improved Mapping", "ranking_formula_v1_improved_2026_001", {"recent_points_avg": 0.25, "targets": 0.25, "team_pass_rate": 0.20, "target_share_slope_3yr": 0.15, "availability_rate_3yr": 0.15}),
+    ]
+
+
+def _tournament_candidate(
+    *,
+    position: str,
+    family: str,
+    name: str,
+    version: str,
+    weights: dict[str, float],
+    formula_set_id: str,
+) -> dict[str, Any]:
+    candidate_id = f"ranking_formula_{position.lower()}_{family}_2026_001"
+    row = build_candidate_row(
+        {
+            "version": version,
+            "position": position,
+            "score_expression": "weighted_linear",
+            "features": list(weights),
+            "weights": dict(weights),
+            "normalization": {"method": "position_percentile"},
+            "source_flags": {"historical_tournament": True},
+        },
+        formula_name=name,
+        candidate_id=candidate_id,
+        formula_set_id=formula_set_id,
+        target_name=_target_name_for_position(position),
+        status="draft",
+    )
+    row["notes"] = f"Phase 32.5 tournament family={family}. Backtest-only, not a champion."
+    return row
 
 
 def build_rolling_season_pairs(
@@ -1293,10 +1457,16 @@ def run_no_lookahead_backtest(
     )
     if normalized_candidate_family == "trend_v2":
         candidates = trend_formula_candidates(formula_set_id=formula_set_id)
+    elif normalized_candidate_family == "tournament_v0":
+        candidates = tournament_formula_candidates(formula_set_id=formula_set_id)
     candidates = [candidate for candidate in candidates if candidate["position"] in normalized_positions]
     if not candidates:
         raise FormulaValidationError("No matching seeded formula candidates found")
-    _validate_candidate_coverage(candidates, normalized_positions)
+    _validate_candidate_coverage(
+        candidates,
+        normalized_positions,
+        expected_count=None if normalized_candidate_family == "tournament_v0" else 3,
+    )
 
     all_result_rows: list[dict[str, Any]] = []
     all_summary_rows: list[dict[str, Any]] = []
@@ -1491,6 +1661,7 @@ WITH season_features AS (
         AVG(source_profile.total_fantasy_points) AS points_per_game,
         SUM(source_profile.total_fantasy_points) AS total_points,
         AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) AS recent_points_avg,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) * 4.0)) AS profile_points_score,
         AVG(metrics.targets) AS targets,
         AVG(metrics.carries) AS carries,
         AVG(truth.receiving_yards) AS receiving_yards,
@@ -1508,6 +1679,8 @@ WITH season_features AS (
         AVG(metrics.cpoe) AS cpoe,
         AVG(metrics.opportunities) AS usage_volume,
         AVG(metrics.epa_per_opportunity) AS epa_per_play,
+        LEAST(100.0, GREATEST(0.0, AVG(metrics.opportunities) * 4.0)) AS opportunity_score_proxy,
+        LEAST(100.0, GREATEST(0.0, 50.0 + (AVG(metrics.epa_per_opportunity) * 25.0))) AS efficiency_score_proxy,
         AVG(SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0))) AS passing_epa_per_play,
         AVG(metrics.red_zone_touches) AS red_zone_opportunities,
         AVG(metrics.inside_5_carries) AS goal_line_opportunities,
@@ -1516,6 +1689,7 @@ WITH season_features AS (
         AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
         SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) AS availability_rate,
         STDDEV(metrics.opportunities) AS weekly_volatility,
+        LEAST(100.0, GREATEST(0.0, SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) * 100.0 - COALESCE(STDDEV(metrics.opportunities), 0.0) * 2.0)) AS role_stability_score,
         ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
         ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags
     FROM `{table_id(project_id, dataset_id, "player_week_advanced_metrics")}` metrics
@@ -1546,6 +1720,7 @@ source_features AS (
         position,
         ANY_VALUE(source_team HAVING MAX season) AS source_team,
         AVG(recent_points_avg) AS recent_points_avg,
+        AVG(profile_points_score) AS profile_points_score,
         AVG(targets) AS targets,
         AVG(carries) AS carries,
         AVG(receiving_yards) AS receiving_yards,
@@ -1560,6 +1735,9 @@ source_features AS (
         AVG(cpoe) AS cpoe,
         AVG(usage_volume) AS usage_volume,
         AVG(epa_per_play) AS epa_per_play,
+        AVG(opportunity_score_proxy) AS opportunity_score_proxy,
+        AVG(efficiency_score_proxy) AS efficiency_score_proxy,
+        AVG((opportunity_score_proxy + efficiency_score_proxy) / 2.0) AS analytical_grade_proxy,
         AVG(passing_epa_per_play) AS passing_epa_per_play,
         AVG(red_zone_opportunities) AS red_zone_opportunities,
         AVG(goal_line_opportunities) AS goal_line_opportunities,
@@ -1577,6 +1755,7 @@ source_features AS (
         _slope(ARRAY_AGG(STRUCT(season, success_rate AS value) ORDER BY season)) AS efficiency_slope_3yr,
         AVG(availability_rate) AS availability_rate_3yr,
         AVG(weekly_volatility) AS weekly_volatility_3yr,
+        AVG(role_stability_score) AS role_stability_score,
         IF(_slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) > 0
            AND _slope(ARRAY_AGG(STRUCT(season, epa_per_play AS value) ORDER BY season)) > 0, 1.0, 0.0) AS improving_3yr,
         IF(_slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) < 0
@@ -1637,6 +1816,7 @@ SELECT
     target.roster_format_id,
     target.actual_points,
     source.recent_points_avg,
+    source.profile_points_score,
     source.targets,
     source.carries,
     source.receiving_yards,
@@ -1651,6 +1831,9 @@ SELECT
     source.cpoe,
     source.usage_volume,
     source.epa_per_play,
+    source.opportunity_score_proxy,
+    source.efficiency_score_proxy,
+    source.analytical_grade_proxy,
     source.passing_epa_per_play,
     packet.packet_team_epa_per_play AS team_epa_per_play,
     source.red_zone_opportunities,
@@ -1672,6 +1855,7 @@ SELECT
     source.efficiency_slope_3yr,
     source.availability_rate_3yr,
     source.weekly_volatility_3yr,
+    source.role_stability_score,
     source.improving_3yr,
     source.declining_3yr,
     source.breakout_trajectory_3yr
@@ -2090,6 +2274,17 @@ def table_id(project_id: str, dataset_id: str, table_name: str) -> str:
     return f"{project_id}.{dataset_id}.{table_name}"
 
 
+def append_scorecard_tournament_entry(existing_markdown: str, entry_markdown: str) -> str:
+    """Append one tournament entry without removing older scorecard history."""
+    entry = entry_markdown.strip()
+    if not entry:
+        return existing_markdown
+    if entry in existing_markdown:
+        return existing_markdown
+    separator = "\n\n" if existing_markdown.strip() else ""
+    return f"{existing_markdown.rstrip()}{separator}{entry}\n"
+
+
 def _validate_real_data_bounds(
     *,
     position: str,
@@ -2499,10 +2694,18 @@ def _validate_result_rows(rows: list[dict[str, Any]]) -> None:
                 raise ValueError(f"{rank_field} must be positive")
 
 
-def _validate_candidate_coverage(candidates: list[Mapping[str, Any]], positions: list[str]) -> None:
+def _validate_candidate_coverage(
+    candidates: list[Mapping[str, Any]],
+    positions: list[str],
+    *,
+    expected_count: int | None = 3,
+) -> None:
     for position in positions:
         count = sum(1 for candidate in candidates if candidate["position"] == position)
-        if count != 3:
+        if expected_count is None:
+            if count < 1:
+                raise FormulaValidationError(f"Expected at least 1 {position} candidate, found {count}")
+        elif count != expected_count:
             raise FormulaValidationError(f"Expected 3 {position} candidates, found {count}")
 
 
@@ -2539,7 +2742,7 @@ def _normalize_source_window_years(source_window_years: int) -> int:
 def _normalize_candidate_family(candidate_family: str) -> str:
     value = str(candidate_family or "").strip().lower()
     _reject_executable_text(value)
-    if value not in {"seeded", "trend_v2"}:
+    if value not in {"seeded", "trend_v2", "tournament_v0"}:
         raise FormulaValidationError(f"Unsupported candidate_family: {candidate_family}")
     return value
 
@@ -2613,7 +2816,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--formula-set-id")
     parser.add_argument("--backtest-version", default=DEFAULT_BACKTEST_VERSION)
     parser.add_argument("--source-window-years", type=int, default=1)
-    parser.add_argument("--candidate-family", default="seeded", choices=("seeded", "trend_v2"))
+    parser.add_argument("--candidate-family", default="seeded", choices=("seeded", "trend_v2", "tournament_v0"))
     parser.add_argument("--status", default="draft")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--scoring-profile-id", default="ppr")
