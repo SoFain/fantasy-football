@@ -63,8 +63,25 @@ COMMON_FEATURES = {
     "opponent_allowed_points",
     "pigskin_context_score",
 }
+TREND_FEATURES = {
+    "points_per_game_slope_3yr",
+    "total_points_slope_3yr",
+    "opportunity_slope_3yr",
+    "target_share_slope_3yr",
+    "carry_share_slope_3yr",
+    "receiving_usage_slope_3yr",
+    "wopr_slope_3yr",
+    "epa_slope_3yr",
+    "efficiency_slope_3yr",
+    "availability_rate_3yr",
+    "weekly_volatility_3yr",
+    "improving_3yr",
+    "declining_3yr",
+    "breakout_trajectory_3yr",
+}
 POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "QB": COMMON_FEATURES
+    | TREND_FEATURES
     | {
         "passing_epa_per_play",
         "passing_success_rate",
@@ -74,6 +91,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
         "designed_rush_share_proxy",
     },
     "RB": COMMON_FEATURES
+    | TREND_FEATURES
     | {
         "carries",
         "targets",
@@ -82,6 +100,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
         "goal_line_opportunities",
     },
     "WR": COMMON_FEATURES
+    | TREND_FEATURES
     | {
         "targets",
         "air_yards",
@@ -90,6 +109,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
         "red_zone_targets",
     },
     "TE": COMMON_FEATURES
+    | TREND_FEATURES
     | {
         "targets",
         "air_yards",
@@ -141,6 +161,20 @@ FEATURE_SOURCE_MAP = {
     "snap_share_proxy": "snap_share_proxy",
     "air_yards": "air_yards",
     "team_pass_rate": "team_pass_rate",
+    "points_per_game_slope_3yr": "points_per_game_slope_3yr",
+    "total_points_slope_3yr": "total_points_slope_3yr",
+    "opportunity_slope_3yr": "opportunity_slope_3yr",
+    "target_share_slope_3yr": "target_share_slope_3yr",
+    "carry_share_slope_3yr": "carry_share_slope_3yr",
+    "receiving_usage_slope_3yr": "receiving_usage_slope_3yr",
+    "wopr_slope_3yr": "wopr_slope_3yr",
+    "epa_slope_3yr": "epa_slope_3yr",
+    "efficiency_slope_3yr": "efficiency_slope_3yr",
+    "availability_rate_3yr": "availability_rate_3yr",
+    "weekly_volatility_3yr": "weekly_volatility_3yr",
+    "improving_3yr": "improving_3yr",
+    "declining_3yr": "declining_3yr",
+    "breakout_trajectory_3yr": "breakout_trajectory_3yr",
 }
 FORBIDDEN_TABLE_REFERENCES = {
     "weekly_metrics",
@@ -304,6 +338,210 @@ def default_formula(position: str) -> dict[str, Any]:
         "normalization": {"method": "position_percentile"},
         "source_flags": {},
     }
+
+
+def trend_formula_candidates(formula_set_id: str = "ranking_formula_set_v2_trend_2026_001") -> list[dict[str, Any]]:
+    candidate_specs = [
+        (
+            "QB",
+            "trend_balanced",
+            "QB Trend Balanced",
+            {
+                "opportunity_slope_3yr": 0.25,
+                "epa_slope_3yr": 0.25,
+                "efficiency_slope_3yr": 0.20,
+                "availability_rate_3yr": 0.15,
+                "declining_3yr": 0.15,
+            },
+        ),
+        (
+            "QB",
+            "trend_opportunity",
+            "QB Trend Opportunity",
+            {
+                "opportunity_slope_3yr": 0.35,
+                "usage_volume": 0.15,
+                "rushing_attempts": 0.20,
+                "availability_rate_3yr": 0.20,
+                "improving_3yr": 0.15,
+            },
+        ),
+        (
+            "QB",
+            "trend_efficiency",
+            "QB Trend Efficiency",
+            {
+                "epa_slope_3yr": 0.35,
+                "efficiency_slope_3yr": 0.25,
+                "success_rate": 0.15,
+                "team_epa_per_play": 0.15,
+                "weekly_volatility_3yr": 0.10,
+            },
+        ),
+        (
+            "RB",
+            "trend_balanced",
+            "RB Trend Balanced",
+            {
+                "opportunity_slope_3yr": 0.30,
+                "carry_share_slope_3yr": 0.20,
+                "epa_slope_3yr": 0.15,
+                "availability_rate_3yr": 0.20,
+                "declining_3yr": 0.15,
+            },
+        ),
+        (
+            "RB",
+            "trend_opportunity",
+            "RB Trend Opportunity",
+            {
+                "carry_share_slope_3yr": 0.30,
+                "targets": 0.15,
+                "usage_volume": 0.20,
+                "improving_3yr": 0.20,
+                "availability_rate_3yr": 0.15,
+            },
+        ),
+        (
+            "RB",
+            "trend_risk_adjusted",
+            "RB Trend Risk Adjusted",
+            {
+                "opportunity_slope_3yr": 0.25,
+                "efficiency_slope_3yr": 0.20,
+                "weekly_volatility_3yr": 0.20,
+                "availability_rate_3yr": 0.20,
+                "declining_3yr": 0.15,
+            },
+        ),
+        (
+            "WR",
+            "trend_balanced",
+            "WR Trend Balanced",
+            {
+                "target_share_slope_3yr": 0.25,
+                "receiving_usage_slope_3yr": 0.20,
+                "wopr_slope_3yr": 0.20,
+                "epa_slope_3yr": 0.20,
+                "availability_rate_3yr": 0.15,
+            },
+        ),
+        (
+            "WR",
+            "trend_breakout",
+            "WR Trend Breakout",
+            {
+                "target_share_slope_3yr": 0.30,
+                "wopr_slope_3yr": 0.25,
+                "breakout_trajectory_3yr": 0.20,
+                "improving_3yr": 0.15,
+                "air_yards": 0.10,
+            },
+        ),
+        (
+            "WR",
+            "trend_risk_adjusted",
+            "WR Trend Risk Adjusted",
+            {
+                "target_share_slope_3yr": 0.25,
+                "weekly_volatility_3yr": 0.20,
+                "availability_rate_3yr": 0.20,
+                "declining_3yr": 0.20,
+                "efficiency_slope_3yr": 0.15,
+            },
+        ),
+        (
+            "TE",
+            "trend_balanced",
+            "TE Trend Balanced",
+            {
+                "target_share_slope_3yr": 0.25,
+                "receiving_usage_slope_3yr": 0.20,
+                "team_pass_rate": 0.20,
+                "availability_rate_3yr": 0.20,
+                "declining_3yr": 0.15,
+            },
+        ),
+        (
+            "TE",
+            "trend_breakout",
+            "TE Trend Breakout",
+            {
+                "target_share_slope_3yr": 0.30,
+                "breakout_trajectory_3yr": 0.25,
+                "wopr_slope_3yr": 0.20,
+                "improving_3yr": 0.15,
+                "team_pass_rate": 0.10,
+            },
+        ),
+        (
+            "TE",
+            "trend_efficiency",
+            "TE Trend Efficiency",
+            {
+                "epa_slope_3yr": 0.25,
+                "efficiency_slope_3yr": 0.25,
+                "receiving_usage_slope_3yr": 0.20,
+                "weekly_volatility_3yr": 0.15,
+                "availability_rate_3yr": 0.15,
+            },
+        ),
+    ]
+    return [
+        build_candidate_row(
+            {
+                "version": "ranking_formula_v2_trend_2026_001",
+                "position": position,
+                "score_expression": "weighted_linear",
+                "features": list(weights),
+                "weights": dict(weights),
+                "normalization": {"method": "position_percentile"},
+                "source_flags": {"trend_features_available": True},
+            },
+            formula_name=name,
+            candidate_id=f"ranking_formula_{position.lower()}_{style}_v2_trend_2026_001",
+            formula_set_id=formula_set_id,
+            target_name=_target_name_for_position(position),
+            status="draft",
+        )
+        for position, style, name, weights in candidate_specs
+    ]
+
+
+def build_rolling_season_pairs(
+    *,
+    source_seasons: list[int] | tuple[int, ...],
+    target_seasons: list[int] | tuple[int, ...],
+    source_window_years: int = 3,
+    min_source_season: int = 2014,
+) -> list[dict[str, Any]]:
+    normalized_source_window_years = _normalize_source_window_years(source_window_years)
+    source_set = {int(season) for season in source_seasons}
+    target_set = {int(season) for season in target_seasons}
+    pairs: list[dict[str, Any]] = []
+    for target_season in sorted(target_set):
+        source_season = target_season - 1
+        if source_season not in source_set:
+            continue
+        source_window_start = max(min_source_season, source_season - normalized_source_window_years + 1)
+        source_window = [
+            season
+            for season in range(source_window_start, source_season + 1)
+            if season in source_set and season < target_season
+        ]
+        if not source_window:
+            continue
+        pairs.append(
+            {
+                "source_season": source_season,
+                "target_season": target_season,
+                "source_window_start": min(source_window),
+                "source_window_end": max(source_window),
+                "source_window_years": len(source_window),
+                "source_seasons": source_window,
+            }
+        )
+    return pairs
 
 
 def validate_formula(formula: Mapping[str, Any]) -> dict[str, Any]:
@@ -1018,6 +1256,8 @@ def run_no_lookahead_backtest(
     project_id: str = DEFAULT_PROJECT,
     dataset_id: str = DEFAULT_DATASET,
     backtest_version: str = DEFAULT_BACKTEST_VERSION,
+    source_window_years: int = 1,
+    candidate_family: str = "seeded",
     dry_run: bool = True,
     write: bool = False,
     limit: int | None = None,
@@ -1034,6 +1274,8 @@ def run_no_lookahead_backtest(
     normalized_positions = [_normalize_position(position) for position in positions]
     normalized_profiles = [_normalize_scoring_profile_id(profile) for profile in scoring_profile_ids]
     normalized_backtest_version = _normalize_backtest_version(backtest_version)
+    normalized_source_window_years = _normalize_source_window_years(source_window_years)
+    normalized_candidate_family = _normalize_candidate_family(candidate_family)
     validate_candidate_status(status)
     load_ranking_formula_set(
         client=client,
@@ -1049,6 +1291,8 @@ def run_no_lookahead_backtest(
         formula_set_id=formula_set_id,
         status=status,
     )
+    if normalized_candidate_family == "trend_v2":
+        candidates = trend_formula_candidates(formula_set_id=formula_set_id)
     candidates = [candidate for candidate in candidates if candidate["position"] in normalized_positions]
     if not candidates:
         raise FormulaValidationError("No matching seeded formula candidates found")
@@ -1082,7 +1326,8 @@ def run_no_lookahead_backtest(
             ),
             notes=(
                 f"backtest_version={normalized_backtest_version}; "
-                f"source_season={source_season}; target_season={target_season}; "
+                f"source_season={source_season}; source_window_years={normalized_source_window_years}; "
+                f"target_season={target_season}; "
                 f"target_weeks={target_week_start}-{target_week_end}; no_lookahead=true"
             ),
         )
@@ -1105,6 +1350,7 @@ def run_no_lookahead_backtest(
                 roster_format_id=roster_format_id,
                 project_id=project_id,
                 dataset_id=dataset_id,
+                source_window_years=normalized_source_window_years,
                 limit=limit,
             )
             target_name = _target_name_for_position(position)
@@ -1148,6 +1394,8 @@ def run_no_lookahead_backtest(
         "write": write,
         "formula_set_id": formula_set_id,
         "backtest_version": normalized_backtest_version,
+        "source_window_years": normalized_source_window_years,
+        "candidate_family": normalized_candidate_family,
         "candidate_count": len(candidates),
         "scoring_profile_ids": normalized_profiles,
         "positions": normalized_positions,
@@ -1193,6 +1441,7 @@ def load_no_lookahead_feature_rows(
     roster_format_id: str,
     project_id: str = DEFAULT_PROJECT,
     dataset_id: str = DEFAULT_DATASET,
+    source_window_years: int = 1,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     normalized_position = _normalize_position(position)
@@ -1200,10 +1449,13 @@ def load_no_lookahead_feature_rows(
         raise FormulaValidationError("target_season must be after source_season to avoid lookahead")
     if target_week_start > target_week_end:
         raise FormulaValidationError("target_week_start must be less than or equal to target_week_end")
+    normalized_source_window_years = _normalize_source_window_years(source_window_years)
+    source_window_start = max(int(source_season) - normalized_source_window_years + 1, 2014)
     bounded_limit = None if limit is None or int(limit) <= 0 else min(int(limit), MAX_REAL_DATA_LIMIT)
     limit_sql = "\nLIMIT @limit" if bounded_limit else ""
     query_parameters = [
         _scalar_param("position", "STRING", normalized_position),
+        _scalar_param("source_window_start", "INT64", int(source_window_start)),
         _scalar_param("source_season", "INT64", int(source_season)),
         _scalar_param("target_season", "INT64", int(target_season)),
         _scalar_param("target_week_start", "INT64", int(target_week_start)),
@@ -1215,13 +1467,29 @@ def load_no_lookahead_feature_rows(
     if bounded_limit:
         query_parameters.append(_scalar_param("limit", "INT64", bounded_limit))
     query = f"""
-WITH source_features AS (
+CREATE TEMP FUNCTION _slope(points ARRAY<STRUCT<season INT64, value FLOAT64>>)
+RETURNS FLOAT64
+LANGUAGE js AS '''
+  const filtered = points
+    .filter((point) => point.value !== null && Number.isFinite(Number(point.value)))
+    .sort((left, right) => Number(left.season) - Number(right.season));
+  if (filtered.length < 2) return null;
+  const first = filtered[0];
+  const last = filtered[filtered.length - 1];
+  const seasonSpan = Number(last.season) - Number(first.season);
+  if (!Number.isFinite(seasonSpan) || seasonSpan === 0) return null;
+  return (Number(last.value) - Number(first.value)) / seasonSpan;
+''';
+WITH season_features AS (
     SELECT
         REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') AS player_key,
         metrics.player_id_internal,
         ANY_VALUE(COALESCE(metrics.player_name, truth.player_display_name, truth.player_name)) AS player_name,
         metrics.position,
+        metrics.season,
         ANY_VALUE(COALESCE(metrics.team, truth.team)) AS source_team,
+        AVG(source_profile.total_fantasy_points) AS points_per_game,
+        SUM(source_profile.total_fantasy_points) AS total_points,
         AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) AS recent_points_avg,
         AVG(metrics.targets) AS targets,
         AVG(metrics.carries) AS carries,
@@ -1234,6 +1502,9 @@ WITH source_features AS (
         AVG(metrics.carries) AS rushing_attempts,
         AVG(metrics.success_rate) AS rush_success_rate,
         AVG(metrics.targets) AS receiving_usage,
+        AVG(metrics.target_share) AS target_share,
+        AVG(metrics.carry_share) AS carry_share,
+        AVG(metrics.wopr) AS wopr,
         AVG(metrics.cpoe) AS cpoe,
         AVG(metrics.opportunities) AS usage_volume,
         AVG(metrics.epa_per_opportunity) AS epa_per_play,
@@ -1243,6 +1514,8 @@ WITH source_features AS (
         AVG(metrics.snap_share) AS snap_share_proxy,
         AVG(metrics.air_yards_share) AS air_yards,
         AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
+        SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) AS availability_rate,
+        STDDEV(metrics.opportunities) AS weekly_volatility,
         ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
         ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags
     FROM `{table_id(project_id, dataset_id, "player_week_advanced_metrics")}` metrics
@@ -1258,11 +1531,62 @@ WITH source_features AS (
      AND COALESCE(source_profile.league_type_id, @league_type_id) = @league_type_id
      AND COALESCE(source_profile.roster_format_id, @roster_format_id) = @roster_format_id
     WHERE metrics.position = @position
-      AND metrics.season = @source_season
+      AND metrics.season BETWEEN @source_window_start AND @source_season
+      AND metrics.season < @target_season
       AND metrics.scoring_profile_id = 'ppr'
       AND metrics.league_type_id = @league_type_id
       AND metrics.roster_format_id = @roster_format_id
-    GROUP BY metrics.player_id_internal, metrics.position
+    GROUP BY metrics.player_id_internal, metrics.position, metrics.season
+),
+source_features AS (
+    SELECT
+        player_key,
+        ANY_VALUE(player_id_internal) AS player_id_internal,
+        ANY_VALUE(player_name) AS player_name,
+        position,
+        ANY_VALUE(source_team HAVING MAX season) AS source_team,
+        AVG(recent_points_avg) AS recent_points_avg,
+        AVG(targets) AS targets,
+        AVG(carries) AS carries,
+        AVG(receiving_yards) AS receiving_yards,
+        AVG(receiving_epa) AS receiving_epa,
+        AVG(red_zone_targets) AS red_zone_targets,
+        AVG(success_rate) AS success_rate,
+        AVG(passing_success_rate) AS passing_success_rate,
+        AVG(dropbacks) AS dropbacks,
+        AVG(rushing_attempts) AS rushing_attempts,
+        AVG(rush_success_rate) AS rush_success_rate,
+        AVG(receiving_usage) AS receiving_usage,
+        AVG(cpoe) AS cpoe,
+        AVG(usage_volume) AS usage_volume,
+        AVG(epa_per_play) AS epa_per_play,
+        AVG(passing_epa_per_play) AS passing_epa_per_play,
+        AVG(red_zone_opportunities) AS red_zone_opportunities,
+        AVG(goal_line_opportunities) AS goal_line_opportunities,
+        AVG(snap_share_proxy) AS snap_share_proxy,
+        AVG(air_yards) AS air_yards,
+        AVG(team_pass_rate) AS team_pass_rate,
+        _slope(ARRAY_AGG(STRUCT(season, points_per_game AS value) ORDER BY season)) AS points_per_game_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, total_points AS value) ORDER BY season)) AS total_points_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) AS opportunity_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, target_share AS value) ORDER BY season)) AS target_share_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, carry_share AS value) ORDER BY season)) AS carry_share_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, receiving_usage AS value) ORDER BY season)) AS receiving_usage_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, wopr AS value) ORDER BY season)) AS wopr_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, epa_per_play AS value) ORDER BY season)) AS epa_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, success_rate AS value) ORDER BY season)) AS efficiency_slope_3yr,
+        AVG(availability_rate) AS availability_rate_3yr,
+        AVG(weekly_volatility) AS weekly_volatility_3yr,
+        IF(_slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) > 0
+           AND _slope(ARRAY_AGG(STRUCT(season, epa_per_play AS value) ORDER BY season)) > 0, 1.0, 0.0) AS improving_3yr,
+        IF(_slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) < 0
+           AND _slope(ARRAY_AGG(STRUCT(season, epa_per_play AS value) ORDER BY season)) < 0, 1.0, 0.0) AS declining_3yr,
+        IF(_slope(ARRAY_AGG(STRUCT(season, target_share AS value) ORDER BY season)) > 0
+           OR _slope(ARRAY_AGG(STRUCT(season, carry_share AS value) ORDER BY season)) > 0, 1.0, 0.0) AS breakout_trajectory_3yr,
+        ANY_VALUE(metrics_source_freshness_json HAVING MAX season) AS metrics_source_freshness_json,
+        ANY_VALUE(metrics_missing_flags HAVING MAX season) AS metrics_missing_flags
+    FROM season_features
+    GROUP BY player_key, position
 ),
 packet_context AS (
     SELECT
@@ -1336,7 +1660,21 @@ SELECT
     COALESCE(source.team_pass_rate, packet.packet_team_pass_rate) AS team_pass_rate,
     source.metrics_source_freshness_json,
     source.metrics_missing_flags,
-    packet.packet_source_freshness_json
+    packet.packet_source_freshness_json,
+    source.points_per_game_slope_3yr,
+    source.total_points_slope_3yr,
+    source.opportunity_slope_3yr,
+    source.target_share_slope_3yr,
+    source.carry_share_slope_3yr,
+    source.receiving_usage_slope_3yr,
+    source.wopr_slope_3yr,
+    source.epa_slope_3yr,
+    source.efficiency_slope_3yr,
+    source.availability_rate_3yr,
+    source.weekly_volatility_3yr,
+    source.improving_3yr,
+    source.declining_3yr,
+    source.breakout_trajectory_3yr
 FROM target_points target
 JOIN source_features source
   ON target.player_key = source.player_key
@@ -1507,16 +1845,19 @@ def build_summary_from_results(
         top_n_hit_rate = sum(1 for row in target_rows if row["target_hit"]) / len(target_rows)
     rank_correlation = _rank_correlation(scored_rows)
     pairwise_win_rate = _pairwise_win_rate(scored_rows)
+    high_confidence_pairwise_win_rate = _pairwise_win_rate(scored_rows, min_predicted_score_delta=10.0)
     mean_absolute_error = _mean_absolute_error(scored_rows)
     top_n_capture = _top_n_capture_metrics(scored_rows, candidate_row["position"], target_name)
     metric_payload = {
         "sample_size": sample_size,
         "pairwise_win_rate": pairwise_win_rate,
+        "high_confidence_pairwise_win_rate": high_confidence_pairwise_win_rate,
         "top_n_hit_rate": top_n_capture["top_n_hit_rate"] if top_n_capture["top_n_hit_rate"] is not None else top_n_hit_rate,
         "rank_correlation": rank_correlation,
         "mean_absolute_error": mean_absolute_error,
         "regret_score": top_n_capture["regret_score"],
         "actual_points_captured_rate": top_n_capture["actual_points_captured_rate"],
+        "value_over_replacement_captured_rate": top_n_capture["value_over_replacement_captured_rate"],
         "missing_input_rate": sum(missing_rates) / len(missing_rates) if missing_rates else None,
         "expected_feature_count": len(feature_names),
         "available_feature_count": len(available_features),
@@ -1525,9 +1866,11 @@ def build_summary_from_results(
         "top_missing_features": top_missing_features,
         "null_metric_reasons": {
             "pairwise_win_rate": None if pairwise_win_rate is not None else "fewer than two scored comparison rows",
+            "high_confidence_pairwise_win_rate": None if high_confidence_pairwise_win_rate is not None else "fewer than two high-confidence scored comparison rows",
             "mean_absolute_error": None if mean_absolute_error is not None else "fewer than one scored row with ranks",
             "regret_score": None if top_n_capture["regret_score"] is not None else "top-N comparison unavailable",
             "actual_points_captured_rate": None if top_n_capture["actual_points_captured_rate"] is not None else "top-N comparison unavailable",
+            "value_over_replacement_captured_rate": None if top_n_capture["value_over_replacement_captured_rate"] is not None else "replacement comparison unavailable",
         },
     }
     return {
@@ -1824,6 +2167,26 @@ def _safe_float(value: Any) -> float | None:
 
 
 def _feature_value_to_score(feature: str, value: float) -> float:
+    if feature in {
+        "points_per_game_slope_3yr",
+        "total_points_slope_3yr",
+        "opportunity_slope_3yr",
+        "targets_slope_3yr",
+        "receiving_usage_slope_3yr",
+        "epa_slope_3yr",
+        "efficiency_slope_3yr",
+    }:
+        return max(0.0, min(100.0, 50.0 + (value * 10.0)))
+    if feature in {"target_share_slope_3yr", "carry_share_slope_3yr", "wopr_slope_3yr"}:
+        return max(0.0, min(100.0, 50.0 + (value * 250.0)))
+    if feature == "availability_rate_3yr":
+        return max(0.0, min(100.0, value * 100.0 if value <= 1 else value))
+    if feature == "weekly_volatility_3yr":
+        return max(0.0, min(100.0, 100.0 - (value * 10.0)))
+    if feature in {"improving_3yr", "breakout_trajectory_3yr"}:
+        return 100.0 if value > 0 else 0.0
+    if feature == "declining_3yr":
+        return 0.0 if value > 0 else 100.0
     if feature in {"success_rate", "cpoe", "snap_share_proxy"}:
         return max(0.0, min(100.0, value * 100 if value <= 1 else value))
     if feature in {"actual_points", "fantasy_points_ppr", "recent_points_avg"}:
@@ -1904,7 +2267,7 @@ def _rank_correlation(rows: list[Mapping[str, Any]]) -> float | None:
     return _pearson(predicted, actual)
 
 
-def _pairwise_win_rate(rows: list[Mapping[str, Any]]) -> float | None:
+def _pairwise_win_rate(rows: list[Mapping[str, Any]], *, min_predicted_score_delta: float = 0.0) -> float | None:
     grouped: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
     for row in rows:
         if (
@@ -1921,11 +2284,20 @@ def _pairwise_win_rate(rows: list[Mapping[str, Any]]) -> float | None:
         ordered = sorted(week_rows, key=lambda row: int(row["predicted_rank_position"]))
         for left_index, left in enumerate(ordered):
             left_points = _safe_float(left.get("actual_points"))
+            left_score = _safe_float(left.get("predicted_score"))
             if left_points is None:
                 continue
             for right in ordered[left_index + 1 :]:
                 right_points = _safe_float(right.get("actual_points"))
+                right_score = _safe_float(right.get("predicted_score"))
                 if right_points is None or left_points == right_points:
+                    continue
+                if (
+                    min_predicted_score_delta > 0
+                    and left_score is not None
+                    and right_score is not None
+                    and abs(left_score - right_score) < min_predicted_score_delta
+                ):
                     continue
                 comparisons += 1
                 if left_points > right_points:
@@ -1993,12 +2365,44 @@ def _top_n_capture_metrics(
         predicted_points_total += sum(_safe_float(row.get("actual_points")) or 0.0 for row in predicted_top)
         actual_points_total += sum(_safe_float(row.get("actual_points")) or 0.0 for row in actual_top)
     if actual_points_total <= 0:
-        return {"top_n_hit_rate": None, "regret_score": None, "actual_points_captured_rate": None}
+        return {
+            "top_n_hit_rate": None,
+            "regret_score": None,
+            "actual_points_captured_rate": None,
+            "value_over_replacement_captured_rate": None,
+        }
     return {
         "top_n_hit_rate": sum(hit_rates) / len(hit_rates) if hit_rates else None,
         "regret_score": max(actual_points_total - predicted_points_total, 0.0),
         "actual_points_captured_rate": predicted_points_total / actual_points_total,
+        "value_over_replacement_captured_rate": _value_over_replacement_captured_rate(grouped, top_n),
     }
+
+
+def _value_over_replacement_captured_rate(grouped_rows: Mapping[tuple[int, int], list[Mapping[str, Any]]], top_n: int) -> float | None:
+    predicted_value_total = 0.0
+    actual_value_total = 0.0
+    for week_rows in grouped_rows.values():
+        actual_sorted = sorted(week_rows, key=lambda row: _safe_float(row.get("actual_points")) or -9999.0, reverse=True)
+        predicted_sorted = sorted(week_rows, key=lambda row: int(row["predicted_rank_position"]))
+        if len(actual_sorted) <= top_n:
+            continue
+        replacement_points = _safe_float(actual_sorted[top_n].get("actual_points"))
+        if replacement_points is None:
+            continue
+        actual_top = actual_sorted[:top_n]
+        predicted_top = predicted_sorted[:top_n]
+        predicted_value_total += sum(
+            max((_safe_float(row.get("actual_points")) or 0.0) - replacement_points, 0.0)
+            for row in predicted_top
+        )
+        actual_value_total += sum(
+            max((_safe_float(row.get("actual_points")) or 0.0) - replacement_points, 0.0)
+            for row in actual_top
+        )
+    if actual_value_total <= 0:
+        return None
+    return predicted_value_total / actual_value_total
 
 
 def _top_n_for_target(position: str, target_name: str) -> int:
@@ -2125,6 +2529,21 @@ def _normalize_backtest_version(backtest_version: str) -> str:
     return value
 
 
+def _normalize_source_window_years(source_window_years: int) -> int:
+    value = int(source_window_years)
+    if value < 1 or value > 10:
+        raise FormulaValidationError("source_window_years must be between 1 and 10")
+    return value
+
+
+def _normalize_candidate_family(candidate_family: str) -> str:
+    value = str(candidate_family or "").strip().lower()
+    _reject_executable_text(value)
+    if value not in {"seeded", "trend_v2"}:
+        raise FormulaValidationError(f"Unsupported candidate_family: {candidate_family}")
+    return value
+
+
 def _target_name_for_position(position: str) -> str:
     return "top_12_position" if _normalize_position(position) in {"QB", "TE"} else "top_24_position"
 
@@ -2193,6 +2612,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--from-bigquery-candidates", action="store_true")
     parser.add_argument("--formula-set-id")
     parser.add_argument("--backtest-version", default=DEFAULT_BACKTEST_VERSION)
+    parser.add_argument("--source-window-years", type=int, default=1)
+    parser.add_argument("--candidate-family", default="seeded", choices=("seeded", "trend_v2"))
     parser.add_argument("--status", default="draft")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--scoring-profile-id", default="ppr")
@@ -2231,6 +2652,8 @@ def main(argv: list[str] | None = None) -> int:
                 project_id=args.project,
                 dataset_id=args.dataset,
                 backtest_version=args.backtest_version,
+                source_window_years=args.source_window_years,
+                candidate_family=args.candidate_family,
                 dry_run=args.dry_run or not args.write,
                 write=args.write,
                 limit=args.limit,
@@ -2279,6 +2702,8 @@ def _cli_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "write": result.get("write"),
         "candidate_count": result.get("candidate_count"),
         "backtest_version": result.get("backtest_version"),
+        "source_window_years": result.get("source_window_years"),
+        "candidate_family": result.get("candidate_family"),
         "positions": result.get("positions"),
         "scoring_profile_ids": result.get("scoring_profile_ids"),
         "source_season": result.get("source_season"),

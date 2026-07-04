@@ -444,6 +444,60 @@ class RankingFormulaBacktestTests(unittest.TestCase):
     def test_air_yards_share_proxy_scores_as_percentage(self):
         self.assertEqual(rfb._feature_value_to_score("air_yards", 0.42), 42.0)
 
+    def test_trend_formula_candidates_validate_without_blocked_metrics(self):
+        candidates = rfb.trend_formula_candidates("set-v2")
+
+        self.assertEqual(len(candidates), 12)
+        self.assertEqual(
+            {position: sum(1 for row in candidates if row["position"] == position) for position in rfb.POSITIONS},
+            {"QB": 3, "RB": 3, "WR": 3, "TE": 3},
+        )
+        for row in candidates:
+            formula = rfb.validate_formula(json.loads(row["formula_json"]))
+            self.assertEqual(formula["version"], "ranking_formula_v2_trend_2026_001")
+            self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
+
+    def test_three_year_improving_player_scores_above_declining_player(self):
+        formula = rfb.validate_formula(
+            {
+                "version": "ranking_formula_v2_trend_2026_001",
+                "position": "WR",
+                "score_expression": "weighted_linear",
+                "features": ["target_share_slope_3yr", "improving_3yr", "declining_3yr"],
+                "weights": {"target_share_slope_3yr": 0.5, "improving_3yr": 0.25, "declining_3yr": 0.25},
+                "normalization": {"method": "position_percentile"},
+                "source_flags": {"trend_features_available": True},
+            }
+        )
+
+        improving = rfb.evaluate_formula_for_feature_row(
+            formula,
+            {"target_share_slope_3yr": 0.04, "improving_3yr": 1.0, "declining_3yr": 0.0},
+        )
+        declining = rfb.evaluate_formula_for_feature_row(
+            formula,
+            {"target_share_slope_3yr": -0.04, "improving_3yr": 0.0, "declining_3yr": 1.0},
+        )
+
+        self.assertGreater(improving["predicted_score"], declining["predicted_score"])
+
+    def test_missing_trend_history_is_explicit(self):
+        formula = rfb.validate_formula(
+            {
+                "version": "ranking_formula_v2_trend_2026_001",
+                "position": "RB",
+                "score_expression": "weighted_linear",
+                "features": ["opportunity_slope_3yr", "availability_rate_3yr"],
+                "weights": {"opportunity_slope_3yr": 0.5, "availability_rate_3yr": 0.5},
+                "normalization": {"method": "position_percentile"},
+                "source_flags": {"trend_features_available": True},
+            }
+        )
+
+        result = rfb.evaluate_formula_for_feature_row(formula, {"availability_rate_3yr": 0.8})
+
+        self.assertIn("opportunity_slope_3yr", result["missing_features"])
+
     def test_unavailable_supported_feature_stays_missing_not_zero_filled(self):
         formula = {
             "version": "ranking_formula_v0_2026_001",
@@ -579,6 +633,30 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertEqual(result["backtest_version"], "v1")
         self.assertEqual(result["backtest_run_rows"][0]["backtest_run_id"], "ranking_backtest_v1_2024_to_2025_ppr")
 
+    def test_no_lookahead_backtest_uses_trend_candidates_when_requested(self):
+        formula_set = self._formula_set()
+        fake = _SequencedFakeClient([[formula_set], [], []])
+
+        result = rfb.run_no_lookahead_backtest(
+            client=fake,
+            formula_set_id="set-1",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_ids=["ppr"],
+            positions=["WR"],
+            backtest_version="v2_trend_rolling",
+            source_window_years=3,
+            candidate_family="trend_v2",
+            dry_run=True,
+        )
+
+        self.assertEqual(result["candidate_family"], "trend_v2")
+        self.assertEqual(result["source_window_years"], 3)
+        self.assertEqual(result["candidate_count"], 3)
+        self.assertTrue(all(row["candidate_id"].endswith("_v2_trend_2026_001") for row in result["candidate_rows"]))
+
     def test_no_lookahead_feature_query_uses_safe_v1_source_mappings(self):
         fake = _FakeClient(rows=[])
 
@@ -601,6 +679,114 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertIn("$.neutral_pass_rate", sql)
         self.assertIn("AVG(metrics.carries) AS rushing_attempts", sql)
         self.assertIn("AVG(metrics.air_yards_share) AS air_yards", sql)
+
+    def test_no_lookahead_feature_query_excludes_target_season_and_uses_source_window(self):
+        fake = _FakeClient(rows=[])
+
+        rfb.load_no_lookahead_feature_rows(
+            client=fake,
+            position="WR",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            source_window_years=3,
+        )
+
+        sql, job_config = fake.queries[0]
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["source_window_start"], 2022)
+        self.assertEqual(params["source_season"], 2024)
+        self.assertEqual(params["target_season"], 2025)
+        self.assertIn("metrics.season BETWEEN @source_window_start AND @source_season", sql)
+        self.assertIn("metrics.season < @target_season", sql)
+        self.assertIn("points_per_game_slope_3yr", sql)
+        self.assertIn("breakout_trajectory_3yr", sql)
+
+    def test_rolling_pairs_require_target_coverage_and_exclude_target_season(self):
+        pairs = rfb.build_rolling_season_pairs(
+            source_seasons=[2014, 2015, 2016, 2024],
+            target_seasons=[2015, 2016, 2025],
+            source_window_years=3,
+        )
+
+        self.assertEqual(
+            pairs,
+            [
+                {
+                    "source_season": 2014,
+                    "target_season": 2015,
+                    "source_window_start": 2014,
+                    "source_window_end": 2014,
+                    "source_window_years": 1,
+                    "source_seasons": [2014],
+                },
+                {
+                    "source_season": 2015,
+                    "target_season": 2016,
+                    "source_window_start": 2014,
+                    "source_window_end": 2015,
+                    "source_window_years": 2,
+                    "source_seasons": [2014, 2015],
+                },
+                {
+                    "source_season": 2024,
+                    "target_season": 2025,
+                    "source_window_start": 2024,
+                    "source_window_end": 2024,
+                    "source_window_years": 1,
+                    "source_seasons": [2024],
+                },
+            ],
+        )
+        self.assertTrue(all(pair["target_season"] not in pair["source_seasons"] for pair in pairs))
+
+    def test_high_confidence_and_vor_metrics_are_in_summary_json(self):
+        candidate = rfb.build_candidate_row(
+            {
+                "version": "ranking_formula_v2_trend_2026_001",
+                "position": "QB",
+                "score_expression": "weighted_linear",
+                "features": ["availability_rate_3yr"],
+                "weights": {"availability_rate_3yr": 1.0},
+                "normalization": {"method": "position_percentile"},
+                "source_flags": {"trend_features_available": True},
+            },
+            formula_name="QB v2",
+            candidate_id="qb-v2",
+        )
+        result_rows = []
+        for index in range(14):
+            result_rows.append(
+                {
+                    "season": 2025,
+                    "week": 1,
+                    "player_id_internal": f"p{index}",
+                    "predicted_score": 100 - index,
+                    "predicted_rank_position": index + 1,
+                    "actual_points": 30 - index,
+                    "actual_rank_position": index + 1,
+                    "target_hit": index < 12,
+                    "missing_flags_json": json.dumps({"missing_features": []}),
+                }
+            )
+
+        summary = rfb.build_summary_from_results(
+            candidate_row=candidate,
+            result_rows=result_rows,
+            backtest_run_id="run",
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            target_name="position_default_top_n",
+        )
+        metric_json = json.loads(summary["metric_json"])
+
+        self.assertIn("high_confidence_pairwise_win_rate", metric_json)
+        self.assertIn("value_over_replacement_captured_rate", metric_json)
 
     def test_no_lookahead_dry_run_writes_nothing(self):
         formula_set = self._formula_set()

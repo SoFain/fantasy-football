@@ -58,6 +58,19 @@ class RankingFormulaSeedTests(unittest.TestCase):
         self.assertEqual(summary["candidate_count"], 12)
         self.assertEqual(summary["target_tables"], ["ranking_formula_candidates", "ranking_formula_sets"])
 
+    def test_trend_seed_payload_is_draft_and_separate_from_baseline(self):
+        payload = seed.build_trend_seed_payload()
+        candidates = payload["candidate_rows"]
+
+        self.assertEqual(payload["formula_set_row"]["formula_set_id"], seed.TREND_FORMULA_SET_ID)
+        self.assertEqual(len(candidates), 12)
+        self.assertTrue(all(row["candidate_id"].endswith("_v2_trend_2026_001") for row in candidates))
+        for row in candidates:
+            self.assertEqual(row["status"], "draft")
+            formula = json.loads(row["formula_json"])
+            self.assertEqual(formula["version"], "ranking_formula_v2_trend_2026_001")
+            rfb.validate_formula(formula)
+
     def test_apply_without_gate_fails_closed(self):
         fake = _FakeClient()
         with patch.dict("os.environ", {}, clear=True):

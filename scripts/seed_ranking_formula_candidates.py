@@ -23,6 +23,9 @@ FORMULA_VERSION = "ranking_formula_v0_2026_001"
 FORMULA_SET_ID = "ranking_formula_set_v0_2026_001"
 FORMULA_SET_VERSION = "formula_set_v0_2026_001"
 FORMULA_SET_NAME = "Initial 2026 Draft Ranking Formula Set"
+TREND_FORMULA_SET_ID = "ranking_formula_set_v2_trend_2026_001"
+TREND_FORMULA_SET_VERSION = "formula_set_v2_trend_2026_001"
+TREND_FORMULA_SET_NAME = "Trend-Aware 2026 Draft Ranking Formula Set"
 
 BASELINE_CANDIDATES = {
     "QB": "ranking_formula_qb_balanced_v0_2026_001",
@@ -198,14 +201,44 @@ def build_seed_payload() -> dict[str, Any]:
     return {"candidate_rows": candidate_rows, "formula_set_row": formula_set_row}
 
 
+def build_trend_seed_payload() -> dict[str, Any]:
+    candidate_rows = rfb.trend_formula_candidates(formula_set_id=TREND_FORMULA_SET_ID)
+    baseline_by_position = {
+        position: next(
+            row["candidate_id"]
+            for row in candidate_rows
+            if row["position"] == position and row["candidate_id"].startswith(f"ranking_formula_{position.lower()}_trend_balanced")
+        )
+        for position in rfb.POSITIONS
+    }
+    formula_set_row = {
+        "formula_set_id": TREND_FORMULA_SET_ID,
+        "formula_set_name": TREND_FORMULA_SET_NAME,
+        "formula_set_version": TREND_FORMULA_SET_VERSION,
+        "qb_candidate_id": baseline_by_position["QB"],
+        "rb_candidate_id": baseline_by_position["RB"],
+        "wr_candidate_id": baseline_by_position["WR"],
+        "te_candidate_id": baseline_by_position["TE"],
+        "status": "draft",
+        "description": "Trend-aware draft grouping for backtest-only ranking formula evaluation.",
+        "created_by": rfb.CREATED_BY,
+        "created_at": _now(),
+        "updated_at": None,
+        "notes": "Phase 32.3 trend-aware backtest candidates. Not a champion selection.",
+    }
+    _validate_payload(candidate_rows, formula_set_row)
+    return {"candidate_rows": candidate_rows, "formula_set_row": formula_set_row}
+
+
 def apply_seed(
     *,
     project_id: str = rfb.DEFAULT_PROJECT,
     dataset_id: str = rfb.DEFAULT_DATASET,
     client: Any | None = None,
+    candidate_family: str = "baseline",
 ) -> dict[str, Any]:
     rfb.require_write_authorization()
-    payload = build_seed_payload()
+    payload = _payload_for_family(candidate_family)
     if client is None:
         from google.cloud import bigquery
 
@@ -227,6 +260,14 @@ def apply_seed(
         "formula_set_id": payload["formula_set_row"]["formula_set_id"],
         "target_tables": ["ranking_formula_candidates", "ranking_formula_sets"],
     }
+
+
+def _payload_for_family(candidate_family: str) -> dict[str, Any]:
+    if candidate_family == "baseline":
+        return build_seed_payload()
+    if candidate_family == "trend_v2":
+        return build_trend_seed_payload()
+    raise ValueError(f"Unsupported candidate_family: {candidate_family}")
 
 
 def summarize_payload(payload: Mapping[str, Any], *, wrote: bool) -> dict[str, Any]:
@@ -369,16 +410,17 @@ def _now() -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Seed draft ranking formula candidates.")
     parser.add_argument("--apply", action="store_true", help="Write draft seed rows with the ranking write gate enabled.")
+    parser.add_argument("--candidate-family", default="baseline", choices=("baseline", "trend_v2"))
     parser.add_argument("--project", default=rfb.DEFAULT_PROJECT)
     parser.add_argument("--dataset", default=rfb.DEFAULT_DATASET)
     args = parser.parse_args(argv)
 
-    payload = build_seed_payload()
+    payload = _payload_for_family(args.candidate_family)
     if not args.apply:
         print(json.dumps(summarize_payload(payload, wrote=False), indent=2, sort_keys=True))
         return 0
 
-    result = apply_seed(project_id=args.project, dataset_id=args.dataset)
+    result = apply_seed(project_id=args.project, dataset_id=args.dataset, candidate_family=args.candidate_family)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
