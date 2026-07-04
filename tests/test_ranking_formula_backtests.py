@@ -472,6 +472,246 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertTrue(target_report["target_available"])
         self.assertEqual(target_report["target_row_count"], 1)
 
+    def test_no_lookahead_backtest_requires_future_target_season(self):
+        with self.assertRaisesRegex(rfb.FormulaValidationError, "avoid lookahead"):
+            rfb.run_no_lookahead_backtest(
+                client=_FakeClient(),
+                formula_set_id="set-1",
+                source_season=2025,
+                target_season=2025,
+                target_week_start=1,
+                target_week_end=18,
+                scoring_profile_ids=["ppr"],
+                positions=["QB"],
+            )
+
+    def test_no_lookahead_backtest_evaluates_three_candidates_for_profile(self):
+        formula_set = self._formula_set()
+        candidates = [
+            rfb.build_candidate_row(
+                rfb.default_formula("QB"),
+                formula_name=f"QB {index}",
+                candidate_id=f"qb-{index}",
+                formula_set_id="set-1",
+            )
+            for index in range(3)
+        ]
+        feature_rows = [
+            self._feature_row("00-1", "QB One", 28.0, 0.22),
+            self._feature_row("00-2", "QB Two", 18.0, 0.10),
+        ]
+        fake = _SequencedFakeClient([[formula_set], candidates, feature_rows])
+
+        result = rfb.run_no_lookahead_backtest(
+            client=fake,
+            formula_set_id="set-1",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_ids=["ppr"],
+            positions=["QB"],
+            dry_run=True,
+        )
+
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["candidate_count"], 3)
+        self.assertEqual(len(result["backtest_run_rows"]), 1)
+        self.assertEqual(len(result["result_rows"]), 6)
+        self.assertEqual(len(result["candidate_summary_rows"]), 3)
+        self.assertEqual(result["backtest_run_rows"][0]["backtest_run_id"], "ranking_backtest_v0_2024_to_2025_ppr")
+        self.assertEqual(result["result_rows"][0]["season"], 2025)
+        self.assertEqual(result["result_rows"][0]["scoring_profile_id"], "ppr")
+
+    def test_no_lookahead_dry_run_writes_nothing(self):
+        formula_set = self._formula_set()
+        candidates = [
+            rfb.build_candidate_row(
+                rfb.default_formula("QB"),
+                formula_name=f"QB {index}",
+                candidate_id=f"qb-{index}",
+                formula_set_id="set-1",
+            )
+            for index in range(3)
+        ]
+        fake = _SequencedFakeClient([[formula_set], candidates, []])
+
+        rfb.run_no_lookahead_backtest(
+            client=fake,
+            formula_set_id="set-1",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_ids=["ppr"],
+            positions=["QB"],
+            dry_run=True,
+        )
+
+        self.assertFalse(hasattr(fake, "loaded"))
+
+    def test_no_lookahead_write_fails_closed_without_gate(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(PermissionError, rfb.WRITE_GATE):
+                rfb.run_no_lookahead_backtest(
+                    client=_FakeClient(),
+                    formula_set_id="set-1",
+                    source_season=2024,
+                    target_season=2025,
+                    target_week_start=1,
+                    target_week_end=18,
+                    scoring_profile_ids=["ppr"],
+                    positions=["QB"],
+                    dry_run=False,
+                    write=True,
+                )
+
+    def test_save_executed_backtest_writes_only_allowed_backtest_tables(self):
+        run_row = rfb.build_backtest_run_row(
+            candidate_count=1,
+            formula_set_id="set-1",
+            formula_version="v1",
+            season_start=2024,
+            season_end=2025,
+            week_start=1,
+            week_end=18,
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            target_name="position_default_top_n",
+            dry_run=False,
+            status="complete",
+            backtest_run_id="run-1",
+        )
+        result_row = {
+            "backtest_run_id": "run-1",
+            "candidate_id": "candidate-qb",
+            "formula_set_id": "set-1",
+            "formula_version": "v1",
+            "position": "QB",
+            "season": 2025,
+            "week": 1,
+            "player_id_internal": "00-1",
+            "player_name": "QB One",
+            "team": "ABC",
+            "scoring_profile_id": "ppr",
+            "league_type_id": "redraft",
+            "roster_format_id": "one_qb",
+            "predicted_score": 88.0,
+            "predicted_rank_position": 1,
+            "actual_points": 30.0,
+            "actual_rank_position": 1,
+            "target_name": "top_12_position",
+            "target_hit": True,
+            "win_rate": 1.0,
+            "feature_values_json": "{}",
+            "result_json": "{}",
+            "missing_flags_json": "{\"missing_features\":[]}",
+            "source_freshness_json": "{}",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        summary_row = rfb.build_summary_from_results(
+            candidate_row=rfb.build_candidate_row(
+                rfb.default_formula("QB"),
+                formula_name="QB",
+                candidate_id="candidate-qb",
+                formula_set_id="set-1",
+            ),
+            result_rows=[result_row],
+            backtest_run_id="run-1",
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+            target_name="top_12_position",
+        )
+        fake = _FakeClient()
+
+        summary = rfb.save_executed_backtest(
+            {
+                "backtest_run_rows": [run_row],
+                "result_rows": [result_row],
+                "candidate_summary_rows": [summary_row],
+            },
+            project_id="p",
+            dataset_id="d",
+            client=fake,
+        )
+
+        self.assertEqual(summary["target_tables"], [
+            "ranking_backtest_runs",
+            "ranking_backtest_results",
+            "ranking_backtest_candidate_summaries",
+        ])
+        loaded_tables = [table for _, table in fake.loaded]
+        self.assertIn("p.d.ranking_backtest_runs", loaded_tables)
+        self.assertIn("p.d.ranking_backtest_results", loaded_tables)
+        self.assertIn("p.d.ranking_backtest_candidate_summaries", loaded_tables)
+        self.assertNotIn("p.d.ranking_formula_candidates", loaded_tables)
+        self.assertNotIn("p.d.ranking_formula_champions", loaded_tables)
+
+    def test_champion_recommendations_are_not_active_champion_rows(self):
+        candidates = [
+            {"candidate_id": "a", "formula_name": "A", "position": "QB"},
+            {"candidate_id": "b", "formula_name": "B", "position": "QB"},
+        ]
+        summaries = [
+            {
+                "scoring_profile_id": "ppr",
+                "position": "QB",
+                "candidate_id": "a",
+                "pairwise_win_rate": 0.55,
+                "actual_points_captured_rate": 0.95,
+                "top_n_hit_rate": 0.50,
+                "missing_input_rate": 0.10,
+            },
+            {
+                "scoring_profile_id": "ppr",
+                "position": "QB",
+                "candidate_id": "b",
+                "pairwise_win_rate": 0.60,
+                "actual_points_captured_rate": 0.90,
+                "top_n_hit_rate": 0.45,
+                "missing_input_rate": 0.20,
+            },
+        ]
+
+        recommendations = rfb.recommend_champions(summaries, candidates)
+
+        self.assertEqual(recommendations[0]["candidate_id"], "b")
+        self.assertNotIn("active", recommendations[0])
+
+    def _formula_set(self):
+        return {
+            "formula_set_id": "set-1",
+            "formula_set_name": "Set",
+            "formula_set_version": "v1",
+            "qb_candidate_id": "qb-balanced",
+            "rb_candidate_id": "rb-balanced",
+            "wr_candidate_id": "wr-balanced",
+            "te_candidate_id": "te-balanced",
+            "status": "draft",
+            "description": None,
+            "created_by": "test",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": None,
+            "notes": None,
+        }
+
+    def _feature_row(self, player_id, name, actual_points, passing_epa_per_play):
+        return {
+            "season": 2025,
+            "week": 1,
+            "player_id_internal": player_id,
+            "player_name": name,
+            "position": "QB",
+            "team": "ABC",
+            "actual_points": actual_points,
+            "recent_points_avg": actual_points - 2,
+            "passing_epa_per_play": passing_epa_per_play,
+            "passing_success_rate": 0.52,
+            "cpoe": 0.04,
+        }
+
 
 if __name__ == "__main__":
     unittest.main()

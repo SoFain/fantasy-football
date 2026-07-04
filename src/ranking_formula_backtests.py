@@ -20,9 +20,18 @@ CREATED_BY = "ranking_formula_backtests"
 MAX_REAL_DATA_SEASON_SPAN = 1
 DEFAULT_REAL_DATA_LIMIT = 100
 MAX_REAL_DATA_LIMIT = 500
+DEFAULT_SCORING_PROFILES = ("ppr", "half_ppr", "standard", "gng_keeper")
+DEFAULT_LEAGUE_TYPE_ID = "redraft"
+DEFAULT_ROSTER_FORMAT_ID = "one_qb"
+POSITION_TOP_N = {"QB": 12, "RB": 24, "WR": 24, "TE": 12}
 
 POSITIONS = ("QB", "RB", "WR", "TE")
 TARGET_DEFINITIONS = {
+    "position_default_top_n": {
+        "target_name": "position_default_top_n",
+        "position_thresholds": POSITION_TOP_N if "POSITION_TOP_N" in globals() else {"QB": 12, "RB": 24, "WR": 24, "TE": 12},
+        "description": "Player finishes inside the position-specific default top-N threshold.",
+    },
     "top_12_position": {
         "target_name": "top_12_position",
         "rank_threshold": 12,
@@ -128,6 +137,7 @@ FEATURE_SOURCE_MAP = {
     "goal_line_opportunities": "goal_line_opportunities",
     "snap_share_proxy": "snap_share_proxy",
     "air_yards": "air_yards",
+    "team_pass_rate": "team_pass_rate",
 }
 FORBIDDEN_TABLE_REFERENCES = {
     "weekly_metrics",
@@ -776,9 +786,12 @@ def build_backtest_run_row(
     input_tables: list[str] | tuple[str, ...] = ALLOWED_INPUT_TABLES,
     dry_run: bool,
     status: str,
+    backtest_run_id: str | None = None,
+    notes: str | None = None,
 ) -> dict[str, Any]:
     return {
-        "backtest_run_id": f"ranking-backtest-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}",
+        "backtest_run_id": backtest_run_id
+        or f"ranking-backtest-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}",
         "formula_set_id": formula_set_id,
         "formula_version": formula_version,
         "candidate_count": candidate_count,
@@ -797,7 +810,7 @@ def build_backtest_run_row(
         "created_at": _now(),
         "completed_at": None,
         "error_message": None,
-        "notes": None,
+        "notes": notes,
     }
 
 
@@ -986,6 +999,327 @@ def run_seeded_candidate_real_data_dry_run(
     }
 
 
+def run_no_lookahead_backtest(
+    *,
+    client: Any,
+    formula_set_id: str,
+    source_season: int,
+    target_season: int,
+    target_week_start: int,
+    target_week_end: int,
+    scoring_profile_ids: list[str] | tuple[str, ...],
+    positions: list[str] | tuple[str, ...],
+    status: str = "draft",
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    dry_run: bool = True,
+    write: bool = False,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    if target_season <= source_season:
+        raise FormulaValidationError("target_season must be after source_season to avoid lookahead")
+    if target_week_start > target_week_end:
+        raise FormulaValidationError("target_week_start must be less than or equal to target_week_end")
+    if write:
+        require_write_authorization()
+    if not dry_run and not write:
+        raise ValueError("write=True is required for non-dry-run ranking formula backtests")
+
+    normalized_positions = [_normalize_position(position) for position in positions]
+    normalized_profiles = [_normalize_scoring_profile_id(profile) for profile in scoring_profile_ids]
+    validate_candidate_status(status)
+    load_ranking_formula_set(
+        client=client,
+        formula_set_id=formula_set_id,
+        project_id=project_id,
+        dataset_id=dataset_id,
+        status=status,
+    )
+    candidates = load_ranking_formula_candidates(
+        client=client,
+        project_id=project_id,
+        dataset_id=dataset_id,
+        formula_set_id=formula_set_id,
+        status=status,
+    )
+    candidates = [candidate for candidate in candidates if candidate["position"] in normalized_positions]
+    if not candidates:
+        raise FormulaValidationError("No matching seeded formula candidates found")
+    _validate_candidate_coverage(candidates, normalized_positions)
+
+    all_result_rows: list[dict[str, Any]] = []
+    all_summary_rows: list[dict[str, Any]] = []
+    run_rows: list[dict[str, Any]] = []
+    feature_reports: dict[str, Any] = {}
+    target_reports: dict[str, Any] = {}
+    position_input_counts: dict[str, int] = {}
+
+    for profile in normalized_profiles:
+        run_row = build_backtest_run_row(
+            candidate_count=len(candidates),
+            formula_set_id=formula_set_id,
+            formula_version=candidates[0]["formula_version"],
+            season_start=source_season,
+            season_end=target_season,
+            week_start=target_week_start,
+            week_end=target_week_end,
+            scoring_profile_id=profile,
+            league_type_id=league_type_id,
+            roster_format_id=roster_format_id,
+            target_name="position_default_top_n",
+            input_tables=ALLOWED_INPUT_TABLES,
+            dry_run=not write,
+            status="planned" if not write else "complete",
+            backtest_run_id=f"ranking_backtest_v0_{source_season}_to_{target_season}_{profile}",
+            notes=(
+                f"source_season={source_season}; target_season={target_season}; "
+                f"target_weeks={target_week_start}-{target_week_end}; no_lookahead=true"
+            ),
+        )
+        if write:
+            run_row["completed_at"] = _now()
+        run_rows.append(run_row)
+
+        profile_results: list[dict[str, Any]] = []
+        for position in normalized_positions:
+            position_candidates = [candidate for candidate in candidates if candidate["position"] == position]
+            feature_rows = load_no_lookahead_feature_rows(
+                client=client,
+                position=position,
+                source_season=source_season,
+                target_season=target_season,
+                target_week_start=target_week_start,
+                target_week_end=target_week_end,
+                scoring_profile_id=profile,
+                league_type_id=league_type_id,
+                roster_format_id=roster_format_id,
+                project_id=project_id,
+                dataset_id=dataset_id,
+                limit=limit,
+            )
+            target_name = _target_name_for_position(position)
+            result_rows = build_result_rows_for_candidates(
+                candidates=position_candidates,
+                feature_rows=feature_rows,
+                backtest_run_id=run_row["backtest_run_id"],
+                formula_set_id=formula_set_id,
+                scoring_profile_id=profile,
+                league_type_id=league_type_id,
+                roster_format_id=roster_format_id,
+                target_name=target_name,
+            )
+            for candidate in position_candidates:
+                candidate_results = [
+                    row for row in result_rows if row["candidate_id"] == candidate["candidate_id"]
+                ]
+                all_summary_rows.append(
+                    build_summary_from_results(
+                        candidate_row=candidate,
+                        result_rows=candidate_results,
+                        backtest_run_id=run_row["backtest_run_id"],
+                        scoring_profile_id=profile,
+                        league_type_id=league_type_id,
+                        roster_format_id=roster_format_id,
+                        target_name=target_name,
+                    )
+                )
+            profile_results.extend(result_rows)
+            feature_reports[f"{profile}:{position}"] = build_feature_availability_report(
+                position_candidates,
+                feature_rows,
+            )
+            target_reports[f"{profile}:{position}"] = build_target_availability_report(feature_rows)
+            position_input_counts[f"{profile}:{position}"] = len(feature_rows)
+
+        all_result_rows.extend(profile_results)
+
+    result = {
+        "dry_run": not write,
+        "write": write,
+        "formula_set_id": formula_set_id,
+        "candidate_count": len(candidates),
+        "scoring_profile_ids": normalized_profiles,
+        "positions": normalized_positions,
+        "source_season": source_season,
+        "target_season": target_season,
+        "target_week_start": target_week_start,
+        "target_week_end": target_week_end,
+        "league_type_id": league_type_id,
+        "roster_format_id": roster_format_id,
+        "input_tables": list(ALLOWED_INPUT_TABLES),
+        "blocked_metrics": sorted(BLOCKED_METRIC_FEATURES),
+        "candidate_rows": candidates,
+        "backtest_run_rows": run_rows,
+        "result_rows": all_result_rows,
+        "candidate_summary_rows": all_summary_rows,
+        "result_shape_count": len(all_result_rows),
+        "candidate_summary_count": len(all_summary_rows),
+        "feature_availability": feature_reports,
+        "target_availability": target_reports,
+        "position_input_counts": position_input_counts,
+        "champion_recommendations": recommend_champions(all_summary_rows, candidates),
+    }
+    if write:
+        result["write_summary"] = save_executed_backtest(
+            result,
+            project_id=project_id,
+            dataset_id=dataset_id,
+            client=client,
+        )
+    return result
+
+
+def load_no_lookahead_feature_rows(
+    *,
+    client: Any,
+    position: str,
+    source_season: int,
+    target_season: int,
+    target_week_start: int,
+    target_week_end: int,
+    scoring_profile_id: str,
+    league_type_id: str,
+    roster_format_id: str,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    normalized_position = _normalize_position(position)
+    if target_season <= source_season:
+        raise FormulaValidationError("target_season must be after source_season to avoid lookahead")
+    if target_week_start > target_week_end:
+        raise FormulaValidationError("target_week_start must be less than or equal to target_week_end")
+    bounded_limit = None if limit is None or int(limit) <= 0 else min(int(limit), MAX_REAL_DATA_LIMIT)
+    limit_sql = "\nLIMIT @limit" if bounded_limit else ""
+    query_parameters = [
+        _scalar_param("position", "STRING", normalized_position),
+        _scalar_param("source_season", "INT64", int(source_season)),
+        _scalar_param("target_season", "INT64", int(target_season)),
+        _scalar_param("target_week_start", "INT64", int(target_week_start)),
+        _scalar_param("target_week_end", "INT64", int(target_week_end)),
+        _scalar_param("scoring_profile_id", "STRING", scoring_profile_id),
+        _scalar_param("league_type_id", "STRING", league_type_id),
+        _scalar_param("roster_format_id", "STRING", roster_format_id),
+    ]
+    if bounded_limit:
+        query_parameters.append(_scalar_param("limit", "INT64", bounded_limit))
+    query = f"""
+WITH source_features AS (
+    SELECT
+        REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') AS player_key,
+        metrics.player_id_internal,
+        ANY_VALUE(COALESCE(metrics.player_name, truth.player_display_name, truth.player_name)) AS player_name,
+        metrics.position,
+        ANY_VALUE(COALESCE(metrics.team, truth.team)) AS source_team,
+        AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) AS recent_points_avg,
+        AVG(metrics.targets) AS targets,
+        AVG(metrics.carries) AS carries,
+        AVG(truth.receiving_yards) AS receiving_yards,
+        AVG(truth.receiving_epa) AS receiving_epa,
+        AVG(metrics.red_zone_targets) AS red_zone_targets,
+        AVG(metrics.success_rate) AS success_rate,
+        AVG(metrics.success_rate) AS passing_success_rate,
+        AVG(truth.pass_attempts) AS dropbacks,
+        AVG(truth.carries) AS rushing_attempts,
+        AVG(metrics.success_rate) AS rush_success_rate,
+        AVG(metrics.targets) AS receiving_usage,
+        AVG(metrics.cpoe) AS cpoe,
+        AVG(metrics.opportunities) AS usage_volume,
+        AVG(metrics.epa_per_opportunity) AS epa_per_play,
+        AVG(SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0))) AS passing_epa_per_play,
+        AVG(metrics.red_zone_touches) AS red_zone_opportunities,
+        AVG(metrics.inside_5_carries) AS goal_line_opportunities,
+        AVG(metrics.snap_share) AS snap_share_proxy,
+        AVG(truth.receiving_air_yards) AS air_yards,
+        AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
+        ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
+        ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags
+    FROM `{table_id(project_id, dataset_id, "player_week_advanced_metrics")}` metrics
+    LEFT JOIN `{table_id(project_id, dataset_id, "analytics_player_weekly_truth")}` truth
+      ON metrics.season = truth.season
+     AND metrics.week = truth.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(truth.player_id, r'^gsis:', '')
+    LEFT JOIN `{table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")}` source_profile
+      ON metrics.season = source_profile.season
+     AND metrics.week = source_profile.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(source_profile.player_id_internal, r'^gsis:', '')
+     AND source_profile.scoring_profile_id = @scoring_profile_id
+     AND COALESCE(source_profile.league_type_id, @league_type_id) = @league_type_id
+     AND COALESCE(source_profile.roster_format_id, @roster_format_id) = @roster_format_id
+    WHERE metrics.position = @position
+      AND metrics.season = @source_season
+      AND metrics.scoring_profile_id = 'ppr'
+      AND metrics.league_type_id = @league_type_id
+      AND metrics.roster_format_id = @roster_format_id
+    GROUP BY metrics.player_id_internal, metrics.position
+),
+target_points AS (
+    SELECT
+        target.season,
+        target.week,
+        REGEXP_REPLACE(target.player_id_internal, r'^gsis:', '') AS player_key,
+        REGEXP_REPLACE(target.player_id_internal, r'^gsis:', '') AS player_id_internal,
+        target.player_display_name AS player_name,
+        target.position,
+        target.team,
+        target.scoring_profile_id,
+        COALESCE(target.league_type_id, @league_type_id) AS league_type_id,
+        COALESCE(target.roster_format_id, @roster_format_id) AS roster_format_id,
+        target.total_fantasy_points AS actual_points
+    FROM `{table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")}` target
+    WHERE target.position = @position
+      AND target.season = @target_season
+      AND target.week BETWEEN @target_week_start AND @target_week_end
+      AND target.scoring_profile_id = @scoring_profile_id
+      AND COALESCE(target.league_type_id, @league_type_id) = @league_type_id
+      AND COALESCE(target.roster_format_id, @roster_format_id) = @roster_format_id
+      AND target.player_id_internal IS NOT NULL
+)
+SELECT
+    target.season,
+    target.week,
+    target.player_id_internal,
+    COALESCE(target.player_name, source.player_name) AS player_name,
+    target.position,
+    COALESCE(target.team, source.source_team) AS team,
+    target.scoring_profile_id,
+    target.league_type_id,
+    target.roster_format_id,
+    target.actual_points,
+    source.recent_points_avg,
+    source.targets,
+    source.carries,
+    source.receiving_yards,
+    source.receiving_epa,
+    source.red_zone_targets,
+    source.success_rate,
+    source.passing_success_rate,
+    source.dropbacks,
+    source.rushing_attempts,
+    source.rush_success_rate,
+    source.receiving_usage,
+    source.cpoe,
+    source.usage_volume,
+    source.epa_per_play,
+    source.passing_epa_per_play,
+    source.red_zone_opportunities,
+    source.goal_line_opportunities,
+    source.snap_share_proxy,
+    source.air_yards,
+    source.team_pass_rate,
+    source.metrics_source_freshness_json,
+    source.metrics_missing_flags
+FROM target_points target
+JOIN source_features source
+  ON target.player_key = source.player_key
+ORDER BY target.week, target.player_id_internal
+{limit_sql}
+""".strip()
+    return _query_records(client, query, query_parameters)
+
+
 def build_feature_availability_report(
     candidates: list[Mapping[str, Any]],
     feature_rows: list[Mapping[str, Any]],
@@ -1129,20 +1463,23 @@ def build_summary_from_results(
     if target_rows:
         top_n_hit_rate = sum(1 for row in target_rows if row["target_hit"]) / len(target_rows)
     rank_correlation = _rank_correlation(scored_rows)
+    pairwise_win_rate = _pairwise_win_rate(scored_rows)
+    mean_absolute_error = _mean_absolute_error(scored_rows)
+    top_n_capture = _top_n_capture_metrics(scored_rows, candidate_row["position"], target_name)
     metric_payload = {
         "sample_size": sample_size,
-        "pairwise_win_rate": None,
-        "top_n_hit_rate": top_n_hit_rate,
+        "pairwise_win_rate": pairwise_win_rate,
+        "top_n_hit_rate": top_n_capture["top_n_hit_rate"] if top_n_capture["top_n_hit_rate"] is not None else top_n_hit_rate,
         "rank_correlation": rank_correlation,
-        "mean_absolute_error": None,
-        "regret_score": None,
-        "actual_points_captured_rate": None,
+        "mean_absolute_error": mean_absolute_error,
+        "regret_score": top_n_capture["regret_score"],
+        "actual_points_captured_rate": top_n_capture["actual_points_captured_rate"],
         "missing_input_rate": sum(missing_rates) / len(missing_rates) if missing_rates else None,
         "null_metric_reasons": {
-            "pairwise_win_rate": "pairwise comparisons are not implemented in the dry-run skeleton",
-            "mean_absolute_error": "predicted scores are normalized 0-100 and not calibrated to fantasy points",
-            "regret_score": "requires a champion or baseline comparison",
-            "actual_points_captured_rate": "requires a lineup or top-N capture definition",
+            "pairwise_win_rate": None if pairwise_win_rate is not None else "fewer than two scored comparison rows",
+            "mean_absolute_error": None if mean_absolute_error is not None else "fewer than one scored row with ranks",
+            "regret_score": None if top_n_capture["regret_score"] is not None else "top-N comparison unavailable",
+            "actual_points_captured_rate": None if top_n_capture["actual_points_captured_rate"] is not None else "top-N comparison unavailable",
         },
     }
     return {
@@ -1155,18 +1492,108 @@ def build_summary_from_results(
         "roster_format_id": roster_format_id,
         "target_name": target_name,
         "sample_size": sample_size,
-        "pairwise_win_rate": None,
-        "top_n_hit_rate": top_n_hit_rate,
+        "pairwise_win_rate": pairwise_win_rate,
+        "top_n_hit_rate": metric_payload["top_n_hit_rate"],
         "rank_correlation": rank_correlation,
-        "mean_absolute_error": None,
-        "regret_score": None,
-        "actual_points_captured_rate": None,
+        "mean_absolute_error": mean_absolute_error,
+        "regret_score": top_n_capture["regret_score"],
+        "actual_points_captured_rate": top_n_capture["actual_points_captured_rate"],
         "missing_input_rate": metric_payload["missing_input_rate"],
         "metric_json": _json(metric_payload),
-        "missing_flags_json": _json({"summary_from_dry_run": True}),
-        "source_freshness_json": _json({"status": "dry_run", "result_row_count": sample_size}),
+        "missing_flags_json": _json({"summary_from_results": True}),
+        "source_freshness_json": _json({"status": "computed", "result_row_count": sample_size}),
         "created_at": _now(),
     }
+
+
+def save_executed_backtest(
+    result: Mapping[str, Any],
+    *,
+    project_id: str,
+    dataset_id: str,
+    client: Any,
+) -> dict[str, Any]:
+    run_rows = [dict(row) for row in result.get("backtest_run_rows", [])]
+    result_rows = [dict(row) for row in result.get("result_rows", [])]
+    summary_rows = [dict(row) for row in result.get("candidate_summary_rows", [])]
+    if not run_rows:
+        raise ValueError("No backtest run rows to write")
+    _validate_run_rows(run_rows)
+    _validate_result_rows(result_rows)
+    _validate_summary_rows(summary_rows)
+    run_ids = [str(row["backtest_run_id"]) for row in run_rows]
+    delete_params = [_array_param("backtest_run_ids", "STRING", run_ids)]
+    for table_name in (
+        "ranking_backtest_results",
+        "ranking_backtest_candidate_summaries",
+        "ranking_backtest_runs",
+    ):
+        client.query(
+            f"""
+DELETE FROM `{table_id(project_id, dataset_id, table_name)}`
+WHERE backtest_run_id IN UNNEST(@backtest_run_ids)
+""".strip(),
+            job_config=_query_job_config(delete_params),
+        ).result()
+    client.load_table_from_json(
+        run_rows,
+        table_id(project_id, dataset_id, "ranking_backtest_runs"),
+    ).result()
+    client.load_table_from_json(
+        result_rows,
+        table_id(project_id, dataset_id, "ranking_backtest_results"),
+    ).result()
+    client.load_table_from_json(
+        summary_rows,
+        table_id(project_id, dataset_id, "ranking_backtest_candidate_summaries"),
+    ).result()
+    return {
+        "backtest_run_row_count": len(run_rows),
+        "result_row_count": len(result_rows),
+        "candidate_summary_row_count": len(summary_rows),
+        "backtest_run_ids": run_ids,
+        "target_tables": [
+            "ranking_backtest_runs",
+            "ranking_backtest_results",
+            "ranking_backtest_candidate_summaries",
+        ],
+    }
+
+
+def recommend_champions(
+    summary_rows: list[Mapping[str, Any]],
+    candidates: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    candidate_names = {row["candidate_id"]: row.get("formula_name") for row in candidates}
+    grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    for row in summary_rows:
+        grouped.setdefault((str(row["scoring_profile_id"]), str(row["position"])), []).append(row)
+    recommendations: list[dict[str, Any]] = []
+    for (profile, position), summaries in sorted(grouped.items()):
+        best = sorted(
+            summaries,
+            key=lambda row: (
+                _metric_sort_value(row.get("pairwise_win_rate")),
+                _metric_sort_value(row.get("actual_points_captured_rate")),
+                _metric_sort_value(row.get("top_n_hit_rate")),
+                -_metric_sort_value(row.get("missing_input_rate"), missing_value=1.0),
+            ),
+            reverse=True,
+        )[0]
+        recommendations.append(
+            {
+                "scoring_profile_id": profile,
+                "position": position,
+                "candidate_id": best["candidate_id"],
+                "formula_name": candidate_names.get(best["candidate_id"]),
+                "pairwise_win_rate": best.get("pairwise_win_rate"),
+                "actual_points_captured_rate": best.get("actual_points_captured_rate"),
+                "top_n_hit_rate": best.get("top_n_hit_rate"),
+                "missing_input_rate": best.get("missing_input_rate"),
+                "reason": "highest pairwise win rate, with captured-points and top-N hit rate as tie-breakers",
+            }
+        )
+    return recommendations
 
 
 def save_backtest_plan(
@@ -1418,6 +1845,113 @@ def _rank_correlation(rows: list[Mapping[str, Any]]) -> float | None:
     return _pearson(predicted, actual)
 
 
+def _pairwise_win_rate(rows: list[Mapping[str, Any]]) -> float | None:
+    grouped: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if (
+            row.get("season") is None
+            or row.get("week") is None
+            or row.get("predicted_rank_position") is None
+            or _safe_float(row.get("actual_points")) is None
+        ):
+            continue
+        grouped.setdefault((int(row["season"]), int(row["week"])), []).append(row)
+    wins = 0
+    comparisons = 0
+    for week_rows in grouped.values():
+        ordered = sorted(week_rows, key=lambda row: int(row["predicted_rank_position"]))
+        for left_index, left in enumerate(ordered):
+            left_points = _safe_float(left.get("actual_points"))
+            if left_points is None:
+                continue
+            for right in ordered[left_index + 1 :]:
+                right_points = _safe_float(right.get("actual_points"))
+                if right_points is None or left_points == right_points:
+                    continue
+                comparisons += 1
+                if left_points > right_points:
+                    wins += 1
+    if comparisons == 0:
+        return None
+    return wins / comparisons
+
+
+def _mean_absolute_error(rows: list[Mapping[str, Any]]) -> float | None:
+    grouped: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if (
+            row.get("season") is None
+            or row.get("week") is None
+            or row.get("predicted_score") is None
+            or row.get("actual_rank_position") is None
+        ):
+            continue
+        grouped.setdefault((int(row["season"]), int(row["week"])), []).append(row)
+    errors: list[float] = []
+    for week_rows in grouped.values():
+        denominator = max(len(week_rows) - 1, 1)
+        for row in week_rows:
+            predicted_score = _safe_float(row.get("predicted_score"))
+            actual_rank = _safe_float(row.get("actual_rank_position"))
+            if predicted_score is None or actual_rank is None:
+                continue
+            actual_rank_score = max(0.0, min(100.0, 100.0 * (1.0 - ((actual_rank - 1.0) / denominator))))
+            errors.append(abs(predicted_score - actual_rank_score))
+    if not errors:
+        return None
+    return sum(errors) / len(errors)
+
+
+def _top_n_capture_metrics(
+    rows: list[Mapping[str, Any]],
+    position: str,
+    target_name: str,
+) -> dict[str, float | None]:
+    top_n = _top_n_for_target(position, target_name)
+    grouped: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if (
+            row.get("season") is None
+            or row.get("week") is None
+            or row.get("predicted_rank_position") is None
+            or _safe_float(row.get("actual_points")) is None
+        ):
+            continue
+        grouped.setdefault((int(row["season"]), int(row["week"])), []).append(row)
+    hit_rates: list[float] = []
+    predicted_points_total = 0.0
+    actual_points_total = 0.0
+    for week_rows in grouped.values():
+        actual_sorted = sorted(week_rows, key=lambda row: _safe_float(row.get("actual_points")) or -9999.0, reverse=True)
+        predicted_sorted = sorted(week_rows, key=lambda row: int(row["predicted_rank_position"]))
+        actual_top = actual_sorted[:top_n]
+        predicted_top = predicted_sorted[:top_n]
+        if not actual_top or not predicted_top:
+            continue
+        actual_ids = {str(row["player_id_internal"]) for row in actual_top}
+        predicted_ids = {str(row["player_id_internal"]) for row in predicted_top}
+        hit_rates.append(len(actual_ids & predicted_ids) / max(len(actual_ids), 1))
+        predicted_points_total += sum(_safe_float(row.get("actual_points")) or 0.0 for row in predicted_top)
+        actual_points_total += sum(_safe_float(row.get("actual_points")) or 0.0 for row in actual_top)
+    if actual_points_total <= 0:
+        return {"top_n_hit_rate": None, "regret_score": None, "actual_points_captured_rate": None}
+    return {
+        "top_n_hit_rate": sum(hit_rates) / len(hit_rates) if hit_rates else None,
+        "regret_score": max(actual_points_total - predicted_points_total, 0.0),
+        "actual_points_captured_rate": predicted_points_total / actual_points_total,
+    }
+
+
+def _top_n_for_target(position: str, target_name: str) -> int:
+    if target_name == "position_default_top_n":
+        return POSITION_TOP_N[_normalize_position(position)]
+    target = TARGET_DEFINITIONS[target_name]
+    threshold = target.get("rank_threshold")
+    if threshold is None:
+        return POSITION_TOP_N[_normalize_position(position)]
+    return int(threshold)
+
+
 def _pearson(left: list[float], right: list[float]) -> float | None:
     if len(left) != len(right) or len(left) < 2:
         return None
@@ -1475,11 +2009,62 @@ def _validate_summary_rows(rows: list[dict[str, Any]]) -> None:
                 raise ValueError(f"{field} must be non-negative")
 
 
+def _validate_result_rows(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        for field in RANKING_TABLES["ranking_backtest_results"]:
+            if field in {
+                "formula_set_id",
+                "player_name",
+                "team",
+                "predicted_score",
+                "predicted_rank_position",
+                "actual_points",
+                "actual_rank_position",
+                "target_hit",
+                "win_rate",
+            }:
+                continue
+            if row.get(field) is None:
+                raise ValueError(f"backtest result row missing {field}")
+        validate_score(row.get("predicted_score"), field_name="predicted_score")
+        win_rate = row.get("win_rate")
+        if win_rate is not None and (float(win_rate) < 0 or float(win_rate) > 1):
+            raise ValueError("win_rate must be between 0 and 1")
+        for rank_field in ("predicted_rank_position", "actual_rank_position"):
+            rank_value = row.get(rank_field)
+            if rank_value is not None and int(rank_value) < 1:
+                raise ValueError(f"{rank_field} must be positive")
+
+
+def _validate_candidate_coverage(candidates: list[Mapping[str, Any]], positions: list[str]) -> None:
+    for position in positions:
+        count = sum(1 for candidate in candidates if candidate["position"] == position)
+        if count != 3:
+            raise FormulaValidationError(f"Expected 3 {position} candidates, found {count}")
+
+
 def _normalize_position(position: str) -> str:
     value = position.strip().upper()
     if value not in POSITIONS:
         raise FormulaValidationError(f"Unsupported position: {position}")
     return value
+
+
+def _normalize_scoring_profile_id(scoring_profile_id: str) -> str:
+    value = str(scoring_profile_id or "").strip().lower()
+    _reject_executable_text(value)
+    if value not in DEFAULT_SCORING_PROFILES:
+        raise FormulaValidationError(f"Unsupported scoring_profile_id: {scoring_profile_id}")
+    return value
+
+
+def _target_name_for_position(position: str) -> str:
+    return "top_12_position" if _normalize_position(position) in {"QB", "TE"} else "top_24_position"
+
+
+def _metric_sort_value(value: Any, *, missing_value: float = -1.0) -> float:
+    numeric_value = _safe_float(value)
+    return missing_value if numeric_value is None else numeric_value
 
 
 def _reject_executable_text(value: str) -> None:
@@ -1526,18 +2111,24 @@ def _now() -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan deterministic ranking formula backtests.")
     parser.add_argument("--position", choices=POSITIONS, default="QB")
+    parser.add_argument("--all-positions", action="store_true")
     parser.add_argument("--season-start", type=int, default=2014)
     parser.add_argument("--season-end", type=int, default=2014)
+    parser.add_argument("--source-season", type=int)
+    parser.add_argument("--target-season", type=int)
     parser.add_argument("--week-start", type=int, default=1)
     parser.add_argument("--week-end", type=int, default=17)
+    parser.add_argument("--target-week-start", type=int)
+    parser.add_argument("--target-week-end", type=int)
     parser.add_argument("--target", default="top_12_position", choices=sorted(TARGET_DEFINITIONS))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--from-bigquery-candidates", action="store_true")
     parser.add_argument("--formula-set-id")
     parser.add_argument("--status", default="draft")
-    parser.add_argument("--limit", type=int, default=DEFAULT_REAL_DATA_LIMIT)
+    parser.add_argument("--limit", type=int)
     parser.add_argument("--scoring-profile-id", default="ppr")
+    parser.add_argument("--all-scoring-profiles", action="store_true")
     parser.add_argument("--league-type-id", default="redraft")
     parser.add_argument("--roster-format-id", default="one_qb")
     parser.add_argument("--project", default=DEFAULT_PROJECT)
@@ -1545,13 +2136,39 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.from_bigquery_candidates:
-        if args.write:
-            raise ValueError("--write is not supported for seeded-candidate real-data dry-runs")
         if not args.formula_set_id:
             raise ValueError("--formula-set-id is required with --from-bigquery-candidates")
         from google.cloud import bigquery
 
         client = bigquery.Client(project=args.project)
+        source_season = args.source_season or args.season_start
+        target_season = args.target_season or args.season_end
+        target_week_start = args.target_week_start if args.target_week_start is not None else args.week_start
+        target_week_end = args.target_week_end if args.target_week_end is not None else args.week_end
+        if args.all_positions or args.all_scoring_profiles or args.source_season or args.target_season:
+            result = run_no_lookahead_backtest(
+                client=client,
+                formula_set_id=args.formula_set_id,
+                source_season=source_season,
+                target_season=target_season,
+                target_week_start=target_week_start,
+                target_week_end=target_week_end,
+                scoring_profile_ids=DEFAULT_SCORING_PROFILES
+                if args.all_scoring_profiles
+                else (args.scoring_profile_id,),
+                positions=POSITIONS if args.all_positions else (args.position,),
+                status=args.status,
+                league_type_id=args.league_type_id,
+                roster_format_id=args.roster_format_id,
+                project_id=args.project,
+                dataset_id=args.dataset,
+                dry_run=args.dry_run or not args.write,
+                write=args.write,
+                limit=args.limit,
+            )
+            print(json.dumps(_cli_summary(result), indent=2, sort_keys=True))
+            return 0
+
         result = run_seeded_candidate_real_data_dry_run(
             client=client,
             formula_set_id=args.formula_set_id,
@@ -1593,18 +2210,29 @@ def _cli_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "write": result.get("write"),
         "candidate_count": result.get("candidate_count"),
         "positions": result.get("positions"),
+        "scoring_profile_ids": result.get("scoring_profile_ids"),
+        "source_season": result.get("source_season"),
+        "target_season": result.get("target_season"),
+        "target_week_start": result.get("target_week_start"),
+        "target_week_end": result.get("target_week_end"),
         "season_start": result.get("season_start"),
         "season_end": result.get("season_end"),
         "target_definition": result.get("target_definition"),
         "input_tables": result.get("input_tables"),
         "blocked_metrics": result.get("blocked_metrics"),
+        "backtest_run_count": len(result.get("backtest_run_rows", [])),
         "candidate_summary_count": len(result.get("candidate_summary_rows", [])),
         "formula_set_id": result.get("formula_set_id"),
         "input_row_count": result.get("input_row_count"),
         "result_shape_count": result.get("result_shape_count"),
         "target_availability": result.get("target_availability"),
         "feature_availability": result.get("feature_availability"),
+        "position_input_counts": result.get("position_input_counts"),
+        "champion_recommendations": result.get("champion_recommendations"),
+        "write_summary": result.get("write_summary"),
         "sample_size": _first_summary_value(result, "sample_size"),
+        "pairwise_win_rate": _first_summary_value(result, "pairwise_win_rate"),
+        "actual_points_captured_rate": _first_summary_value(result, "actual_points_captured_rate"),
         "missing_input_rate": _first_summary_value(result, "missing_input_rate"),
         "top_n_hit_rate": _first_summary_value(result, "top_n_hit_rate"),
         "rank_correlation": _first_summary_value(result, "rank_correlation"),
