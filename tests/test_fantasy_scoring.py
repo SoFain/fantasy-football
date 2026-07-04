@@ -99,7 +99,14 @@ class FantasyScoringTests(unittest.TestCase):
         self.assertEqual(profile["settings"]["receptions"], 0.1)
         self.assertEqual(profile["unmapped_settings"]["bonus_rec_te"], 0.2)
         self.assertEqual(profile["unmapped_settings"]["bonus_rec_wr"], 0.1)
+        self.assertEqual(profile["sleeper_scoring_settings"]["fgm"], 3.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["sack"], 1.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["pts_allow_0"], 8.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["yds_allow_550p"], -7.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["fum"], 0.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["pass_td_40p"], 0.0)
         self.assertEqual(profile["source_metadata"]["source_league_id"], "1369406895588143104")
+        self.assertEqual(profile["source_metadata"]["league_status_at_retrieval"], "pre_draft")
 
     def test_default_scoring_profile_includes_gng_keeper(self):
         profile = get_default_scoring_profile("gng_keeper")

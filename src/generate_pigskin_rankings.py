@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -410,17 +411,38 @@ def write_rankings(client, dataset_id, rows):
     df = pd.DataFrame(rows)
     final_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings"
     history_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings_history"
+    staging_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings_staging_{uuid.uuid4().hex}"
     load_schema = ranking_load_schema(client, final_table_id, history_table_id)
+    positions = sorted({str(row["position"]) for row in rows if row.get("position")})
+    scoring_profile_ids = sorted({str(row["scoring_profile_id"]) for row in rows if row.get("scoring_profile_id")})
+    league_type_ids = sorted({str(row["league_type_id"]) for row in rows if row.get("league_type_id")})
+    roster_format_ids = sorted({str(row["roster_format_id"]) for row in rows if row.get("roster_format_id")})
+    if not positions or not scoring_profile_ids or not league_type_ids or not roster_format_ids:
+        raise RuntimeError("Pigskin ranking rows must include position and profile scope fields.")
 
-    final_job = client.load_table_from_dataframe(
+    staging_job = client.load_table_from_dataframe(
         df,
-        final_table_id,
+        staging_table_id,
         job_config=bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            write_disposition=bigquery.WriteDisposition.WRITE_EMPTY,
             schema=load_schema,
         ),
     )
-    final_job.result()
+    staging_job.result()
+
+    delete_sql, insert_sql = build_profile_aware_rankings_replace_sql(client.project, dataset_id, staging_table_id.split(".")[-1])
+    query_parameters = [
+        bigquery.ArrayQueryParameter("scoring_profile_ids", "STRING", scoring_profile_ids),
+        bigquery.ArrayQueryParameter("league_type_ids", "STRING", league_type_ids),
+        bigquery.ArrayQueryParameter("roster_format_ids", "STRING", roster_format_ids),
+        bigquery.ArrayQueryParameter("positions", "STRING", positions),
+    ]
+    query_config = bigquery.QueryJobConfig(query_parameters=query_parameters)
+    try:
+        client.query(delete_sql, job_config=query_config).result()
+        client.query(insert_sql).result()
+    finally:
+        client.delete_table(staging_table_id, not_found_ok=True)
 
     ensure_history_table(client, final_table_id, history_table_id)
     history_job = client.load_table_from_dataframe(
@@ -449,6 +471,10 @@ def build_profile_aware_rankings_replace_sql(project_id, dataset_id, staging_tab
           AND target_board.league_type_id = source_board.league_type_id
           AND target_board.roster_format_id = source_board.roster_format_id
           AND target_board.position = source_board.position
+          AND target_board.scoring_profile_id IN UNNEST(@scoring_profile_ids)
+          AND target_board.league_type_id IN UNNEST(@league_type_ids)
+          AND target_board.roster_format_id IN UNNEST(@roster_format_ids)
+          AND target_board.position IN UNNEST(@positions)
     )
     """.strip()
     insert_sql = f"""

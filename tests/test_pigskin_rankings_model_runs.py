@@ -27,10 +27,16 @@ class FakeLoadClient:
 
     def __init__(self):
         self.load_calls = []
+        self.query_calls = []
+        self.deleted_tables = []
         self.history_schema = [
             rankings.bigquery.SchemaField("ranking_version", "STRING"),
             rankings.bigquery.SchemaField("generated_at", "TIMESTAMP"),
             rankings.bigquery.SchemaField("adjudicated_at", "TIMESTAMP"),
+            rankings.bigquery.SchemaField("position", "STRING"),
+            rankings.bigquery.SchemaField("scoring_profile_id", "STRING"),
+            rankings.bigquery.SchemaField("league_type_id", "STRING"),
+            rankings.bigquery.SchemaField("roster_format_id", "STRING"),
         ]
         self.final_schema = [
             rankings.bigquery.SchemaField("ranking_version", "STRING"),
@@ -48,6 +54,13 @@ class FakeLoadClient:
     def load_table_from_dataframe(self, df, table_id, job_config):
         self.load_calls.append((table_id, job_config))
         return FakeJob()
+
+    def query(self, sql, job_config=None):
+        self.query_calls.append((sql, job_config))
+        return FakeJob()
+
+    def delete_table(self, table_id, not_found_ok=False):
+        self.deleted_tables.append((table_id, not_found_ok))
 
 
 class PigskinRankingModelRunTests(unittest.TestCase):
@@ -221,27 +234,100 @@ class PigskinRankingModelRunTests(unittest.TestCase):
                 },
             )
 
-    def test_write_rankings_reuses_history_schema_for_truncate_load(self):
+    def test_write_rankings_replaces_only_matching_profile_scope(self):
         client = FakeLoadClient()
         rows = [{
             "ranking_version": "pigskin-llm-test",
             "generated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
             "adjudicated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "position": "QB",
+            "scoring_profile_id": "ppr",
+            "league_type_id": "redraft",
+            "roster_format_id": "one_qb",
         }]
 
         rankings.write_rankings(client, "test_dataset", rows)
 
         self.assertEqual(len(client.load_calls), 2)
-        final_table_id, final_config = client.load_calls[0]
+        staging_table_id, staging_config = client.load_calls[0]
         history_table_id, history_config = client.load_calls[1]
-        self.assertTrue(final_table_id.endswith(".analytics_pigskin_rankings"))
+        self.assertIn(".analytics_pigskin_rankings_staging_", staging_table_id)
         self.assertTrue(history_table_id.endswith(".analytics_pigskin_rankings_history"))
-        self.assertEqual(final_config.write_disposition, rankings.bigquery.WriteDisposition.WRITE_TRUNCATE)
+        self.assertEqual(staging_config.write_disposition, rankings.bigquery.WriteDisposition.WRITE_EMPTY)
         self.assertEqual(history_config.write_disposition, rankings.bigquery.WriteDisposition.WRITE_APPEND)
+        self.assertEqual(len(client.query_calls), 2)
+        delete_sql, delete_config = client.query_calls[0]
+        insert_sql, insert_config = client.query_calls[1]
+        self.assertIn("DELETE FROM `test-project.test_dataset.analytics_pigskin_rankings`", delete_sql)
+        self.assertIn("target_board.scoring_profile_id IN UNNEST(@scoring_profile_ids)", delete_sql)
+        self.assertIn("target_board.league_type_id IN UNNEST(@league_type_ids)", delete_sql)
+        self.assertIn("target_board.roster_format_id IN UNNEST(@roster_format_ids)", delete_sql)
+        self.assertIn("target_board.position IN UNNEST(@positions)", delete_sql)
+        self.assertIn("INSERT INTO `test-project.test_dataset.analytics_pigskin_rankings`", insert_sql)
+        self.assertIsNone(insert_config)
+        params = {param.name: param.values for param in delete_config.query_parameters}
+        self.assertEqual(params["scoring_profile_ids"], ["ppr"])
+        self.assertEqual(params["league_type_ids"], ["redraft"])
+        self.assertEqual(params["roster_format_ids"], ["one_qb"])
+        self.assertEqual(params["positions"], ["QB"])
+        self.assertEqual(client.deleted_tables, [(staging_table_id, True)])
 
-        schema_by_name = {field.name: field.field_type for field in final_config.schema}
+        final_loads = [
+            table_id for table_id, config in client.load_calls
+            if table_id.endswith(".analytics_pigskin_rankings")
+            and config.write_disposition == rankings.bigquery.WriteDisposition.WRITE_TRUNCATE
+        ]
+        self.assertEqual(final_loads, [])
+        schema_by_name = {field.name: field.field_type for field in staging_config.schema}
         self.assertEqual(schema_by_name["generated_at"], "TIMESTAMP")
         self.assertEqual(schema_by_name["adjudicated_at"], "TIMESTAMP")
+
+    def test_write_rankings_standard_scope_does_not_delete_ppr(self):
+        client = FakeLoadClient()
+        rankings.write_rankings(client, "test_dataset", [{
+            "ranking_version": "pigskin-llm-test",
+            "generated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "adjudicated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "position": "RB",
+            "scoring_profile_id": "standard",
+            "league_type_id": "redraft",
+            "roster_format_id": "one_qb",
+        }])
+
+        params = {param.name: param.values for param in client.query_calls[0][1].query_parameters}
+        self.assertEqual(params["scoring_profile_ids"], ["standard"])
+        self.assertNotIn("ppr", params["scoring_profile_ids"])
+
+    def test_write_rankings_gng_scope_does_not_delete_ppr(self):
+        client = FakeLoadClient()
+        rankings.write_rankings(client, "test_dataset", [{
+            "ranking_version": "pigskin-llm-test",
+            "generated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "adjudicated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "position": "TE",
+            "scoring_profile_id": "gng_keeper",
+            "league_type_id": "keeper",
+            "roster_format_id": "superflex",
+        }])
+
+        params = {param.name: param.values for param in client.query_calls[0][1].query_parameters}
+        self.assertEqual(params["scoring_profile_ids"], ["gng_keeper"])
+        self.assertNotIn("ppr", params["scoring_profile_ids"])
+
+    def test_write_rankings_rejects_missing_profile_scope_fields(self):
+        client = FakeLoadClient()
+        rows = [{
+            "ranking_version": "pigskin-llm-test",
+            "generated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "adjudicated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "position": "QB",
+        }]
+
+        with self.assertRaisesRegex(RuntimeError, "position and profile scope fields"):
+            rankings.write_rankings(client, "test_dataset", rows)
+
+        self.assertEqual(client.load_calls, [])
+        self.assertEqual(client.query_calls, [])
 
     def test_candidate_query_filters_selected_scoring_profile(self):
         class QueryClient:
@@ -327,6 +413,11 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         self.assertIn("scoring_profile_id", combined)
         self.assertIn("league_type_id", combined)
         self.assertIn("roster_format_id", combined)
+        self.assertIn("@scoring_profile_ids", combined)
+        self.assertIn("@league_type_ids", combined)
+        self.assertIn("@roster_format_ids", combined)
+        self.assertIn("@positions", combined)
+        self.assertNotIn(" AS rows", combined)
         self.assertNotIn("WRITE_TRUNCATE", combined)
         self.assertNotIn("TRUNCATE TABLE", combined)
 
