@@ -9,8 +9,8 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
     def test_dropdown_options_are_limited_to_requested_profiles(self):
         options = profiles.get_player_profile_scoring_profile_options()
 
-        self.assertEqual([option["label"] for option in options], ["PPR", "Standard", "GNG Keeper"])
-        self.assertEqual([option["scoring_profile_id"] for option in options], ["ppr", "standard", "gng_keeper"])
+        self.assertEqual([option["label"] for option in options], ["PPR", "Half PPR", "Standard", "GNG Keeper"])
+        self.assertEqual([option["scoring_profile_id"] for option in options], ["ppr", "half_ppr", "standard", "gng_keeper"])
 
     def test_default_profile_is_ppr(self):
         resolved = profiles.resolve_player_profile_scoring_profile(None)
@@ -24,6 +24,11 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
 
         self.assertEqual(resolved["scoring_profile_id"], "gng_keeper")
 
+    def test_half_ppr_profile_maps_to_internal_id(self):
+        resolved = profiles.resolve_player_profile_scoring_profile("Half PPR")
+
+        self.assertEqual(resolved["scoring_profile_id"], "half_ppr")
+
     def test_rankings_query_filters_selected_scoring_profile(self):
         sql, job_config = profiles.build_pigskin_rankings_query(
             "test-project",
@@ -36,6 +41,18 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
         self.assertNotIn("ranking_formula_candidates", sql)
         params = {param.name: param.value for param in job_config.query_parameters}
         self.assertEqual(params["scoring_profile_id"], "standard")
+
+    def test_rankings_query_filters_half_ppr_without_fallback(self):
+        sql, job_config = profiles.build_pigskin_rankings_query(
+            "test-project",
+            "test_dataset",
+            "half_ppr",
+        )
+
+        self.assertIn("scoring_profile_id = @scoring_profile_id", sql)
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["scoring_profile_id"], "half_ppr")
+        self.assertNotEqual(params["scoring_profile_id"], "ppr")
 
     def test_missing_profile_board_message_is_explicit(self):
         self.assertEqual(

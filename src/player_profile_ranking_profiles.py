@@ -7,6 +7,7 @@ from google.cloud import bigquery
 
 PLAYER_PROFILE_SCORING_PROFILE_OPTIONS = (
     {"label": "PPR", "scoring_profile_id": "ppr"},
+    {"label": "Half PPR", "scoring_profile_id": "half_ppr"},
     {"label": "Standard", "scoring_profile_id": "standard"},
     {"label": "GNG Keeper", "scoring_profile_id": "gng_keeper"},
 )

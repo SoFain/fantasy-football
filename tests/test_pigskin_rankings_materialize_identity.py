@@ -32,6 +32,18 @@ class PigskinRankingsMaterializeIdentityTests(unittest.TestCase):
         self.assertIn("avg_profile_points", sql)
         self.assertIn("missing selected scoring profile sample", sql)
 
+    def test_candidate_sql_labels_half_ppr_profile(self):
+        sql = materialize.build_pigskin_rankings_sql(
+            "project-id",
+            "dataset_id",
+            scoring_profile_id="half_ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+        )
+
+        self.assertIn("'half_ppr' AS scoring_profile_id", sql)
+        self.assertIn("'Half PPR' AS scoring_profile_label", sql)
+
     def test_pigskin_rankings_materialization_requires_identity_bridge(self):
         class FakeClient:
             project = "project-id"

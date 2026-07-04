@@ -705,6 +705,7 @@ def _sql_string_literal(value):
 def _ranking_scoring_profile_label(scoring_profile_id):
     labels = {
         "ppr": "PPR",
+        "half_ppr": "Half PPR",
         "standard": "Standard",
         "gng_keeper": "GNG Keeper",
     }
