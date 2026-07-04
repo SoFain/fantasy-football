@@ -27,6 +27,7 @@ class FakeLoadClient:
 
     def __init__(self):
         self.load_calls = []
+        self.loaded_dataframes = []
         self.query_calls = []
         self.deleted_tables = []
         self.history_schema = [
@@ -52,6 +53,7 @@ class FakeLoadClient:
         raise AssertionError(f"unexpected table {table_id}")
 
     def load_table_from_dataframe(self, df, table_id, job_config):
+        self.loaded_dataframes.append(df.copy())
         self.load_calls.append((table_id, job_config))
         return FakeJob()
 
@@ -281,6 +283,24 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         schema_by_name = {field.name: field.field_type for field in staging_config.schema}
         self.assertEqual(schema_by_name["generated_at"], "TIMESTAMP")
         self.assertEqual(schema_by_name["adjudicated_at"], "TIMESTAMP")
+
+    def test_write_rankings_drops_candidate_only_columns_before_load(self):
+        client = FakeLoadClient()
+        rankings.write_rankings(client, "test_dataset", [{
+            "ranking_version": "pigskin-llm-test",
+            "generated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "adjudicated_at": pd.Timestamp("2026-07-03T06:00:00Z"),
+            "position": "TE",
+            "scoring_profile_id": "half_ppr",
+            "league_type_id": "redraft",
+            "roster_format_id": "one_qb",
+            "avg_profile_points": 14.876,
+        }])
+
+        self.assertEqual(len(client.loaded_dataframes), 2)
+        for loaded_df in client.loaded_dataframes:
+            self.assertEqual(list(loaded_df.columns), [field.name for field in client.history_schema])
+            self.assertNotIn("avg_profile_points", loaded_df.columns)
 
     def test_write_rankings_standard_scope_does_not_delete_ppr(self):
         client = FakeLoadClient()

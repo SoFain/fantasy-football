@@ -419,6 +419,8 @@ def write_rankings(client, dataset_id, rows):
     roster_format_ids = sorted({str(row["roster_format_id"]) for row in rows if row.get("roster_format_id")})
     if not positions or not scoring_profile_ids or not league_type_ids or not roster_format_ids:
         raise RuntimeError("Pigskin ranking rows must include position and profile scope fields.")
+    if load_schema:
+        df = df.reindex(columns=[field.name for field in load_schema])
 
     staging_job = client.load_table_from_dataframe(
         df,
