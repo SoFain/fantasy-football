@@ -434,6 +434,33 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertEqual(summary["sample_size"], 1)
         self.assertEqual(summary["top_n_hit_rate"], 1.0)
         self.assertIn("missing_input_rate", summary)
+        metric_payload = json.loads(summary["metric_json"])
+        missing_payload = json.loads(summary["missing_flags_json"])
+        self.assertEqual(metric_payload["expected_feature_count"], 4)
+        self.assertEqual(metric_payload["available_feature_count"], 3)
+        self.assertEqual(metric_payload["missing_feature_count"], 1)
+        self.assertEqual(missing_payload["missing_feature_names"], ["pigskin_context_score"])
+
+    def test_air_yards_share_proxy_scores_as_percentage(self):
+        self.assertEqual(rfb._feature_value_to_score("air_yards", 0.42), 42.0)
+
+    def test_unavailable_supported_feature_stays_missing_not_zero_filled(self):
+        formula = {
+            "version": "ranking_formula_v0_2026_001",
+            "position": "WR",
+            "score_expression": "weighted_linear",
+            "features": ["targets", "receiving_yards"],
+            "weights": {"targets": 0.5, "receiving_yards": 0.5},
+            "normalization": {"method": "position_percentile"},
+            "source_flags": {},
+        }
+        result = rfb.evaluate_formula_for_feature_row(
+            rfb.validate_formula(formula),
+            {"targets": 8, "receiving_yards": None},
+        )
+
+        self.assertIn("receiving_yards", result["missing_features"])
+        self.assertNotIn("receiving_yards", result["feature_values"])
 
     def test_feature_and_target_availability_reports_missing_inputs(self):
         candidate = rfb.build_candidate_row(
@@ -522,6 +549,58 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertEqual(result["backtest_run_rows"][0]["backtest_run_id"], "ranking_backtest_v0_2024_to_2025_ppr")
         self.assertEqual(result["result_rows"][0]["season"], 2025)
         self.assertEqual(result["result_rows"][0]["scoring_profile_id"], "ppr")
+
+    def test_no_lookahead_backtest_version_controls_run_ids(self):
+        formula_set = self._formula_set()
+        candidates = [
+            rfb.build_candidate_row(
+                rfb.default_formula("QB"),
+                formula_name=f"QB {index}",
+                candidate_id=f"qb-{index}",
+                formula_set_id="set-1",
+            )
+            for index in range(3)
+        ]
+        fake = _SequencedFakeClient([[formula_set], candidates, []])
+
+        result = rfb.run_no_lookahead_backtest(
+            client=fake,
+            formula_set_id="set-1",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_ids=["ppr"],
+            positions=["QB"],
+            backtest_version="v1",
+            dry_run=True,
+        )
+
+        self.assertEqual(result["backtest_version"], "v1")
+        self.assertEqual(result["backtest_run_rows"][0]["backtest_run_id"], "ranking_backtest_v1_2024_to_2025_ppr")
+
+    def test_no_lookahead_feature_query_uses_safe_v1_source_mappings(self):
+        fake = _FakeClient(rows=[])
+
+        rfb.load_no_lookahead_feature_rows(
+            client=fake,
+            position="WR",
+            source_season=2024,
+            target_season=2025,
+            target_week_start=1,
+            target_week_end=18,
+            scoring_profile_id="ppr",
+            league_type_id="redraft",
+            roster_format_id="one_qb",
+        )
+
+        sql, _ = fake.queries[0]
+        self.assertIn("pigskin_player_context_packet_current", sql)
+        self.assertIn("packet_team_epa_per_play", sql)
+        self.assertIn("scoring_profile_id = 'ppr'", sql)
+        self.assertIn("$.neutral_pass_rate", sql)
+        self.assertIn("AVG(metrics.carries) AS rushing_attempts", sql)
+        self.assertIn("AVG(metrics.air_yards_share) AS air_yards", sql)
 
     def test_no_lookahead_dry_run_writes_nothing(self):
         formula_set = self._formula_set()

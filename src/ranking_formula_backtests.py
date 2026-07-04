@@ -7,6 +7,7 @@ import json
 import math
 import os
 import uuid
+from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,7 @@ MAX_REAL_DATA_LIMIT = 500
 DEFAULT_SCORING_PROFILES = ("ppr", "half_ppr", "standard", "gng_keeper")
 DEFAULT_LEAGUE_TYPE_ID = "redraft"
 DEFAULT_ROSTER_FORMAT_ID = "one_qb"
+DEFAULT_BACKTEST_VERSION = "v0"
 POSITION_TOP_N = {"QB": 12, "RB": 24, "WR": 24, "TE": 12}
 
 POSITIONS = ("QB", "RB", "WR", "TE")
@@ -133,6 +135,7 @@ FEATURE_SOURCE_MAP = {
     "usage_volume": "usage_volume",
     "epa_per_play": "epa_per_play",
     "passing_epa_per_play": "passing_epa_per_play",
+    "team_epa_per_play": "team_epa_per_play",
     "red_zone_opportunities": "red_zone_opportunities",
     "goal_line_opportunities": "goal_line_opportunities",
     "snap_share_proxy": "snap_share_proxy",
@@ -1014,6 +1017,7 @@ def run_no_lookahead_backtest(
     roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
     project_id: str = DEFAULT_PROJECT,
     dataset_id: str = DEFAULT_DATASET,
+    backtest_version: str = DEFAULT_BACKTEST_VERSION,
     dry_run: bool = True,
     write: bool = False,
     limit: int | None = None,
@@ -1029,6 +1033,7 @@ def run_no_lookahead_backtest(
 
     normalized_positions = [_normalize_position(position) for position in positions]
     normalized_profiles = [_normalize_scoring_profile_id(profile) for profile in scoring_profile_ids]
+    normalized_backtest_version = _normalize_backtest_version(backtest_version)
     validate_candidate_status(status)
     load_ranking_formula_set(
         client=client,
@@ -1072,8 +1077,11 @@ def run_no_lookahead_backtest(
             input_tables=ALLOWED_INPUT_TABLES,
             dry_run=not write,
             status="planned" if not write else "complete",
-            backtest_run_id=f"ranking_backtest_v0_{source_season}_to_{target_season}_{profile}",
+            backtest_run_id=(
+                f"ranking_backtest_{normalized_backtest_version}_{source_season}_to_{target_season}_{profile}"
+            ),
             notes=(
+                f"backtest_version={normalized_backtest_version}; "
                 f"source_season={source_season}; target_season={target_season}; "
                 f"target_weeks={target_week_start}-{target_week_end}; no_lookahead=true"
             ),
@@ -1139,6 +1147,7 @@ def run_no_lookahead_backtest(
         "dry_run": not write,
         "write": write,
         "formula_set_id": formula_set_id,
+        "backtest_version": normalized_backtest_version,
         "candidate_count": len(candidates),
         "scoring_profile_ids": normalized_profiles,
         "positions": normalized_positions,
@@ -1222,7 +1231,7 @@ WITH source_features AS (
         AVG(metrics.success_rate) AS success_rate,
         AVG(metrics.success_rate) AS passing_success_rate,
         AVG(truth.pass_attempts) AS dropbacks,
-        AVG(truth.carries) AS rushing_attempts,
+        AVG(metrics.carries) AS rushing_attempts,
         AVG(metrics.success_rate) AS rush_success_rate,
         AVG(metrics.targets) AS receiving_usage,
         AVG(metrics.cpoe) AS cpoe,
@@ -1232,7 +1241,7 @@ WITH source_features AS (
         AVG(metrics.red_zone_touches) AS red_zone_opportunities,
         AVG(metrics.inside_5_carries) AS goal_line_opportunities,
         AVG(metrics.snap_share) AS snap_share_proxy,
-        AVG(truth.receiving_air_yards) AS air_yards,
+        AVG(metrics.air_yards_share) AS air_yards,
         AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
         ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
         ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags
@@ -1254,6 +1263,21 @@ WITH source_features AS (
       AND metrics.league_type_id = @league_type_id
       AND metrics.roster_format_id = @roster_format_id
     GROUP BY metrics.player_id_internal, metrics.position
+),
+packet_context AS (
+    SELECT
+        REGEXP_REPLACE(player_id_internal, r'^gsis:', '') AS player_key,
+        position,
+        AVG(SAFE_CAST(JSON_VALUE(team_context_json, '$.team_epa_per_play') AS FLOAT64)) AS packet_team_epa_per_play,
+        AVG(SAFE_CAST(JSON_VALUE(team_context_json, '$.neutral_pass_rate') AS FLOAT64)) AS packet_team_pass_rate,
+        ANY_VALUE(source_freshness_json) AS packet_source_freshness_json
+    FROM `{table_id(project_id, dataset_id, "pigskin_player_context_packet_current")}`
+    WHERE position = @position
+      AND as_of_season = @source_season
+      AND scoring_profile_id = 'ppr'
+      AND COALESCE(league_type_id, @league_type_id) = @league_type_id
+      AND COALESCE(roster_format_id, @roster_format_id) = @roster_format_id
+    GROUP BY player_key, position
 ),
 target_points AS (
     SELECT
@@ -1304,16 +1328,20 @@ SELECT
     source.usage_volume,
     source.epa_per_play,
     source.passing_epa_per_play,
+    packet.packet_team_epa_per_play AS team_epa_per_play,
     source.red_zone_opportunities,
     source.goal_line_opportunities,
     source.snap_share_proxy,
     source.air_yards,
-    source.team_pass_rate,
+    COALESCE(source.team_pass_rate, packet.packet_team_pass_rate) AS team_pass_rate,
     source.metrics_source_freshness_json,
-    source.metrics_missing_flags
+    source.metrics_missing_flags,
+    packet.packet_source_freshness_json
 FROM target_points target
 JOIN source_features source
   ON target.player_key = source.player_key
+LEFT JOIN packet_context packet
+  ON target.player_key = packet.player_key
 ORDER BY target.week, target.player_id_internal
 {limit_sql}
 """.strip()
@@ -1455,10 +1483,25 @@ def build_summary_from_results(
     scored_rows = [row for row in result_rows if row.get("predicted_score") is not None]
     missing_rates = []
     formula = json.loads(candidate_row["formula_json"])
-    feature_count = max(len(formula.get("features", [])), 1)
+    feature_names = list(formula.get("features", []))
+    feature_count = max(len(feature_names), 1)
+    missing_counter: Counter[str] = Counter()
     for row in result_rows:
         missing = json.loads(row["missing_flags_json"]).get("missing_features", [])
+        missing_counter.update(str(feature) for feature in missing)
         missing_rates.append(len(missing) / feature_count)
+    if sample_size:
+        fully_missing_features = sorted(
+            feature for feature in feature_names if missing_counter.get(str(feature), 0) >= sample_size
+        )
+        available_features = sorted(feature for feature in feature_names if feature not in fully_missing_features)
+    else:
+        fully_missing_features = sorted(feature_names)
+        available_features = []
+    top_missing_features = [
+        {"feature": feature, "missing_row_count": count}
+        for feature, count in missing_counter.most_common()
+    ]
     top_n_hit_rate = None
     if target_rows:
         top_n_hit_rate = sum(1 for row in target_rows if row["target_hit"]) / len(target_rows)
@@ -1475,6 +1518,11 @@ def build_summary_from_results(
         "regret_score": top_n_capture["regret_score"],
         "actual_points_captured_rate": top_n_capture["actual_points_captured_rate"],
         "missing_input_rate": sum(missing_rates) / len(missing_rates) if missing_rates else None,
+        "expected_feature_count": len(feature_names),
+        "available_feature_count": len(available_features),
+        "missing_feature_count": len(fully_missing_features),
+        "missing_feature_names": fully_missing_features,
+        "top_missing_features": top_missing_features,
         "null_metric_reasons": {
             "pairwise_win_rate": None if pairwise_win_rate is not None else "fewer than two scored comparison rows",
             "mean_absolute_error": None if mean_absolute_error is not None else "fewer than one scored row with ranks",
@@ -1500,7 +1548,16 @@ def build_summary_from_results(
         "actual_points_captured_rate": top_n_capture["actual_points_captured_rate"],
         "missing_input_rate": metric_payload["missing_input_rate"],
         "metric_json": _json(metric_payload),
-        "missing_flags_json": _json({"summary_from_results": True}),
+        "missing_flags_json": _json(
+            {
+                "summary_from_results": True,
+                "expected_feature_count": len(feature_names),
+                "available_feature_count": len(available_features),
+                "missing_feature_count": len(fully_missing_features),
+                "missing_feature_names": fully_missing_features,
+                "top_missing_features": top_missing_features,
+            }
+        ),
         "source_freshness_json": _json({"status": "computed", "result_row_count": sample_size}),
         "created_at": _now(),
     }
@@ -1773,6 +1830,8 @@ def _feature_value_to_score(feature: str, value: float) -> float:
         return max(0.0, min(100.0, (value / 35.0) * 100.0))
     if feature in {"epa_per_play", "passing_epa_per_play", "receiving_epa", "team_epa_per_play"}:
         return max(0.0, min(100.0, 50.0 + (value * 25.0)))
+    if feature == "air_yards" and 0 <= value <= 1:
+        return max(0.0, min(100.0, value * 100.0))
     if feature in {"air_yards", "receiving_yards"}:
         return max(0.0, min(100.0, (value / 150.0) * 100.0))
     if feature in {"targets", "carries", "dropbacks", "rushing_attempts", "usage_volume", "red_zone_targets", "red_zone_opportunities", "goal_line_opportunities"}:
@@ -2058,6 +2117,14 @@ def _normalize_scoring_profile_id(scoring_profile_id: str) -> str:
     return value
 
 
+def _normalize_backtest_version(backtest_version: str) -> str:
+    value = str(backtest_version or "").strip().lower()
+    _reject_executable_text(value)
+    if not value or not value.replace("_", "").isalnum():
+        raise FormulaValidationError(f"Unsupported backtest_version: {backtest_version}")
+    return value
+
+
 def _target_name_for_position(position: str) -> str:
     return "top_12_position" if _normalize_position(position) in {"QB", "TE"} else "top_24_position"
 
@@ -2125,6 +2192,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--from-bigquery-candidates", action="store_true")
     parser.add_argument("--formula-set-id")
+    parser.add_argument("--backtest-version", default=DEFAULT_BACKTEST_VERSION)
     parser.add_argument("--status", default="draft")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--scoring-profile-id", default="ppr")
@@ -2162,6 +2230,7 @@ def main(argv: list[str] | None = None) -> int:
                 roster_format_id=args.roster_format_id,
                 project_id=args.project,
                 dataset_id=args.dataset,
+                backtest_version=args.backtest_version,
                 dry_run=args.dry_run or not args.write,
                 write=args.write,
                 limit=args.limit,
@@ -2209,6 +2278,7 @@ def _cli_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "dry_run": result.get("dry_run"),
         "write": result.get("write"),
         "candidate_count": result.get("candidate_count"),
+        "backtest_version": result.get("backtest_version"),
         "positions": result.get("positions"),
         "scoring_profile_ids": result.get("scoring_profile_ids"),
         "source_season": result.get("source_season"),
