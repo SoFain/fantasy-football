@@ -26,6 +26,33 @@ DEFAULT_LEAGUE_TYPE_ID = "redraft"
 DEFAULT_ROSTER_FORMAT_ID = "one_qb"
 DEFAULT_BACKTEST_VERSION = "v0"
 POSITION_TOP_N = {"QB": 12, "RB": 24, "WR": 24, "TE": 12}
+OVERALL_DRAFT_TOP_N = (24, 50, 100)
+PICK_BANDS = (
+    (1, 12, "1-12"),
+    (13, 24, "13-24"),
+    (25, 36, "25-36"),
+    (37, 60, "37-60"),
+    (61, 100, "61-100"),
+    (101, None, "101+"),
+)
+DRAFT_UTILITY_K_BY_POSITION = {
+    "QB": (6, 12),
+    "RB": (12, 24),
+    "WR": (12, 24, 36),
+    "TE": (3, 6, 12),
+}
+DRAFT_UTILITY_OVERALL_K = (24, 50, 100)
+DRAFT_UTILITY_METRIC_CONTRACT = {
+    "ndcg_at_k": "Discounted gain from predicted top K divided by ideal discounted gain for the same weekly slice.",
+    "value_captured_at_k": "Actual fantasy points captured by predicted top K divided by actual top K points.",
+    "elite_recall_at_k": "Share of actual top K players captured by predicted top K.",
+    "tier_accuracy": "Share of rows whose predicted rank tier matches the actual rank tier.",
+    "bust_rate": "Share of predicted top K rows that finish outside twice the K threshold.",
+    "pick_band_regret": "Positive value lost by predicted pick-band allocation compared with actual pick-band allocation.",
+    "overall_pairwise_draft_win_rate": "Pairwise win rate for cross-position draft ordering, bounded to top draft ranks.",
+    "high_confidence_pairwise_win_rate": "Pairwise win rate when predicted scores differ by at least ten points.",
+    "value_over_replacement_captured_rate": "Positive VOR captured by predicted top K divided by ideal actual top K VOR.",
+}
 
 POSITIONS = ("QB", "RB", "WR", "TE")
 TARGET_DEFINITIONS = {
@@ -1870,6 +1897,1353 @@ ORDER BY target.week, target.player_id_internal
     return _query_records(client, query, query_parameters)
 
 
+def build_feature_mart_delete_sql(*, project_id: str, dataset_id: str) -> str:
+    return f"""
+DELETE FROM `{table_id(project_id, dataset_id, "ranking_backtest_feature_mart")}`
+WHERE target_season = @target_season
+  AND scoring_profile_id IN UNNEST(@scoring_profile_ids)
+  AND position IN UNNEST(@positions)
+  AND league_type_id = @league_type_id
+  AND roster_format_id = @roster_format_id
+""".strip()
+
+
+def build_feature_mart_insert_sql(*, project_id: str, dataset_id: str) -> str:
+    mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
+    metrics_table = table_id(project_id, dataset_id, "player_week_advanced_metrics")
+    truth_table = table_id(project_id, dataset_id, "analytics_player_weekly_truth")
+    points_table = table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")
+    packet_table = table_id(project_id, dataset_id, "pigskin_player_context_packet_current")
+    return f"""
+CREATE TEMP FUNCTION _slope(points ARRAY<STRUCT<season INT64, value FLOAT64>>)
+RETURNS FLOAT64
+LANGUAGE js AS '''
+  const filtered = points
+    .filter((point) => point.value !== null && Number.isFinite(Number(point.value)))
+    .sort((left, right) => Number(left.season) - Number(right.season));
+  if (filtered.length < 2) return null;
+  const first = filtered[0];
+  const last = filtered[filtered.length - 1];
+  const seasonSpan = Number(last.season) - Number(first.season);
+  if (!Number.isFinite(seasonSpan) || seasonSpan === 0) return null;
+  return (Number(last.value) - Number(first.value)) / seasonSpan;
+''';
+
+INSERT INTO `{mart_table}` (
+    source_window_start_season,
+    source_window_end_season,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    player_name,
+    team,
+    source_team,
+    recent_points_avg,
+    profile_points_score,
+    opportunity_score_proxy,
+    efficiency_score_proxy,
+    analytical_grade_proxy,
+    role_stability_score,
+    targets,
+    carries,
+    receiving_yards,
+    receiving_epa,
+    red_zone_targets,
+    success_rate,
+    passing_success_rate,
+    dropbacks,
+    rushing_attempts,
+    rush_success_rate,
+    receiving_usage,
+    cpoe,
+    usage_volume,
+    epa_per_play,
+    passing_epa_per_play,
+    team_epa_per_play,
+    red_zone_opportunities,
+    goal_line_opportunities,
+    snap_share_proxy,
+    air_yards,
+    team_pass_rate,
+    points_per_game_slope_3yr,
+    total_points_slope_3yr,
+    opportunity_slope_3yr,
+    target_share_slope_3yr,
+    carry_share_slope_3yr,
+    receiving_usage_slope_3yr,
+    wopr_slope_3yr,
+    epa_slope_3yr,
+    efficiency_slope_3yr,
+    availability_rate_3yr,
+    weekly_volatility_3yr,
+    improving_3yr,
+    declining_3yr,
+    breakout_trajectory_3yr,
+    target_fantasy_points,
+    actual_position_rank,
+    actual_overall_rank,
+    replacement_points,
+    value_over_replacement,
+    top_24_overall,
+    top_50_overall,
+    top_100_overall,
+    actual_pick_band,
+    predictor_missing_flags_json,
+    outcome_missing_flags_json,
+    source_freshness_json,
+    provenance_json,
+    created_at
+)
+WITH profiles AS (
+    SELECT scoring_profile_id FROM UNNEST(@scoring_profile_ids) AS scoring_profile_id
+),
+positions AS (
+    SELECT position FROM UNNEST(@positions) AS position
+),
+season_features AS (
+    SELECT
+        profiles.scoring_profile_id,
+        REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') AS player_key,
+        metrics.player_id_internal,
+        ANY_VALUE(COALESCE(metrics.player_name, truth.player_display_name, truth.player_name)) AS player_name,
+        metrics.position,
+        metrics.season,
+        ANY_VALUE(COALESCE(metrics.team, truth.team)) AS source_team,
+        AVG(source_profile.total_fantasy_points) AS points_per_game,
+        SUM(source_profile.total_fantasy_points) AS total_points,
+        AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) AS recent_points_avg,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) * 4.0)) AS profile_points_score,
+        AVG(metrics.targets) AS targets,
+        AVG(metrics.carries) AS carries,
+        AVG(truth.receiving_yards) AS receiving_yards,
+        AVG(truth.receiving_epa) AS receiving_epa,
+        AVG(metrics.red_zone_targets) AS red_zone_targets,
+        AVG(metrics.success_rate) AS success_rate,
+        AVG(metrics.success_rate) AS passing_success_rate,
+        AVG(truth.pass_attempts) AS dropbacks,
+        AVG(metrics.carries) AS rushing_attempts,
+        AVG(metrics.success_rate) AS rush_success_rate,
+        AVG(metrics.targets) AS receiving_usage,
+        AVG(metrics.target_share) AS target_share,
+        AVG(metrics.carry_share) AS carry_share,
+        AVG(metrics.wopr) AS wopr,
+        AVG(metrics.cpoe) AS cpoe,
+        AVG(metrics.opportunities) AS usage_volume,
+        AVG(metrics.epa_per_opportunity) AS epa_per_play,
+        LEAST(100.0, GREATEST(0.0, AVG(metrics.opportunities) * 4.0)) AS opportunity_score_proxy,
+        LEAST(100.0, GREATEST(0.0, 50.0 + (AVG(metrics.epa_per_opportunity) * 25.0))) AS efficiency_score_proxy,
+        AVG(SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0))) AS passing_epa_per_play,
+        AVG(metrics.red_zone_touches) AS red_zone_opportunities,
+        AVG(metrics.inside_5_carries) AS goal_line_opportunities,
+        AVG(metrics.snap_share) AS snap_share_proxy,
+        AVG(metrics.air_yards_share) AS air_yards,
+        AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
+        SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) AS availability_rate,
+        STDDEV(metrics.opportunities) AS weekly_volatility,
+        LEAST(100.0, GREATEST(0.0, SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) * 100.0 - COALESCE(STDDEV(metrics.opportunities), 0.0) * 2.0)) AS role_stability_score,
+        ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
+        ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags
+    FROM `{metrics_table}` metrics
+    JOIN positions
+      ON metrics.position = positions.position
+    CROSS JOIN profiles
+    LEFT JOIN `{truth_table}` truth
+      ON metrics.season = truth.season
+     AND metrics.week = truth.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(truth.player_id, r'^gsis:', '')
+    LEFT JOIN `{points_table}` source_profile
+      ON metrics.season = source_profile.season
+     AND metrics.week = source_profile.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(source_profile.player_id_internal, r'^gsis:', '')
+     AND source_profile.scoring_profile_id = profiles.scoring_profile_id
+     AND COALESCE(source_profile.league_type_id, @league_type_id) = @league_type_id
+     AND COALESCE(source_profile.roster_format_id, @roster_format_id) = @roster_format_id
+    WHERE metrics.season BETWEEN @source_window_start_season AND @source_window_end_season
+      AND metrics.season < @target_season
+      AND metrics.scoring_profile_id = 'ppr'
+      AND metrics.league_type_id = @league_type_id
+      AND metrics.roster_format_id = @roster_format_id
+    GROUP BY profiles.scoring_profile_id, metrics.player_id_internal, metrics.position, metrics.season
+),
+source_features AS (
+    SELECT
+        scoring_profile_id,
+        player_key,
+        ANY_VALUE(player_id_internal) AS player_id_internal,
+        ANY_VALUE(player_name) AS player_name,
+        position,
+        ANY_VALUE(source_team HAVING MAX season) AS source_team,
+        AVG(recent_points_avg) AS recent_points_avg,
+        AVG(profile_points_score) AS profile_points_score,
+        AVG(targets) AS targets,
+        AVG(carries) AS carries,
+        AVG(receiving_yards) AS receiving_yards,
+        AVG(receiving_epa) AS receiving_epa,
+        AVG(red_zone_targets) AS red_zone_targets,
+        AVG(success_rate) AS success_rate,
+        AVG(passing_success_rate) AS passing_success_rate,
+        AVG(dropbacks) AS dropbacks,
+        AVG(rushing_attempts) AS rushing_attempts,
+        AVG(rush_success_rate) AS rush_success_rate,
+        AVG(receiving_usage) AS receiving_usage,
+        AVG(cpoe) AS cpoe,
+        AVG(usage_volume) AS usage_volume,
+        AVG(epa_per_play) AS epa_per_play,
+        AVG(opportunity_score_proxy) AS opportunity_score_proxy,
+        AVG(efficiency_score_proxy) AS efficiency_score_proxy,
+        AVG((opportunity_score_proxy + efficiency_score_proxy) / 2.0) AS analytical_grade_proxy,
+        AVG(passing_epa_per_play) AS passing_epa_per_play,
+        AVG(red_zone_opportunities) AS red_zone_opportunities,
+        AVG(goal_line_opportunities) AS goal_line_opportunities,
+        AVG(snap_share_proxy) AS snap_share_proxy,
+        AVG(air_yards) AS air_yards,
+        AVG(team_pass_rate) AS team_pass_rate,
+        _slope(ARRAY_AGG(STRUCT(season, points_per_game AS value) ORDER BY season)) AS points_per_game_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, total_points AS value) ORDER BY season)) AS total_points_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) AS opportunity_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, target_share AS value) ORDER BY season)) AS target_share_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, carry_share AS value) ORDER BY season)) AS carry_share_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, receiving_usage AS value) ORDER BY season)) AS receiving_usage_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, wopr AS value) ORDER BY season)) AS wopr_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, epa_per_play AS value) ORDER BY season)) AS epa_slope_3yr,
+        _slope(ARRAY_AGG(STRUCT(season, success_rate AS value) ORDER BY season)) AS efficiency_slope_3yr,
+        AVG(availability_rate) AS availability_rate_3yr,
+        AVG(weekly_volatility) AS weekly_volatility_3yr,
+        AVG(role_stability_score) AS role_stability_score,
+        IF(_slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) > 0
+           AND _slope(ARRAY_AGG(STRUCT(season, epa_per_play AS value) ORDER BY season)) > 0, 1.0, 0.0) AS improving_3yr,
+        IF(_slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) < 0
+           AND _slope(ARRAY_AGG(STRUCT(season, epa_per_play AS value) ORDER BY season)) < 0, 1.0, 0.0) AS declining_3yr,
+        IF(_slope(ARRAY_AGG(STRUCT(season, target_share AS value) ORDER BY season)) > 0
+           OR _slope(ARRAY_AGG(STRUCT(season, carry_share AS value) ORDER BY season)) > 0, 1.0, 0.0) AS breakout_trajectory_3yr,
+        ANY_VALUE(metrics_source_freshness_json HAVING MAX season) AS metrics_source_freshness_json,
+        ANY_VALUE(metrics_missing_flags HAVING MAX season) AS metrics_missing_flags
+    FROM season_features
+    GROUP BY scoring_profile_id, player_key, position
+),
+packet_context AS (
+    SELECT
+        REGEXP_REPLACE(player_id_internal, r'^gsis:', '') AS player_key,
+        position,
+        scoring_profile_id,
+        AVG(SAFE_CAST(JSON_VALUE(team_context_json, '$.team_epa_per_play') AS FLOAT64)) AS packet_team_epa_per_play,
+        AVG(SAFE_CAST(JSON_VALUE(team_context_json, '$.neutral_pass_rate') AS FLOAT64)) AS packet_team_pass_rate,
+        ANY_VALUE(source_freshness_json) AS packet_source_freshness_json
+    FROM `{packet_table}`
+    WHERE as_of_season = @source_window_end_season
+      AND scoring_profile_id IN UNNEST(@scoring_profile_ids)
+      AND position IN UNNEST(@positions)
+      AND COALESCE(league_type_id, @league_type_id) = @league_type_id
+      AND COALESCE(roster_format_id, @roster_format_id) = @roster_format_id
+    GROUP BY player_key, position, scoring_profile_id
+),
+target_points AS (
+    SELECT
+        target.season AS target_season,
+        target.week AS target_week,
+        REGEXP_REPLACE(target.player_id_internal, r'^gsis:', '') AS player_key,
+        REGEXP_REPLACE(target.player_id_internal, r'^gsis:', '') AS player_id_internal,
+        target.player_display_name AS player_name,
+        target.position,
+        target.team,
+        target.scoring_profile_id,
+        COALESCE(target.league_type_id, @league_type_id) AS league_type_id,
+        COALESCE(target.roster_format_id, @roster_format_id) AS roster_format_id,
+        target.total_fantasy_points AS target_fantasy_points
+    FROM `{points_table}` target
+    WHERE target.season = @target_season
+      AND target.scoring_profile_id IN UNNEST(@scoring_profile_ids)
+      AND target.position IN UNNEST(@positions)
+      AND COALESCE(target.league_type_id, @league_type_id) = @league_type_id
+      AND COALESCE(target.roster_format_id, @roster_format_id) = @roster_format_id
+      AND target.player_id_internal IS NOT NULL
+),
+with_source AS (
+    SELECT
+        @source_window_start_season AS source_window_start_season,
+        @source_window_end_season AS source_window_end_season,
+        target.target_season,
+        target.target_week,
+        target.scoring_profile_id,
+        target.league_type_id,
+        target.roster_format_id,
+        target.position,
+        target.player_id_internal,
+        COALESCE(target.player_name, source.player_name) AS player_name,
+        target.team,
+        source.source_team,
+        source.recent_points_avg,
+        source.profile_points_score,
+        source.opportunity_score_proxy,
+        source.efficiency_score_proxy,
+        source.analytical_grade_proxy,
+        source.role_stability_score,
+        source.targets,
+        source.carries,
+        source.receiving_yards,
+        source.receiving_epa,
+        source.red_zone_targets,
+        source.success_rate,
+        source.passing_success_rate,
+        source.dropbacks,
+        source.rushing_attempts,
+        source.rush_success_rate,
+        source.receiving_usage,
+        source.cpoe,
+        source.usage_volume,
+        source.epa_per_play,
+        source.passing_epa_per_play,
+        packet.packet_team_epa_per_play AS team_epa_per_play,
+        source.red_zone_opportunities,
+        source.goal_line_opportunities,
+        source.snap_share_proxy,
+        source.air_yards,
+        COALESCE(source.team_pass_rate, packet.packet_team_pass_rate) AS team_pass_rate,
+        source.points_per_game_slope_3yr,
+        source.total_points_slope_3yr,
+        source.opportunity_slope_3yr,
+        source.target_share_slope_3yr,
+        source.carry_share_slope_3yr,
+        source.receiving_usage_slope_3yr,
+        source.wopr_slope_3yr,
+        source.epa_slope_3yr,
+        source.efficiency_slope_3yr,
+        source.availability_rate_3yr,
+        source.weekly_volatility_3yr,
+        source.improving_3yr,
+        source.declining_3yr,
+        source.breakout_trajectory_3yr,
+        target.target_fantasy_points,
+        source.metrics_source_freshness_json,
+        source.metrics_missing_flags,
+        packet.packet_source_freshness_json
+    FROM target_points target
+    JOIN source_features source
+      ON target.player_key = source.player_key
+     AND target.position = source.position
+     AND target.scoring_profile_id = source.scoring_profile_id
+    LEFT JOIN packet_context packet
+      ON target.player_key = packet.player_key
+     AND target.position = packet.position
+     AND target.scoring_profile_id = packet.scoring_profile_id
+),
+ranked AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+            ORDER BY target_fantasy_points DESC, player_id_internal
+        ) AS actual_position_rank,
+        ROW_NUMBER() OVER (
+            PARTITION BY target_season, target_week, scoring_profile_id, league_type_id, roster_format_id
+            ORDER BY target_fantasy_points DESC, player_id_internal
+        ) AS actual_overall_rank,
+        CASE position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 24 WHEN 'TE' THEN 12 ELSE 24 END AS replacement_rank
+    FROM with_source
+),
+with_replacement AS (
+    SELECT
+        *,
+        MAX(IF(actual_position_rank = replacement_rank, target_fantasy_points, NULL)) OVER (
+            PARTITION BY target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+        ) AS replacement_points
+    FROM ranked
+)
+SELECT
+    source_window_start_season,
+    source_window_end_season,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    player_name,
+    team,
+    source_team,
+    recent_points_avg,
+    profile_points_score,
+    opportunity_score_proxy,
+    efficiency_score_proxy,
+    analytical_grade_proxy,
+    role_stability_score,
+    targets,
+    carries,
+    receiving_yards,
+    receiving_epa,
+    red_zone_targets,
+    success_rate,
+    passing_success_rate,
+    dropbacks,
+    rushing_attempts,
+    rush_success_rate,
+    receiving_usage,
+    cpoe,
+    usage_volume,
+    epa_per_play,
+    passing_epa_per_play,
+    team_epa_per_play,
+    red_zone_opportunities,
+    goal_line_opportunities,
+    snap_share_proxy,
+    air_yards,
+    team_pass_rate,
+    points_per_game_slope_3yr,
+    total_points_slope_3yr,
+    opportunity_slope_3yr,
+    target_share_slope_3yr,
+    carry_share_slope_3yr,
+    receiving_usage_slope_3yr,
+    wopr_slope_3yr,
+    epa_slope_3yr,
+    efficiency_slope_3yr,
+    availability_rate_3yr,
+    weekly_volatility_3yr,
+    improving_3yr,
+    declining_3yr,
+    breakout_trajectory_3yr,
+    target_fantasy_points,
+    actual_position_rank,
+    actual_overall_rank,
+    replacement_points,
+    GREATEST(target_fantasy_points - COALESCE(replacement_points, target_fantasy_points), 0) AS value_over_replacement,
+    actual_overall_rank <= 24 AS top_24_overall,
+    actual_overall_rank <= 50 AS top_50_overall,
+    actual_overall_rank <= 100 AS top_100_overall,
+    CASE
+      WHEN actual_overall_rank BETWEEN 1 AND 12 THEN '1-12'
+      WHEN actual_overall_rank BETWEEN 13 AND 24 THEN '13-24'
+      WHEN actual_overall_rank BETWEEN 25 AND 36 THEN '25-36'
+      WHEN actual_overall_rank BETWEEN 37 AND 60 THEN '37-60'
+      WHEN actual_overall_rank BETWEEN 61 AND 100 THEN '61-100'
+      WHEN actual_overall_rank >= 101 THEN '101+'
+      ELSE NULL
+    END AS actual_pick_band,
+    TO_JSON_STRING(STRUCT(
+        recent_points_avg IS NULL AS recent_points_avg_missing,
+        profile_points_score IS NULL AS profile_points_score_missing,
+        opportunity_score_proxy IS NULL AS opportunity_score_proxy_missing,
+        efficiency_score_proxy IS NULL AS efficiency_score_proxy_missing,
+        analytical_grade_proxy IS NULL AS analytical_grade_proxy_missing,
+        role_stability_score IS NULL AS role_stability_score_missing,
+        metrics_missing_flags AS source_missing_flags
+    )) AS predictor_missing_flags_json,
+    TO_JSON_STRING(STRUCT(
+        target_fantasy_points IS NULL AS target_fantasy_points_missing,
+        replacement_points IS NULL AS replacement_points_missing
+    )) AS outcome_missing_flags_json,
+    TO_JSON_STRING(STRUCT(
+        metrics_source_freshness_json AS metrics_source_freshness_json,
+        packet_source_freshness_json AS packet_source_freshness_json
+    )) AS source_freshness_json,
+    TO_JSON_STRING(STRUCT(
+        'ranking_backtest_feature_mart' AS builder,
+        @source_window_start_season AS source_window_start_season,
+        @source_window_end_season AS source_window_end_season,
+        @target_season AS target_season,
+        'target-season predictors excluded' AS leakage_policy
+    )) AS provenance_json,
+    CURRENT_TIMESTAMP() AS created_at
+FROM with_replacement
+""".strip()
+
+
+def populate_ranking_backtest_feature_mart(
+    *,
+    client: Any,
+    target_season: int,
+    scoring_profile_ids: list[str] | tuple[str, ...],
+    positions: list[str] | tuple[str, ...],
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+    source_window_years: int = 3,
+) -> dict[str, Any]:
+    normalized_profiles = [str(profile) for profile in scoring_profile_ids]
+    normalized_positions = [_normalize_position(position) for position in positions]
+    source_window_end = int(target_season) - 1
+    source_window_start = max(source_window_end - _normalize_source_window_years(source_window_years) + 1, 2014)
+    params = _feature_mart_query_params(
+        target_season=target_season,
+        source_window_start=source_window_start,
+        source_window_end=source_window_end,
+        scoring_profile_ids=normalized_profiles,
+        positions=normalized_positions,
+        league_type_id=league_type_id,
+        roster_format_id=roster_format_id,
+    )
+    client.query(
+        build_feature_mart_delete_sql(project_id=project_id, dataset_id=dataset_id),
+        job_config=_query_job_config(params),
+    ).result()
+    client.query(
+        build_feature_mart_insert_sql(project_id=project_id, dataset_id=dataset_id),
+        job_config=_query_job_config(params),
+    ).result()
+    count_sql = f"""
+SELECT COUNT(*) AS row_count
+FROM `{table_id(project_id, dataset_id, "ranking_backtest_feature_mart")}`
+WHERE target_season = @target_season
+  AND scoring_profile_id IN UNNEST(@scoring_profile_ids)
+  AND position IN UNNEST(@positions)
+  AND league_type_id = @league_type_id
+  AND roster_format_id = @roster_format_id
+""".strip()
+    row_count = list(client.query(count_sql, job_config=_query_job_config(params)).result())[0]["row_count"]
+    return {
+        "target_table": table_id(project_id, dataset_id, "ranking_backtest_feature_mart"),
+        "target_season": int(target_season),
+        "source_window_start_season": source_window_start,
+        "source_window_end_season": source_window_end,
+        "scoring_profile_ids": normalized_profiles,
+        "positions": normalized_positions,
+        "row_count": int(row_count),
+    }
+
+
+def build_sql_native_scoring_prototype_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_season: int = 2025,
+    scoring_profile_id: str = "ppr",
+    position: str = "TE",
+) -> str:
+    mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
+    normalized_position = _normalize_position(position)
+    return f"""
+WITH formula_weights AS (
+  SELECT 'current_pigskin_candidate_score_v1' AS candidate_id, 'analytical_grade_proxy' AS feature_name, 0.55 AS weight UNION ALL
+  SELECT 'current_pigskin_candidate_score_v1', 'opportunity_score_proxy', 0.15 UNION ALL
+  SELECT 'current_pigskin_candidate_score_v1', 'efficiency_score_proxy', 0.10 UNION ALL
+  SELECT 'current_pigskin_candidate_score_v1', 'role_stability_score', 0.10 UNION ALL
+  SELECT 'current_pigskin_candidate_score_v1', 'profile_points_score', 0.10 UNION ALL
+  SELECT 'simple_projection_points_baseline', 'profile_points_score', 1.00 UNION ALL
+  SELECT 'v2_trend_balanced', 'target_share_slope_3yr', 0.25 UNION ALL
+  SELECT 'v2_trend_balanced', 'receiving_usage_slope_3yr', 0.20 UNION ALL
+  SELECT 'v2_trend_balanced', 'team_pass_rate', 0.20 UNION ALL
+  SELECT 'v2_trend_balanced', 'availability_rate_3yr', 0.20
+  UNION ALL SELECT 'v2_trend_balanced', 'declining_3yr', 0.15
+),
+mart AS (
+  SELECT *
+  FROM `{mart_table}`
+  WHERE target_season = {int(target_season)}
+    AND scoring_profile_id = '{scoring_profile_id}'
+    AND position = '{normalized_position}'
+    AND league_type_id = '{DEFAULT_LEAGUE_TYPE_ID}'
+    AND roster_format_id = '{DEFAULT_ROSTER_FORMAT_ID}'
+),
+feature_values AS (
+  SELECT
+    mart.*,
+    feature_name,
+    CASE feature_name
+      WHEN 'analytical_grade_proxy' THEN analytical_grade_proxy
+      WHEN 'opportunity_score_proxy' THEN opportunity_score_proxy
+      WHEN 'efficiency_score_proxy' THEN efficiency_score_proxy
+      WHEN 'role_stability_score' THEN role_stability_score
+      WHEN 'profile_points_score' THEN profile_points_score
+      WHEN 'recent_points_avg' THEN recent_points_avg
+      WHEN 'targets' THEN targets
+      WHEN 'target_share_slope_3yr' THEN target_share_slope_3yr
+      WHEN 'receiving_usage_slope_3yr' THEN receiving_usage_slope_3yr
+      WHEN 'points_per_game_slope_3yr' THEN points_per_game_slope_3yr
+      WHEN 'team_pass_rate' THEN team_pass_rate
+      WHEN 'availability_rate_3yr' THEN availability_rate_3yr
+      WHEN 'declining_3yr' THEN declining_3yr
+      ELSE NULL
+    END AS raw_feature_value
+  FROM mart
+  CROSS JOIN UNNEST([
+    'analytical_grade_proxy',
+    'opportunity_score_proxy',
+    'efficiency_score_proxy',
+    'role_stability_score',
+    'profile_points_score',
+    'recent_points_avg',
+    'targets',
+    'target_share_slope_3yr',
+    'receiving_usage_slope_3yr',
+    'points_per_game_slope_3yr',
+    'team_pass_rate',
+    'availability_rate_3yr',
+    'declining_3yr'
+  ]) AS feature_name
+),
+scored_features AS (
+  SELECT
+    *,
+    CASE
+      WHEN raw_feature_value IS NULL THEN NULL
+      WHEN feature_name IN ('points_per_game_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 10.0))
+      WHEN feature_name IN ('target_share_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 250.0))
+      WHEN feature_name IN ('receiving_usage_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 10.0))
+      WHEN feature_name = 'availability_rate_3yr' THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name = 'declining_3yr' THEN IF(raw_feature_value > 0, 0.0, 100.0)
+      WHEN feature_name = 'team_pass_rate' THEN LEAST(100.0, GREATEST(0.0, raw_feature_value))
+      WHEN feature_name = 'recent_points_avg' THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 35.0 * 100.0))
+      WHEN feature_name = 'targets' THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
+      ELSE LEAST(100.0, GREATEST(0.0, raw_feature_value))
+    END AS feature_score
+  FROM feature_values
+),
+candidate_scores AS (
+  SELECT
+    weights.candidate_id,
+    scored.target_season,
+    scored.target_week,
+    scored.scoring_profile_id,
+    scored.position,
+    scored.player_id_internal,
+    ANY_VALUE(scored.player_name) AS player_name,
+    ANY_VALUE(scored.team) AS team,
+    ANY_VALUE(scored.target_fantasy_points) AS actual_points,
+    ANY_VALUE(scored.actual_position_rank) AS actual_position_rank,
+    ANY_VALUE(scored.value_over_replacement) AS value_over_replacement,
+    SAFE_DIVIDE(SUM(scored.feature_score * weights.weight), SUM(IF(scored.feature_score IS NULL, 0, weights.weight))) AS predicted_score,
+    1.0 - SAFE_DIVIDE(SUM(IF(scored.feature_score IS NULL, weights.weight, 0)), SUM(weights.weight)) AS available_weight_rate
+  FROM formula_weights weights
+  JOIN scored_features scored
+    ON weights.feature_name = scored.feature_name
+  GROUP BY weights.candidate_id, scored.target_season, scored.target_week, scored.scoring_profile_id, scored.position, scored.player_id_internal
+),
+ranked AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, position
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_rank_position
+  FROM candidate_scores
+),
+weekly_summary AS (
+  SELECT
+    candidate_id,
+    target_week,
+    COUNT(*) AS source_row_count,
+    AVG(1.0 - available_weight_rate) AS missing_input_rate,
+    SAFE_DIVIDE(
+      COUNTIF(predicted_rank_position <= 12 AND actual_position_rank <= 12),
+      NULLIF(COUNTIF(actual_position_rank <= 12), 0)
+    ) AS top_n_hit_rate,
+    SUM(IF(predicted_rank_position <= 12, actual_points, 0)) AS predicted_top_points,
+    SUM(IF(actual_position_rank <= 12, actual_points, 0)) AS actual_top_points,
+    SUM(IF(predicted_rank_position <= 12, value_over_replacement, 0)) AS predicted_top_vor,
+    SUM(IF(actual_position_rank <= 12, value_over_replacement, 0)) AS actual_top_vor
+  FROM ranked
+  GROUP BY candidate_id, target_week
+),
+summary AS (
+  SELECT
+    candidate_id,
+    SUM(source_row_count) AS source_row_count,
+    AVG(missing_input_rate) AS missing_input_rate,
+    AVG(top_n_hit_rate) AS top_n_hit_rate,
+    SAFE_DIVIDE(SUM(predicted_top_points), SUM(actual_top_points)) AS actual_points_captured_rate,
+    SAFE_DIVIDE(SUM(predicted_top_vor), SUM(actual_top_vor)) AS value_over_replacement_captured_rate
+  FROM weekly_summary
+  GROUP BY candidate_id
+),
+rank_correlation AS (
+  SELECT
+    candidate_id,
+    CORR(CAST(predicted_rank_position AS FLOAT64), CAST(actual_position_rank AS FLOAT64)) AS rank_correlation
+  FROM ranked
+  GROUP BY candidate_id
+),
+final_summary AS (
+  SELECT
+    summary.candidate_id,
+    summary.source_row_count,
+    summary.missing_input_rate,
+    summary.top_n_hit_rate,
+    summary.actual_points_captured_rate,
+    summary.value_over_replacement_captured_rate,
+    rank_correlation.rank_correlation
+  FROM summary
+  LEFT JOIN rank_correlation USING (candidate_id)
+)
+SELECT *
+FROM final_summary
+ORDER BY candidate_id
+""".strip()
+
+
+def run_sql_native_scoring_prototype(
+    *,
+    client: Any,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    target_season: int = 2025,
+    scoring_profile_id: str = "ppr",
+    position: str = "TE",
+) -> list[dict[str, Any]]:
+    sql = build_sql_native_scoring_prototype_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_season=target_season,
+        scoring_profile_id=scoring_profile_id,
+        position=position,
+    )
+    return [dict(row) for row in client.query(sql).result()]
+
+
+def draft_utility_metric_contract() -> dict[str, Any]:
+    return {
+        "metrics": dict(DRAFT_UTILITY_METRIC_CONTRACT),
+        "position_k_values": {position: list(values) for position, values in DRAFT_UTILITY_K_BY_POSITION.items()},
+        "overall_k_values": list(DRAFT_UTILITY_OVERALL_K),
+        "persistence": "ranking_backtest_candidate_summaries.metric_json",
+    }
+
+
+def build_sql_native_tournament_summary_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_seasons: list[int] | tuple[int, ...] = tuple(range(2017, 2026)),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    candidate_rows: list[Mapping[str, Any]] | None = None,
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
+    selected_candidates = candidate_rows or sql_native_tournament_candidates()
+    formula_weight_sql = _formula_weight_rows_sql(selected_candidates)
+    target_season_sql = ", ".join(str(int(season)) for season in sorted({int(season) for season in target_seasons}))
+    profile_sql = ", ".join(_sql_string(profile) for profile in scoring_profile_ids)
+    position_sql = ", ".join(_sql_string(_normalize_position(position)) for position in positions)
+    return f"""
+WITH formula_weights AS (
+  {formula_weight_sql}
+),
+mart AS (
+  SELECT *
+  FROM `{mart_table}`
+  WHERE target_season IN ({target_season_sql})
+    AND scoring_profile_id IN ({profile_sql})
+    AND position IN ({position_sql})
+    AND league_type_id = {_sql_string(league_type_id)}
+    AND roster_format_id = {_sql_string(roster_format_id)}
+    AND source_window_end_season < target_season
+),
+feature_values AS (
+  SELECT
+    mart.*,
+    weights.candidate_id,
+    weights.formula_version,
+    weights.feature_name,
+    weights.weight,
+    CASE weights.feature_name
+      WHEN 'actual_points' THEN target_fantasy_points
+      WHEN 'fantasy_points_ppr' THEN target_fantasy_points
+      WHEN 'recent_points_avg' THEN recent_points_avg
+      WHEN 'profile_points_score' THEN profile_points_score
+      WHEN 'analytical_grade_proxy' THEN analytical_grade_proxy
+      WHEN 'opportunity_score_proxy' THEN opportunity_score_proxy
+      WHEN 'efficiency_score_proxy' THEN efficiency_score_proxy
+      WHEN 'role_stability_score' THEN role_stability_score
+      WHEN 'targets' THEN targets
+      WHEN 'carries' THEN carries
+      WHEN 'receiving_yards' THEN receiving_yards
+      WHEN 'receiving_epa' THEN receiving_epa
+      WHEN 'red_zone_targets' THEN red_zone_targets
+      WHEN 'success_rate' THEN success_rate
+      WHEN 'passing_success_rate' THEN passing_success_rate
+      WHEN 'cpoe' THEN cpoe
+      WHEN 'dropbacks' THEN dropbacks
+      WHEN 'rushing_attempts' THEN rushing_attempts
+      WHEN 'rush_success_rate' THEN rush_success_rate
+      WHEN 'receiving_usage' THEN receiving_usage
+      WHEN 'usage_volume' THEN usage_volume
+      WHEN 'epa_per_play' THEN epa_per_play
+      WHEN 'passing_epa_per_play' THEN passing_epa_per_play
+      WHEN 'team_epa_per_play' THEN team_epa_per_play
+      WHEN 'red_zone_opportunities' THEN red_zone_opportunities
+      WHEN 'goal_line_opportunities' THEN goal_line_opportunities
+      WHEN 'snap_share_proxy' THEN snap_share_proxy
+      WHEN 'air_yards' THEN air_yards
+      WHEN 'team_pass_rate' THEN team_pass_rate
+      WHEN 'points_per_game_slope_3yr' THEN points_per_game_slope_3yr
+      WHEN 'total_points_slope_3yr' THEN total_points_slope_3yr
+      WHEN 'opportunity_slope_3yr' THEN opportunity_slope_3yr
+      WHEN 'target_share_slope_3yr' THEN target_share_slope_3yr
+      WHEN 'carry_share_slope_3yr' THEN carry_share_slope_3yr
+      WHEN 'receiving_usage_slope_3yr' THEN receiving_usage_slope_3yr
+      WHEN 'wopr_slope_3yr' THEN wopr_slope_3yr
+      WHEN 'epa_slope_3yr' THEN epa_slope_3yr
+      WHEN 'efficiency_slope_3yr' THEN efficiency_slope_3yr
+      WHEN 'availability_rate_3yr' THEN availability_rate_3yr
+      WHEN 'weekly_volatility_3yr' THEN weekly_volatility_3yr
+      WHEN 'improving_3yr' THEN improving_3yr
+      WHEN 'declining_3yr' THEN declining_3yr
+      WHEN 'breakout_trajectory_3yr' THEN breakout_trajectory_3yr
+      ELSE NULL
+    END AS raw_feature_value
+  FROM mart
+  JOIN formula_weights weights
+    ON mart.position = weights.position
+),
+scored_features AS (
+  SELECT
+    *,
+    CASE
+      WHEN raw_feature_value IS NULL THEN NULL
+      WHEN feature_name IN ('points_per_game_slope_3yr', 'total_points_slope_3yr', 'opportunity_slope_3yr', 'receiving_usage_slope_3yr', 'epa_slope_3yr', 'efficiency_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 10.0))
+      WHEN feature_name IN ('target_share_slope_3yr', 'carry_share_slope_3yr', 'wopr_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 250.0))
+      WHEN feature_name = 'availability_rate_3yr' THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name = 'weekly_volatility_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value * 10.0))
+      WHEN feature_name IN ('improving_3yr', 'breakout_trajectory_3yr') THEN IF(raw_feature_value > 0, 100.0, 0.0)
+      WHEN feature_name = 'declining_3yr' THEN IF(raw_feature_value > 0, 0.0, 100.0)
+      WHEN feature_name IN ('success_rate', 'cpoe', 'snap_share_proxy') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name IN ('actual_points', 'fantasy_points_ppr', 'recent_points_avg') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 35.0 * 100.0))
+      WHEN feature_name IN ('epa_per_play', 'passing_epa_per_play', 'receiving_epa', 'team_epa_per_play') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 25.0))
+      WHEN feature_name = 'air_yards' AND raw_feature_value BETWEEN 0 AND 1 THEN LEAST(100.0, GREATEST(0.0, raw_feature_value * 100.0))
+      WHEN feature_name IN ('air_yards', 'receiving_yards') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 150.0 * 100.0))
+      WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
+      ELSE LEAST(100.0, GREATEST(0.0, raw_feature_value))
+    END AS feature_score
+  FROM feature_values
+),
+candidate_scores AS (
+  SELECT
+    candidate_id,
+    formula_version,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    ANY_VALUE(player_name) AS player_name,
+    ANY_VALUE(team) AS team,
+    ANY_VALUE(target_fantasy_points) AS actual_points,
+    ANY_VALUE(actual_position_rank) AS actual_rank_position,
+    ANY_VALUE(actual_overall_rank) AS actual_overall_rank,
+    ANY_VALUE(value_over_replacement) AS value_over_replacement,
+    SAFE_DIVIDE(SUM(feature_score * weight), SUM(IF(feature_score IS NULL, 0, weight))) AS predicted_score,
+    SAFE_DIVIDE(SUM(IF(feature_score IS NULL, weight, 0)), SUM(weight)) AS missing_input_rate
+  FROM scored_features
+  GROUP BY candidate_id, formula_version, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position, player_id_internal
+),
+ranked AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_rank_position,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_overall_rank,
+    CASE position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 24 WHEN 'TE' THEN 12 ELSE 24 END AS default_top_n
+  FROM candidate_scores
+  WHERE predicted_score IS NOT NULL
+),
+with_rank_metrics AS (
+  SELECT
+    *,
+    CASE
+      WHEN predicted_rank_position BETWEEN 1 AND 12 THEN '1-12'
+      WHEN predicted_rank_position BETWEEN 13 AND 24 THEN '13-24'
+      WHEN predicted_rank_position BETWEEN 25 AND 36 THEN '25-36'
+      WHEN predicted_rank_position BETWEEN 37 AND 60 THEN '37-60'
+      WHEN predicted_rank_position BETWEEN 61 AND 100 THEN '61-100'
+      ELSE '101+'
+    END AS predicted_pick_band,
+    CASE
+      WHEN actual_rank_position BETWEEN 1 AND 12 THEN '1-12'
+      WHEN actual_rank_position BETWEEN 13 AND 24 THEN '13-24'
+      WHEN actual_rank_position BETWEEN 25 AND 36 THEN '25-36'
+      WHEN actual_rank_position BETWEEN 37 AND 60 THEN '37-60'
+      WHEN actual_rank_position BETWEEN 61 AND 100 THEN '61-100'
+      ELSE '101+'
+    END AS actual_position_pick_band
+  FROM ranked
+),
+weekly_ideal AS (
+  SELECT
+    candidate_id,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+      ORDER BY actual_points DESC, player_id_internal
+    ) AS ideal_rank
+  FROM with_rank_metrics
+),
+weekly_metrics AS (
+  SELECT
+    scored.candidate_id,
+    scored.formula_version,
+    scored.target_season,
+    scored.target_week,
+    scored.scoring_profile_id,
+    scored.league_type_id,
+    scored.roster_format_id,
+    scored.position,
+    scored.default_top_n,
+    COUNT(*) AS source_row_count,
+    AVG(scored.missing_input_rate) AS missing_input_rate,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_rank_position <= scored.default_top_n), NULLIF(COUNTIF(scored.actual_rank_position <= scored.default_top_n), 0)) AS top_n_hit_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.actual_points, 0)), SUM(IF(scored.actual_rank_position <= scored.default_top_n, scored.actual_points, 0))) AS actual_points_captured_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)), SUM(IF(scored.actual_rank_position <= scored.default_top_n, scored.value_over_replacement, 0))) AS value_over_replacement_captured_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, GREATEST(scored.actual_points, 0) / (LN(scored.predicted_rank_position + 1) / LN(2)), 0)), SUM(IF(ideal.ideal_rank <= scored.default_top_n, GREATEST(scored.actual_points, 0) / (LN(ideal.ideal_rank + 1) / LN(2)), 0))) AS ndcg_at_k,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_rank_position <= scored.default_top_n), NULLIF(COUNTIF(scored.actual_rank_position <= scored.default_top_n), 0)) AS elite_recall_at_k,
+    AVG(IF(scored.predicted_pick_band = scored.actual_position_pick_band, 1.0, 0.0)) AS tier_accuracy,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_rank_position > scored.default_top_n * 2), NULLIF(COUNTIF(scored.predicted_rank_position <= scored.default_top_n), 0)) AS bust_rate,
+    SUM(IF(scored.actual_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)) - SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)) AS pick_band_regret
+  FROM with_rank_metrics scored
+  JOIN weekly_ideal ideal
+    ON scored.candidate_id = ideal.candidate_id
+   AND scored.target_season = ideal.target_season
+   AND scored.target_week = ideal.target_week
+   AND scored.scoring_profile_id = ideal.scoring_profile_id
+   AND scored.league_type_id = ideal.league_type_id
+   AND scored.roster_format_id = ideal.roster_format_id
+   AND scored.position = ideal.position
+   AND scored.player_id_internal = ideal.player_id_internal
+  GROUP BY scored.candidate_id, scored.formula_version, scored.target_season, scored.target_week, scored.scoring_profile_id, scored.league_type_id, scored.roster_format_id, scored.position, scored.default_top_n
+),
+pairwise AS (
+  SELECT
+    left_side.candidate_id,
+    left_side.scoring_profile_id,
+    left_side.league_type_id,
+    left_side.roster_format_id,
+    left_side.position,
+    COUNT(*) AS high_confidence_pairwise_comparison_count,
+    SAFE_DIVIDE(COUNTIF(left_side.actual_points > right_side.actual_points), COUNT(*)) AS high_confidence_pairwise_win_rate
+  FROM with_rank_metrics left_side
+  JOIN with_rank_metrics right_side
+    ON left_side.candidate_id = right_side.candidate_id
+   AND left_side.target_season = right_side.target_season
+   AND left_side.target_week = right_side.target_week
+   AND left_side.scoring_profile_id = right_side.scoring_profile_id
+   AND left_side.league_type_id = right_side.league_type_id
+   AND left_side.roster_format_id = right_side.roster_format_id
+   AND left_side.position = right_side.position
+   AND left_side.predicted_rank_position < right_side.predicted_rank_position
+   AND ABS(left_side.predicted_score - right_side.predicted_score) >= 10
+  GROUP BY left_side.candidate_id, left_side.scoring_profile_id, left_side.league_type_id, left_side.roster_format_id, left_side.position
+),
+overall_pairwise AS (
+  SELECT
+    left_side.candidate_id,
+    left_side.scoring_profile_id,
+    left_side.league_type_id,
+    left_side.roster_format_id,
+    COUNT(*) AS overall_pairwise_comparison_count,
+    SAFE_DIVIDE(COUNTIF(left_side.actual_overall_rank < right_side.actual_overall_rank), COUNT(*)) AS overall_pairwise_draft_win_rate
+  FROM with_rank_metrics left_side
+  JOIN with_rank_metrics right_side
+    ON left_side.candidate_id = right_side.candidate_id
+   AND left_side.target_season = right_side.target_season
+   AND left_side.target_week = right_side.target_week
+   AND left_side.scoring_profile_id = right_side.scoring_profile_id
+   AND left_side.league_type_id = right_side.league_type_id
+   AND left_side.roster_format_id = right_side.roster_format_id
+   AND left_side.predicted_overall_rank < right_side.predicted_overall_rank
+   AND ABS(left_side.predicted_score - right_side.predicted_score) >= 10
+  WHERE (left_side.predicted_overall_rank <= 100 OR left_side.actual_overall_rank <= 100)
+    AND (right_side.predicted_overall_rank <= 100 OR right_side.actual_overall_rank <= 100)
+  GROUP BY left_side.candidate_id, left_side.scoring_profile_id, left_side.league_type_id, left_side.roster_format_id
+),
+summary AS (
+  SELECT
+    candidate_id,
+    ANY_VALUE(formula_version) AS formula_version,
+    position,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    SUM(source_row_count) AS sample_size,
+    AVG(top_n_hit_rate) AS top_n_hit_rate,
+    CORR(CAST(default_top_n AS FLOAT64), CAST(default_top_n AS FLOAT64)) AS stable_metric_placeholder,
+    AVG(missing_input_rate) AS missing_input_rate,
+    AVG(actual_points_captured_rate) AS actual_points_captured_rate,
+    AVG(value_over_replacement_captured_rate) AS value_over_replacement_captured_rate,
+    AVG(ndcg_at_k) AS ndcg_at_k,
+    AVG(actual_points_captured_rate) AS value_captured_at_k,
+    AVG(elite_recall_at_k) AS elite_recall_at_k,
+    AVG(tier_accuracy) AS tier_accuracy,
+    AVG(bust_rate) AS bust_rate,
+    SUM(GREATEST(pick_band_regret, 0)) AS pick_band_regret
+  FROM weekly_metrics
+  GROUP BY candidate_id, position, scoring_profile_id, league_type_id, roster_format_id
+),
+rank_corr AS (
+  SELECT
+    candidate_id,
+    position,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    CORR(CAST(predicted_rank_position AS FLOAT64), CAST(actual_rank_position AS FLOAT64)) AS rank_correlation_value
+  FROM with_rank_metrics
+  GROUP BY candidate_id, position, scoring_profile_id, league_type_id, roster_format_id
+)
+SELECT
+  summary.candidate_id,
+  summary.formula_version,
+  summary.position,
+  summary.scoring_profile_id,
+  summary.league_type_id,
+  summary.roster_format_id,
+  'position_default_top_n' AS target_name,
+  summary.sample_size,
+  pairwise.high_confidence_pairwise_win_rate AS pairwise_win_rate,
+  summary.top_n_hit_rate,
+  rank_corr.rank_correlation_value AS rank_correlation,
+  CAST(NULL AS FLOAT64) AS mean_absolute_error,
+  summary.pick_band_regret AS regret_score,
+  summary.actual_points_captured_rate,
+  summary.missing_input_rate,
+    TO_JSON_STRING(STRUCT(
+    summary.ndcg_at_k AS ndcg_at_k,
+    summary.value_captured_at_k AS value_captured_at_k,
+    summary.elite_recall_at_k AS elite_recall_at_k,
+    summary.tier_accuracy AS tier_accuracy,
+    summary.bust_rate AS bust_rate,
+    summary.pick_band_regret AS pick_band_regret,
+    overall_pairwise.overall_pairwise_draft_win_rate AS overall_pairwise_draft_win_rate,
+    pairwise.high_confidence_pairwise_win_rate AS high_confidence_pairwise_win_rate,
+    summary.value_over_replacement_captured_rate AS value_over_replacement_captured_rate,
+    overall_pairwise.overall_pairwise_comparison_count AS overall_pairwise_comparison_count,
+    pairwise.high_confidence_pairwise_comparison_count AS high_confidence_pairwise_comparison_count,
+    'metric_json' AS persistence_target
+  )) AS metric_json,
+  TO_JSON_STRING(STRUCT(
+    summary.missing_input_rate AS missing_input_rate,
+    'missing features remain null and reduce available weight' AS missing_policy
+  )) AS missing_flags_json,
+  TO_JSON_STRING(STRUCT(
+    'ranking_backtest_feature_mart' AS source_table,
+    MIN(mart.source_window_start_season) AS min_source_window_start_season,
+    MAX(mart.source_window_end_season) AS max_source_window_end_season,
+    'source_window_end_season < target_season' AS leakage_policy
+  )) AS source_freshness_json
+FROM summary
+LEFT JOIN rank_corr USING (candidate_id, position, scoring_profile_id, league_type_id, roster_format_id)
+LEFT JOIN pairwise USING (candidate_id, position, scoring_profile_id, league_type_id, roster_format_id)
+LEFT JOIN overall_pairwise USING (candidate_id, scoring_profile_id, league_type_id, roster_format_id)
+JOIN mart
+  ON summary.scoring_profile_id = mart.scoring_profile_id
+ AND summary.position = mart.position
+ AND summary.league_type_id = mart.league_type_id
+ AND summary.roster_format_id = mart.roster_format_id
+GROUP BY
+  summary.candidate_id,
+  summary.formula_version,
+  summary.position,
+  summary.scoring_profile_id,
+  summary.league_type_id,
+  summary.roster_format_id,
+  summary.sample_size,
+  pairwise.high_confidence_pairwise_win_rate,
+  pairwise.high_confidence_pairwise_comparison_count,
+  overall_pairwise.overall_pairwise_draft_win_rate,
+  overall_pairwise.overall_pairwise_comparison_count,
+  summary.top_n_hit_rate,
+  rank_corr.rank_correlation_value,
+  summary.pick_band_regret,
+  summary.actual_points_captured_rate,
+  summary.missing_input_rate,
+  summary.ndcg_at_k,
+  summary.value_captured_at_k,
+  summary.elite_recall_at_k,
+  summary.tier_accuracy,
+  summary.bust_rate,
+  summary.value_over_replacement_captured_rate
+ORDER BY scoring_profile_id, position, candidate_id
+""".strip()
+
+
+def sql_native_tournament_candidates() -> list[dict[str, Any]]:
+    selected_families = (
+        "_current_pigskin_candidate_score_v1_",
+        "_equal_weight_normalized_blend_v0_",
+        "_simple_projection_points_baseline_v0_",
+        "_scarcity_adjusted_draft_value_v0_",
+        "_value_over_replacement_baseline_v0_",
+        "_v1_improved_mapping_",
+        "_trend_balanced_v2_trend_",
+    )
+    return [
+        row
+        for row in tournament_formula_candidates()
+        if any(family in str(row["candidate_id"]) for family in selected_families)
+    ]
+
+
+def estimate_sql_native_tournament(
+    *,
+    client: Any,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    target_seasons: list[int] | tuple[int, ...] = tuple(range(2017, 2026)),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+) -> dict[str, Any]:
+    from google.cloud import bigquery
+
+    sql = build_sql_native_tournament_summary_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+    )
+    job = client.query(sql, job_config=bigquery.QueryJobConfig(dry_run=True, use_query_cache=False))
+    return {
+        "dry_run": True,
+        "estimated_bytes_processed": int(job.total_bytes_processed or 0),
+        "candidate_count": len(sql_native_tournament_candidates()),
+        "expected_summary_rows": len(sql_native_tournament_candidates()) * len(tuple(scoring_profile_ids)),
+        "detail_rows_written": 0,
+    }
+
+
+def run_sql_native_tournament_summary(
+    *,
+    client: Any,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    target_seasons: list[int] | tuple[int, ...] = tuple(range(2017, 2026)),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+) -> list[dict[str, Any]]:
+    sql = build_sql_native_tournament_summary_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+    )
+    return [dict(row) for row in client.query(sql).result()]
+
+
+def build_sql_native_tournament_summary_write_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_seasons: list[int] | tuple[int, ...] = tuple(range(2017, 2026)),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    backtest_run_id_prefix: str = "ranking_backtest_sql_native_v0_rolling_2017_2025",
+    formula_version: str = "ranking_backtest_sql_native_v0_rolling_2017_2025",
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    summary_sql = build_sql_native_tournament_summary_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+        league_type_id=league_type_id,
+        roster_format_id=roster_format_id,
+    )
+    run_table = table_id(project_id, dataset_id, "ranking_backtest_runs")
+    summary_table = table_id(project_id, dataset_id, "ranking_backtest_candidate_summaries")
+    season_start = min(int(season) for season in target_seasons)
+    season_end = max(int(season) for season in target_seasons)
+    return f"""
+CREATE TEMP TABLE sql_native_summary AS
+{summary_sql};
+
+DELETE FROM `{summary_table}`
+WHERE backtest_run_id IN (
+  SELECT CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id)
+  FROM (SELECT DISTINCT scoring_profile_id FROM sql_native_summary)
+);
+
+DELETE FROM `{run_table}`
+WHERE backtest_run_id IN (
+  SELECT CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id)
+  FROM (SELECT DISTINCT scoring_profile_id FROM sql_native_summary)
+);
+
+INSERT INTO `{run_table}` (
+  backtest_run_id,
+  formula_set_id,
+  formula_version,
+  candidate_count,
+  season_start,
+  season_end,
+  week_start,
+  week_end,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_definition_json,
+  input_tables_json,
+  dry_run,
+  status,
+  created_by,
+  created_at,
+  completed_at,
+  error_message,
+  notes
+)
+SELECT
+  CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id) AS backtest_run_id,
+  CAST(NULL AS STRING) AS formula_set_id,
+  {_sql_string(formula_version)} AS formula_version,
+  COUNT(DISTINCT candidate_id) AS candidate_count,
+  {season_start} AS season_start,
+  {season_end} AS season_end,
+  CAST(NULL AS INT64) AS week_start,
+  CAST(NULL AS INT64) AS week_end,
+  scoring_profile_id,
+  {_sql_string(league_type_id)} AS league_type_id,
+  {_sql_string(roster_format_id)} AS roster_format_id,
+  TO_JSON_STRING(STRUCT('position_default_top_n' AS target_name, 'draft utility metrics in metric_json' AS metric_contract)) AS target_definition_json,
+  TO_JSON_STRING(['ranking_backtest_feature_mart']) AS input_tables_json,
+  FALSE AS dry_run,
+  'complete' AS status,
+  {_sql_string(CREATED_BY)} AS created_by,
+  CURRENT_TIMESTAMP() AS created_at,
+  CURRENT_TIMESTAMP() AS completed_at,
+  CAST(NULL AS STRING) AS error_message,
+  'SQL-native summary-only tournament. No detail rows, no champions, no live rankings.' AS notes
+FROM sql_native_summary
+GROUP BY scoring_profile_id;
+
+INSERT INTO `{summary_table}` (
+  backtest_run_id,
+  candidate_id,
+  formula_version,
+  position,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_name,
+  sample_size,
+  pairwise_win_rate,
+  top_n_hit_rate,
+  rank_correlation,
+  mean_absolute_error,
+  regret_score,
+  actual_points_captured_rate,
+  missing_input_rate,
+  metric_json,
+  missing_flags_json,
+  source_freshness_json,
+  created_at
+)
+SELECT
+  CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id) AS backtest_run_id,
+  candidate_id,
+  formula_version,
+  position,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_name,
+  sample_size,
+  pairwise_win_rate,
+  top_n_hit_rate,
+  rank_correlation,
+  mean_absolute_error,
+  regret_score,
+  actual_points_captured_rate,
+  missing_input_rate,
+  metric_json,
+  missing_flags_json,
+  source_freshness_json,
+  CURRENT_TIMESTAMP() AS created_at
+FROM sql_native_summary;
+""".strip()
+
+
+def write_sql_native_tournament_summaries(
+    *,
+    client: Any,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    target_seasons: list[int] | tuple[int, ...] = tuple(range(2017, 2026)),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    require_write_authorization(env)
+    sql = build_sql_native_tournament_summary_write_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+    )
+    job = client.query(sql)
+    job.result()
+    return {
+        "write": True,
+        "summary_only": True,
+        "detail_rows_written": 0,
+        "job_id": getattr(job, "job_id", None),
+    }
+
+
+def _formula_weight_rows_sql(candidate_rows: list[Mapping[str, Any]]) -> str:
+    selected_rows: list[str] = []
+    for candidate in candidate_rows:
+        formula = validate_formula(json.loads(str(candidate["formula_json"])))
+        for feature_name in formula["features"]:
+            selected_rows.append(
+                "SELECT "
+                f"{_sql_string(str(candidate['candidate_id']))} AS candidate_id, "
+                f"{_sql_string(str(candidate['formula_version']))} AS formula_version, "
+                f"{_sql_string(str(candidate['position']))} AS position, "
+                f"{_sql_string(feature_name)} AS feature_name, "
+                f"{float(formula['weights'][feature_name]):.12g} AS weight, "
+                f"{_sql_string(str(candidate['formula_json']))} AS formula_json"
+            )
+    if not selected_rows:
+        raise FormulaValidationError("At least one SQL-native tournament candidate is required")
+    return "\n  UNION ALL\n  ".join(selected_rows)
+
+
+def _sql_string(value: str) -> str:
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _feature_mart_query_params(
+    *,
+    target_season: int,
+    source_window_start: int,
+    source_window_end: int,
+    scoring_profile_ids: list[str],
+    positions: list[str],
+    league_type_id: str,
+    roster_format_id: str,
+) -> list[Any]:
+    return [
+        _scalar_param("source_window_start_season", "INT64", int(source_window_start)),
+        _scalar_param("source_window_end_season", "INT64", int(source_window_end)),
+        _scalar_param("target_season", "INT64", int(target_season)),
+        _array_param("scoring_profile_ids", "STRING", scoring_profile_ids),
+        _array_param("positions", "STRING", positions),
+        _scalar_param("league_type_id", "STRING", league_type_id),
+        _scalar_param("roster_format_id", "STRING", roster_format_id),
+    ]
+
+
 def build_feature_availability_report(
     candidates: list[Mapping[str, Any]],
     feature_rows: list[Mapping[str, Any]],
@@ -2598,6 +3972,273 @@ def _value_over_replacement_captured_rate(grouped_rows: Mapping[tuple[int, int],
     if actual_value_total <= 0:
         return None
     return predicted_value_total / actual_value_total
+
+
+def replacement_rank_for_position(position: str) -> int:
+    return POSITION_TOP_N[_normalize_position(position)]
+
+
+def assign_pick_band(overall_rank: int | None) -> str | None:
+    if overall_rank is None:
+        return None
+    rank = int(overall_rank)
+    if rank <= 0:
+        raise ValueError("overall_rank must be positive")
+    for band_start, band_end, label in PICK_BANDS:
+        if rank >= band_start and (band_end is None or rank <= band_end):
+            return label
+    return None
+
+
+def build_overall_draft_value_rows(result_rows: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Add cross-position draft ranks and position-relative VOR to result rows."""
+    grouped: dict[tuple[str, str, int, int], list[Mapping[str, Any]]] = {}
+    for row in result_rows:
+        if (
+            row.get("candidate_id") is None
+            or row.get("scoring_profile_id") is None
+            or row.get("season") is None
+            or row.get("week") is None
+            or _safe_float(row.get("predicted_score")) is None
+            or _safe_float(row.get("actual_points")) is None
+            or not row.get("position")
+        ):
+            continue
+        grouped.setdefault(
+            (
+                str(row["candidate_id"]),
+                str(row["scoring_profile_id"]),
+                int(row["season"]),
+                int(row["week"]),
+            ),
+            [],
+        ).append(row)
+
+    draft_rows: list[dict[str, Any]] = []
+    for group_rows in grouped.values():
+        predicted_sorted = sorted(
+            group_rows,
+            key=lambda item: (-(_safe_float(item.get("predicted_score")) or -9999.0), str(item.get("player_id_internal", ""))),
+        )
+        actual_sorted = sorted(
+            group_rows,
+            key=lambda item: (-(_safe_float(item.get("actual_points")) or -9999.0), str(item.get("player_id_internal", ""))),
+        )
+        predicted_ranks = {str(row["player_id_internal"]): index for index, row in enumerate(predicted_sorted, start=1)}
+        actual_ranks = {str(row["player_id_internal"]): index for index, row in enumerate(actual_sorted, start=1)}
+        replacement_points = _replacement_points_by_position(group_rows)
+
+        for row in group_rows:
+            player_id = str(row["player_id_internal"])
+            position = _normalize_position(str(row["position"]))
+            actual_points = _safe_float(row.get("actual_points")) or 0.0
+            replacement_points_for_position = replacement_points.get(position)
+            actual_vor = None
+            if replacement_points_for_position is not None:
+                actual_vor = max(actual_points - replacement_points_for_position, 0.0)
+            predicted_rank = predicted_ranks.get(player_id)
+            draft_rows.append(
+                {
+                    **dict(row),
+                    "predicted_overall_rank": predicted_rank,
+                    "actual_overall_rank": actual_ranks.get(player_id),
+                    "predicted_pick_band": assign_pick_band(predicted_rank),
+                    "actual_vor": actual_vor,
+                    "replacement_points": replacement_points_for_position,
+                }
+            )
+    return draft_rows
+
+
+def build_overall_draft_value_summary(
+    result_rows: list[Mapping[str, Any]],
+    *,
+    top_ns: tuple[int, ...] = OVERALL_DRAFT_TOP_N,
+    pairwise_rank_limit: int | None = 100,
+) -> dict[str, Any]:
+    draft_rows = build_overall_draft_value_rows(result_rows)
+    grouped: dict[tuple[str, str, int, int], list[Mapping[str, Any]]] = {}
+    for row in draft_rows:
+        grouped.setdefault(
+            (
+                str(row["candidate_id"]),
+                str(row["scoring_profile_id"]),
+                int(row["season"]),
+                int(row["week"]),
+            ),
+            [],
+        ).append(row)
+
+    hit_totals: dict[int, list[float]] = {top_n: [] for top_n in top_ns}
+    predicted_top_vor_total = 0.0
+    actual_top_vor_total = 0.0
+    regret_by_pick_band = {label: 0.0 for _, _, label in PICK_BANDS}
+    pairwise_wins = 0
+    pairwise_comparisons = 0
+
+    for group_rows in grouped.values():
+        for top_n in top_ns:
+            predicted_ids = {
+                str(row["player_id_internal"])
+                for row in group_rows
+                if row.get("predicted_overall_rank") is not None and int(row["predicted_overall_rank"]) <= top_n
+            }
+            actual_ids = {
+                str(row["player_id_internal"])
+                for row in group_rows
+                if row.get("actual_overall_rank") is not None and int(row["actual_overall_rank"]) <= top_n
+            }
+            if actual_ids:
+                hit_totals[top_n].append(len(predicted_ids & actual_ids) / min(top_n, len(actual_ids)))
+
+        predicted_top = [
+            row for row in group_rows
+            if row.get("predicted_overall_rank") is not None and int(row["predicted_overall_rank"]) <= 100
+        ]
+        actual_top = [
+            row for row in group_rows
+            if row.get("actual_overall_rank") is not None and int(row["actual_overall_rank"]) <= 100
+        ]
+        predicted_top_vor_total += sum(_safe_float(row.get("actual_vor")) or 0.0 for row in predicted_top)
+        actual_top_vor_total += sum(_safe_float(row.get("actual_vor")) or 0.0 for row in actual_top)
+
+        for band_start, band_end, label in PICK_BANDS:
+            predicted_band_value = sum(
+                _safe_float(row.get("actual_vor")) or 0.0
+                for row in group_rows
+                if _rank_in_band(row.get("predicted_overall_rank"), band_start, band_end)
+            )
+            actual_band_value = sum(
+                _safe_float(row.get("actual_vor")) or 0.0
+                for row in group_rows
+                if _rank_in_band(row.get("actual_overall_rank"), band_start, band_end)
+            )
+            regret_by_pick_band[label] += max(actual_band_value - predicted_band_value, 0.0)
+
+        ordered = [
+            row for row in sorted(group_rows, key=lambda item: int(item["predicted_overall_rank"]))
+            if row.get("predicted_overall_rank") is not None
+            and (pairwise_rank_limit is None or int(row["predicted_overall_rank"]) <= pairwise_rank_limit)
+        ]
+        for left_index, left in enumerate(ordered):
+            left_points = _safe_float(left.get("actual_points"))
+            if left_points is None:
+                continue
+            for right in ordered[left_index + 1:]:
+                right_points = _safe_float(right.get("actual_points"))
+                if right_points is None or left_points == right_points:
+                    continue
+                pairwise_comparisons += 1
+                if left_points > right_points:
+                    pairwise_wins += 1
+
+    summary = {
+        "source_row_count": len(draft_rows),
+        "group_count": len(grouped),
+        "overall_pairwise_draft_win_rate": None if pairwise_comparisons == 0 else pairwise_wins / pairwise_comparisons,
+        "overall_pairwise_comparison_count": pairwise_comparisons,
+        "overall_pairwise_rank_limit": pairwise_rank_limit,
+        "value_over_replacement_captured_rate": None if actual_top_vor_total <= 0 else predicted_top_vor_total / actual_top_vor_total,
+        "regret_by_pick_band": regret_by_pick_band,
+    }
+    for top_n, rates in hit_totals.items():
+        summary[f"top_{top_n}_overall_hit_rate"] = None if not rates else sum(rates) / len(rates)
+    return summary
+
+
+def build_overall_draft_value_metrics_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    backtest_run_id_like: str = "ranking_backtest_ranking_backtest_tournament_v0_rolling_2017_2025_%",
+) -> str:
+    """Return read-only SQL for cross-position draft-value metrics from stored detail rows."""
+    results_table = table_id(project_id, dataset_id, "ranking_backtest_results")
+    return f"""
+WITH tournament AS (
+  SELECT
+    candidate_id,
+    scoring_profile_id,
+    season,
+    week,
+    position,
+    player_id_internal,
+    predicted_score,
+    actual_points,
+    CASE position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 24 WHEN 'TE' THEN 12 ELSE 24 END AS replacement_rank
+  FROM `{results_table}`
+  WHERE backtest_run_id LIKE '{backtest_run_id_like}'
+    AND predicted_score IS NOT NULL
+    AND actual_points IS NOT NULL
+),
+position_ranked AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, scoring_profile_id, season, week, position
+      ORDER BY actual_points DESC, player_id_internal
+    ) AS actual_position_rank_for_replacement
+  FROM tournament
+),
+with_replacement AS (
+  SELECT
+    *,
+    MAX(IF(actual_position_rank_for_replacement = replacement_rank, actual_points, NULL)) OVER (
+      PARTITION BY candidate_id, scoring_profile_id, season, week, position
+    ) AS replacement_points
+  FROM position_ranked
+),
+ranked AS (
+  SELECT
+    *,
+    GREATEST(actual_points - COALESCE(replacement_points, actual_points), 0) AS actual_vor,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, scoring_profile_id, season, week
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_overall_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, scoring_profile_id, season, week
+      ORDER BY actual_points DESC, player_id_internal
+    ) AS actual_overall_rank
+  FROM with_replacement
+)
+SELECT
+  candidate_id,
+  scoring_profile_id,
+  COUNT(*) AS source_row_count,
+  AVG(IF(predicted_overall_rank <= 24 AND actual_overall_rank <= 24, 1.0, 0.0)) AS top_24_overlap_proxy,
+  AVG(IF(predicted_overall_rank <= 50 AND actual_overall_rank <= 50, 1.0, 0.0)) AS top_50_overlap_proxy,
+  AVG(IF(predicted_overall_rank <= 100 AND actual_overall_rank <= 100, 1.0, 0.0)) AS top_100_overlap_proxy,
+  SAFE_DIVIDE(
+    SUM(IF(predicted_overall_rank <= 100, actual_vor, 0)),
+    SUM(IF(actual_overall_rank <= 100, actual_vor, 0))
+  ) AS value_over_replacement_captured_rate
+FROM ranked
+GROUP BY candidate_id, scoring_profile_id
+""".strip()
+
+
+def _replacement_points_by_position(rows: list[Mapping[str, Any]]) -> dict[str, float]:
+    by_position: dict[str, list[float]] = {}
+    for row in rows:
+        actual_points = _safe_float(row.get("actual_points"))
+        if actual_points is None or not row.get("position"):
+            continue
+        by_position.setdefault(_normalize_position(str(row["position"])), []).append(actual_points)
+    replacement_points: dict[str, float] = {}
+    for position, point_values in by_position.items():
+        sorted_values = sorted(point_values, reverse=True)
+        rank = min(replacement_rank_for_position(position), len(sorted_values))
+        if rank > 0:
+            replacement_points[position] = sorted_values[rank - 1]
+    return replacement_points
+
+
+def _rank_in_band(rank: Any, band_start: int, band_end: int | None) -> bool:
+    if rank is None:
+        return False
+    normalized_rank = int(rank)
+    return normalized_rank >= band_start and (band_end is None or normalized_rank <= band_end)
 
 
 def _top_n_for_target(position: str, target_name: str) -> int:

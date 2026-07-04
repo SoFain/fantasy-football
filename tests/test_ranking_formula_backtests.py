@@ -1031,6 +1031,316 @@ class RankingFormulaBacktestTests(unittest.TestCase):
             rfb.append_scorecard_tournament_entry(updated, "- Phase 32.5: tournament run"),
         )
 
+    def test_pick_band_assignment(self):
+        self.assertEqual(rfb.assign_pick_band(1), "1-12")
+        self.assertEqual(rfb.assign_pick_band(24), "13-24")
+        self.assertEqual(rfb.assign_pick_band(36), "25-36")
+        self.assertEqual(rfb.assign_pick_band(60), "37-60")
+        self.assertEqual(rfb.assign_pick_band(100), "61-100")
+        self.assertEqual(rfb.assign_pick_band(101), "101+")
+        with self.assertRaisesRegex(ValueError, "positive"):
+            rfb.assign_pick_band(0)
+
+    def test_overall_draft_rows_add_cross_position_ranks_and_vor(self):
+        draft_rows = rfb.build_overall_draft_value_rows(self._overall_result_rows())
+        by_player = {row["player_id_internal"]: row for row in draft_rows}
+
+        self.assertEqual(by_player["wr1"]["predicted_overall_rank"], 1)
+        self.assertEqual(by_player["rb1"]["predicted_overall_rank"], 2)
+        self.assertEqual(by_player["qb1"]["actual_overall_rank"], 1)
+        self.assertEqual(by_player["wr1"]["actual_overall_rank"], 2)
+        self.assertEqual(by_player["wr1"]["predicted_pick_band"], "1-12")
+        self.assertEqual(by_player["wr1"]["replacement_points"], 12.0)
+        self.assertEqual(by_player["wr1"]["actual_vor"], 13.0)
+        self.assertEqual(by_player["qb1"]["replacement_points"], 30.0)
+        self.assertEqual(by_player["qb1"]["actual_vor"], 0.0)
+
+    def test_overall_draft_value_summary_bounds_and_regret(self):
+        summary = rfb.build_overall_draft_value_summary(
+            self._overall_result_rows(),
+            top_ns=(2, 4),
+            pairwise_rank_limit=None,
+        )
+
+        self.assertEqual(summary["source_row_count"], 4)
+        self.assertEqual(summary["group_count"], 1)
+        self.assertGreaterEqual(summary["overall_pairwise_draft_win_rate"], 0.0)
+        self.assertLessEqual(summary["overall_pairwise_draft_win_rate"], 1.0)
+        self.assertEqual(summary["top_2_overall_hit_rate"], 0.5)
+        self.assertEqual(summary["top_4_overall_hit_rate"], 1.0)
+        self.assertGreaterEqual(summary["value_over_replacement_captured_rate"], 0.0)
+        self.assertIn("1-12", summary["regret_by_pick_band"])
+
+    def test_overall_draft_value_sql_is_read_only_and_uses_neutral_aliases(self):
+        sql = rfb.build_overall_draft_value_metrics_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("ranking_backtest_results", sql)
+        self.assertIn("source_row_count", sql)
+        self.assertNotIn(" as rows", lowered)
+        self.assertNotIn("insert ", lowered)
+        self.assertNotIn("update ", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+
+    def test_feature_mart_insert_sql_excludes_target_season_predictors(self):
+        sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
+
+        self.assertIn("metrics.season BETWEEN @source_window_start_season AND @source_window_end_season", sql)
+        self.assertIn("metrics.season < @target_season", sql)
+        self.assertNotIn("metrics.season = @target_season", sql)
+        self.assertIn("target.season = @target_season", sql)
+
+    def test_feature_mart_delete_sql_is_bounded_not_global_truncate(self):
+        sql = rfb.build_feature_mart_delete_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("target_season = @target_season", sql)
+        self.assertIn("scoring_profile_id IN UNNEST(@scoring_profile_ids)", sql)
+        self.assertIn("position IN UNNEST(@positions)", sql)
+        self.assertNotIn("truncate", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+
+    def test_feature_mart_grain_fields_are_present(self):
+        sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
+        for field in (
+            "source_window_start_season",
+            "source_window_end_season",
+            "target_season",
+            "target_week",
+            "scoring_profile_id",
+            "league_type_id",
+            "roster_format_id",
+            "position",
+            "player_id_internal",
+        ):
+            self.assertIn(field, sql)
+
+    def test_sql_native_scoring_keeps_missing_features_missing(self):
+        sql = rfb.build_sql_native_scoring_prototype_sql(project_id="p", dataset_id="d")
+
+        self.assertIn("WHEN raw_feature_value IS NULL THEN NULL", sql)
+        self.assertIn("SUM(IF(scored.feature_score IS NULL, 0, weights.weight))", sql)
+        self.assertIn("1.0 - SAFE_DIVIDE", sql)
+        self.assertNotIn("COALESCE(raw_feature_value, 0)", sql)
+
+    def test_sql_native_scoring_sql_is_read_only_and_not_champion_path(self):
+        sql = rfb.build_sql_native_scoring_prototype_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("ranking_backtest_feature_mart", sql)
+        self.assertIn("current_pigskin_candidate_score_v1", sql)
+        self.assertIn("simple_projection_points_baseline", sql)
+        self.assertIn("v2_trend_balanced", sql)
+        self.assertNotIn("insert ", lowered)
+        self.assertNotIn("update ", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+
+    def test_sql_native_current_baseline_matches_python_fixture_formula(self):
+        formula = rfb.validate_formula(
+            {
+                "version": "current_pigskin_candidate_score_v1",
+                "position": "TE",
+                "features": [
+                    "analytical_grade_proxy",
+                    "opportunity_score_proxy",
+                    "efficiency_score_proxy",
+                    "role_stability_score",
+                    "profile_points_score",
+                ],
+                "weights": {
+                    "analytical_grade_proxy": 0.55,
+                    "opportunity_score_proxy": 0.15,
+                    "efficiency_score_proxy": 0.10,
+                    "role_stability_score": 0.10,
+                    "profile_points_score": 0.10,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            }
+        )
+        feature_row = {
+            "analytical_grade_proxy": 80.0,
+            "opportunity_score_proxy": 60.0,
+            "efficiency_score_proxy": 70.0,
+            "role_stability_score": 90.0,
+            "profile_points_score": 50.0,
+        }
+
+        evaluated = rfb.evaluate_formula_for_feature_row(formula, feature_row)
+
+        self.assertAlmostEqual(evaluated["predicted_score"], 74.0)
+        self.assertIn("'analytical_grade_proxy' AS feature_name, 0.55 AS weight", rfb.build_sql_native_scoring_prototype_sql(project_id="p", dataset_id="d"))
+
+    def test_feature_mart_fields_include_overall_draft_value_outputs(self):
+        migration = Path("bigquery/migrations/0030__ranking_backtest_feature_mart.sql").read_text(encoding="utf-8")
+
+        self.assertIn("actual_overall_rank INT64", migration)
+        self.assertIn("value_over_replacement FLOAT64", migration)
+        self.assertIn("top_24_overall BOOL", migration)
+        self.assertIn("top_50_overall BOOL", migration)
+        self.assertIn("top_100_overall BOOL", migration)
+        self.assertIn("actual_pick_band STRING", migration)
+
+    def test_draft_utility_metric_contract_uses_metric_json(self):
+        contract = rfb.draft_utility_metric_contract()
+
+        for metric_name in (
+            "ndcg_at_k",
+            "value_captured_at_k",
+            "elite_recall_at_k",
+            "tier_accuracy",
+            "bust_rate",
+            "pick_band_regret",
+            "overall_pairwise_draft_win_rate",
+            "high_confidence_pairwise_win_rate",
+            "value_over_replacement_captured_rate",
+        ):
+            self.assertIn(metric_name, contract["metrics"])
+        self.assertEqual(contract["position_k_values"]["TE"], [3, 6, 12])
+        self.assertEqual(contract["overall_k_values"], [24, 50, 100])
+        self.assertEqual(contract["persistence"], "ranking_backtest_candidate_summaries.metric_json")
+
+    def test_sql_native_tournament_candidates_are_backtest_only(self):
+        candidates = rfb.sql_native_tournament_candidates()
+        ids = {row["candidate_id"] for row in candidates}
+
+        self.assertIn("ranking_formula_qb_current_pigskin_candidate_score_v1_2026_001", ids)
+        self.assertIn("ranking_formula_te_simple_projection_points_baseline_v0_2026_001", ids)
+        self.assertIn("ranking_formula_wr_scarcity_adjusted_draft_value_v0_2026_001", ids)
+        self.assertIn("ranking_formula_rb_value_over_replacement_baseline_v0_2026_001", ids)
+        self.assertIn("ranking_formula_qb_equal_weight_normalized_blend_v0_2026_001", ids)
+        self.assertIn("ranking_formula_wr_v1_improved_mapping_2026_001", ids)
+        self.assertIn("ranking_formula_te_trend_balanced_v2_trend_2026_001", ids)
+        self.assertTrue(all(row["status"] == "draft" for row in candidates))
+
+    def test_sql_native_tournament_summary_sql_is_read_only_and_bounded(self):
+        sql = rfb.build_sql_native_tournament_summary_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2024, 2025),
+            scoring_profile_ids=("ppr",),
+            positions=("TE",),
+        )
+        lowered = sql.lower()
+
+        self.assertIn("ranking_backtest_feature_mart", sql)
+        self.assertIn("target_season IN (2024, 2025)", sql)
+        self.assertIn("scoring_profile_id IN ('ppr')", sql)
+        self.assertIn("position IN ('TE')", sql)
+        self.assertIn("source_window_end_season < target_season", sql)
+        self.assertIn("ndcg_at_k", sql)
+        self.assertIn("value_captured_at_k", sql)
+        self.assertIn("elite_recall_at_k", sql)
+        self.assertIn("bust_rate", sql)
+        self.assertIn("pick_band_regret", sql)
+        self.assertIn("high_confidence_pairwise_win_rate", sql)
+        self.assertIn("overall_pairwise_draft_win_rate", sql)
+        self.assertIn("predicted_overall_rank <= 100", sql)
+        self.assertIn("actual_overall_rank <= 100", sql)
+        self.assertNotIn("insert ", lowered)
+        self.assertNotIn("update ", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("truncate", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn(" as rows", lowered)
+
+    def test_sql_native_tournament_missing_features_are_not_zero_filled(self):
+        sql = rfb.build_sql_native_tournament_summary_sql(project_id="p", dataset_id="d")
+
+        self.assertIn("WHEN raw_feature_value IS NULL THEN NULL", sql)
+        self.assertIn("SUM(IF(feature_score IS NULL, 0, weight))", sql)
+        self.assertIn("missing features remain null", sql)
+        self.assertNotIn("COALESCE(raw_feature_value, 0)", sql)
+
+    def test_sql_native_formula_rows_match_python_fixture_formula(self):
+        sql = rfb.build_sql_native_tournament_summary_sql(
+            project_id="p",
+            dataset_id="d",
+            candidate_rows=[
+                rfb.build_candidate_row(
+                    {
+                        "version": "fixture",
+                        "position": "TE",
+                        "score_expression": "weighted_linear",
+                        "features": ["profile_points_score", "targets"],
+                        "weights": {"profile_points_score": 0.75, "targets": 0.25},
+                        "normalization": {"method": "position_percentile"},
+                    },
+                    formula_name="Fixture",
+                    candidate_id="fixture-te",
+                )
+            ],
+        )
+
+        self.assertIn("'fixture-te' AS candidate_id", sql)
+        self.assertIn("'profile_points_score' AS feature_name", sql)
+        self.assertIn("0.75 AS weight", sql)
+        self.assertIn("'targets' AS feature_name", sql)
+        self.assertIn("0.25 AS weight", sql)
+
+    def test_draft_utility_metrics_are_bigquery_native_expressions(self):
+        sql = rfb.build_sql_native_tournament_summary_sql(project_id="p", dataset_id="d")
+
+        self.assertIn("LN(scored.predicted_rank_position + 1) / LN(2)", sql)
+        self.assertIn("elite_recall_at_k", sql)
+        self.assertIn("tier_accuracy", sql)
+        self.assertIn("bust_rate", sql)
+        self.assertIn("pick_band_regret", sql)
+        self.assertIn("value_over_replacement_captured_rate", sql)
+
+    def test_sql_native_summary_write_gate_fails_closed(self):
+        with self.assertRaisesRegex(PermissionError, "ALLOW_RANKING_FORMULA_BACKTEST_WRITE"):
+            rfb.write_sql_native_tournament_summaries(
+                client=_FakeClient(),
+                project_id="p",
+                dataset_id="d",
+                env={},
+            )
+
+    def test_sql_native_summary_write_script_uses_insert_select_not_python_loads(self):
+        sql = rfb.build_sql_native_tournament_summary_write_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2025,),
+            scoring_profile_ids=("ppr",),
+            positions=("TE",),
+        )
+        lowered = sql.lower()
+
+        self.assertIn("CREATE TEMP TABLE sql_native_summary AS", sql)
+        self.assertIn("INSERT INTO `p.d.ranking_backtest_runs`", sql)
+        self.assertIn("INSERT INTO `p.d.ranking_backtest_candidate_summaries`", sql)
+        self.assertIn("FROM sql_native_summary", sql)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+
+    def test_sql_native_summary_write_submits_one_bigquery_script(self):
+        fake = _FakeClient()
+
+        rfb.write_sql_native_tournament_summaries(
+            client=fake,
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2025,),
+            scoring_profile_ids=("ppr",),
+            positions=("TE",),
+            env={rfb.WRITE_GATE: "true"},
+        )
+
+        self.assertEqual(fake.loaded, [])
+        self.assertEqual(len(fake.queries), 1)
+        queried_sql = fake.queries[0][0].lower()
+        self.assertIn("create temp table sql_native_summary", queried_sql)
+        self.assertIn("insert into `p.d.ranking_backtest_candidate_summaries`", queried_sql)
+        self.assertNotIn("ranking_backtest_results", queried_sql)
+        self.assertNotIn("ranking_formula_champions", queried_sql)
+
     def _formula_set(self):
         return {
             "formula_set_id": "set-1",
@@ -1062,6 +1372,26 @@ class RankingFormulaBacktestTests(unittest.TestCase):
             "passing_success_rate": 0.52,
             "cpoe": 0.04,
         }
+
+    def _overall_result_rows(self):
+        base = {
+            "backtest_run_id": "run-1",
+            "candidate_id": "candidate-1",
+            "formula_set_id": "set-1",
+            "formula_version": "v1",
+            "season": 2025,
+            "week": 1,
+            "scoring_profile_id": "ppr",
+            "league_type_id": "redraft",
+            "roster_format_id": "one_qb",
+            "target_name": "position_default_top_n",
+        }
+        return [
+            {**base, "player_id_internal": "wr1", "player_name": "WR One", "position": "WR", "team": "A", "predicted_score": 96.0, "actual_points": 25.0},
+            {**base, "player_id_internal": "rb1", "player_name": "RB One", "position": "RB", "team": "B", "predicted_score": 94.0, "actual_points": 10.0},
+            {**base, "player_id_internal": "qb1", "player_name": "QB One", "position": "QB", "team": "C", "predicted_score": 90.0, "actual_points": 30.0},
+            {**base, "player_id_internal": "wr2", "player_name": "WR Two", "position": "WR", "team": "D", "predicted_score": 80.0, "actual_points": 12.0},
+        ]
 
 
 if __name__ == "__main__":
