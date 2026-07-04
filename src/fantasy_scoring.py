@@ -167,6 +167,15 @@ STAT_ALIASES = {
     "return_tds": ("return_tds", "return_touchdowns", "st_td"),
 }
 
+SUPPLEMENTAL_STAT_ALIASES = {
+    "passing_completions": ("passing_completions", "completions"),
+    "passing_attempts": ("passing_attempts", "attempts", "pass_attempts"),
+    "sacks_taken": ("sacks_taken", "sacks_suffered", "pass_sack"),
+    "rushing_attempts": ("rushing_attempts", "carries", "rush_att"),
+    "rushing_first_downs": ("rushing_first_downs", "rush_fd"),
+    "receiving_first_downs": ("receiving_first_downs", "rec_fd"),
+}
+
 SLEEPER_SCORING_KEY_MAP = {
     "pass_yd": "passing_yards",
     "pass_td": "passing_tds",
@@ -359,6 +368,17 @@ def normalize_stat_row(stat_row: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _optional_stat(stat_row: dict[str, Any], canonical_field: str) -> float:
+    for alias in SUPPLEMENTAL_STAT_ALIASES[canonical_field]:
+        if alias in stat_row and not _is_missing(stat_row.get(alias)):
+            return _as_float(stat_row.get(alias))
+    return 0.0
+
+
+def _threshold_bonus(value: float, threshold: float, points: float) -> float:
+    return points if points and value >= threshold else 0.0
+
+
 def calculate_fantasy_breakdown(
     stat_row: dict[str, Any],
     scoring_profile: dict[str, Any],
@@ -388,7 +408,30 @@ def calculate_fantasy_breakdown(
         normalized_stats["interceptions"] * settings["interceptions"]
         + normalized_stats["fumbles_lost"] * settings["fumbles_lost"]
     )
-    bonus_points = normalized_stats["return_tds"] * settings["return_tds"]
+    passing_completions = _optional_stat(stat_row, "passing_completions")
+    sacks_taken = _optional_stat(stat_row, "sacks_taken")
+    rushing_attempts = _optional_stat(stat_row, "rushing_attempts")
+    rushing_first_downs = _optional_stat(stat_row, "rushing_first_downs")
+    receiving_first_downs = _optional_stat(stat_row, "receiving_first_downs")
+    bonus_points = (
+        normalized_stats["return_tds"] * settings["return_tds"]
+        + sacks_taken * _sleeper_setting(scoring_profile, "pass_sack")
+        + rushing_first_downs * _sleeper_setting(scoring_profile, "rush_fd")
+        + receiving_first_downs * _sleeper_setting(scoring_profile, "rec_fd")
+        + _threshold_bonus(passing_completions, 25, _sleeper_setting(scoring_profile, "bonus_pass_cmp_25"))
+        + _threshold_bonus(normalized_stats["passing_yards"], 300, _sleeper_setting(scoring_profile, "bonus_pass_yd_300"))
+        + _threshold_bonus(normalized_stats["passing_yards"], 400, _sleeper_setting(scoring_profile, "bonus_pass_yd_400"))
+        + _threshold_bonus(rushing_attempts, 20, _sleeper_setting(scoring_profile, "bonus_rush_att_20"))
+        + _threshold_bonus(normalized_stats["rushing_yards"], 100, _sleeper_setting(scoring_profile, "bonus_rush_yd_100"))
+        + _threshold_bonus(normalized_stats["rushing_yards"], 200, _sleeper_setting(scoring_profile, "bonus_rush_yd_200"))
+        + _threshold_bonus(normalized_stats["receiving_yards"], 100, _sleeper_setting(scoring_profile, "bonus_rec_yd_100"))
+        + _threshold_bonus(normalized_stats["receiving_yards"], 200, _sleeper_setting(scoring_profile, "bonus_rec_yd_200"))
+        + _threshold_bonus(
+            normalized_stats["rushing_yards"] + normalized_stats["receiving_yards"],
+            200,
+            _sleeper_setting(scoring_profile, "bonus_rush_rec_yd_200"),
+        )
+    )
     kicker_points = 0.0
     dst_points = 0.0
     total = (
@@ -411,7 +454,14 @@ def calculate_fantasy_breakdown(
         "kicker_points": kicker_points,
         "dst_points": dst_points,
         "total_fantasy_points": total,
-        "source_stats": {key: normalized_stats[key] for key in STAT_ALIASES},
+        "source_stats": {
+            **{key: normalized_stats[key] for key in STAT_ALIASES},
+            "passing_completions": passing_completions,
+            "sacks_taken": sacks_taken,
+            "rushing_attempts": rushing_attempts,
+            "rushing_first_downs": rushing_first_downs,
+            "receiving_first_downs": receiving_first_downs,
+        },
         "missing_data_flags": list(normalized_stats["missing_data_flags"]),
     }
 

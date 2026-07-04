@@ -28,6 +28,29 @@ logger = logging.getLogger("materialize_fantasy_points")
 DEFAULT_DATASET = "fantasy_football_brain"
 DEFAULT_PROFILE_IDS = ("standard", "half_ppr", "ppr")
 OUTPUT_TABLE = "analytics_player_fantasy_points_by_profile"
+HISTORICAL_NFLVERSE_REQUIRED_FIELDS = (
+    "passing_yards",
+    "passing_tds",
+    "interceptions",
+    "passing_2pt_conversions",
+    "rushing_yards",
+    "rushing_tds",
+    "rushing_2pt_conversions",
+    "receptions",
+    "receiving_yards",
+    "receiving_tds",
+    "receiving_2pt_conversions",
+    "fumbles_lost",
+    "return_tds",
+)
+HISTORICAL_NFLVERSE_GNG_REQUIRED_FIELDS = (
+    "passing_completions",
+    "sacks_taken",
+    "rushing_attempts",
+    "rushing_first_downs",
+    "receiving_first_downs",
+)
+SKILL_POSITIONS = ("QB", "RB", "WR", "TE")
 
 
 def get_bigquery_dataset() -> str:
@@ -76,6 +99,179 @@ def _where_clause(columns: set[str], season: int | None, week: int | None) -> st
     if "season_type" in columns:
         filters.append("season_type = 'REG'")
     return "WHERE " + " AND ".join(filters) if filters else ""
+
+
+def _bounded_where_clause(
+    *,
+    season_start: int,
+    season_end: int,
+    week_start: int | None,
+    week_end: int | None,
+    positions: tuple[str, ...],
+    alias: str = "s",
+) -> tuple[str, list[bigquery.ScalarQueryParameter | bigquery.ArrayQueryParameter]]:
+    filters = [
+        f"{alias}.season BETWEEN @season_start AND @season_end",
+        f"{alias}.position IN UNNEST(@positions)",
+    ]
+    query_parameters: list[bigquery.ScalarQueryParameter | bigquery.ArrayQueryParameter] = [
+        bigquery.ScalarQueryParameter("season_start", "INT64", int(season_start)),
+        bigquery.ScalarQueryParameter("season_end", "INT64", int(season_end)),
+        bigquery.ArrayQueryParameter("positions", "STRING", list(positions)),
+    ]
+    if week_start is not None:
+        filters.append(f"{alias}.week >= @week_start")
+        query_parameters.append(bigquery.ScalarQueryParameter("week_start", "INT64", int(week_start)))
+    if week_end is not None:
+        filters.append(f"{alias}.week <= @week_end")
+        query_parameters.append(bigquery.ScalarQueryParameter("week_end", "INT64", int(week_end)))
+    return " AND ".join(filters), query_parameters
+
+
+def _json_float_expr(json_column: str, path: str) -> str:
+    return f"SAFE_CAST(JSON_VALUE({json_column}, '$.{path}') AS FLOAT64)"
+
+
+def build_historical_nflverse_stat_sql(
+    project_id: str,
+    dataset_id: str,
+    *,
+    season_start: int,
+    season_end: int,
+    week_start: int | None = 1,
+    week_end: int | None = 18,
+    positions: tuple[str, ...] = SKILL_POSITIONS,
+) -> tuple[str, list[bigquery.ScalarQueryParameter | bigquery.ArrayQueryParameter]]:
+    """Build the read-only historical nflverse stat query used for target scoring."""
+
+    filters, query_parameters = _bounded_where_clause(
+        season_start=season_start,
+        season_end=season_end,
+        week_start=week_start,
+        week_end=week_end,
+        positions=positions,
+        alias="s",
+    )
+    raw_table = f"`{project_id}.{dataset_id}.raw_nflverse_weekly`"
+    stg_table = f"`{project_id}.{dataset_id}.stg_player_week_stats`"
+    return f"""
+    SELECT
+        s.player_id_internal,
+        COALESCE(s.nflverse_player_id, s.gsis_id, s.player_id_internal) AS source_player_key,
+        s.player_name AS player_display_name,
+        s.team,
+        s.opponent_team AS opponent,
+        s.position,
+        s.season,
+        s.week,
+        s.passing_yards,
+        s.passing_tds,
+        {_json_float_expr("w.raw_payload_json", "passing_interceptions")} AS interceptions,
+        {_json_float_expr("w.raw_payload_json", "passing_2pt_conversions")} AS passing_2pt_conversions,
+        s.rushing_yards,
+        s.rushing_tds,
+        {_json_float_expr("w.raw_payload_json", "rushing_2pt_conversions")} AS rushing_2pt_conversions,
+        s.receptions,
+        s.receiving_yards,
+        s.receiving_tds,
+        {_json_float_expr("w.raw_payload_json", "receiving_2pt_conversions")} AS receiving_2pt_conversions,
+        (
+            {_json_float_expr("w.raw_payload_json", "rushing_fumbles_lost")}
+            + {_json_float_expr("w.raw_payload_json", "receiving_fumbles_lost")}
+            + {_json_float_expr("w.raw_payload_json", "sack_fumbles_lost")}
+        ) AS fumbles_lost,
+        (
+            {_json_float_expr("w.raw_payload_json", "special_teams_tds")}
+            + {_json_float_expr("w.raw_payload_json", "fumble_recovery_tds")}
+        ) AS return_tds,
+        {_json_float_expr("w.raw_payload_json", "completions")} AS passing_completions,
+        {_json_float_expr("w.raw_payload_json", "sacks_suffered")} AS sacks_taken,
+        s.carries AS rushing_attempts,
+        {_json_float_expr("w.raw_payload_json", "rushing_first_downs")} AS rushing_first_downs,
+        {_json_float_expr("w.raw_payload_json", "receiving_first_downs")} AS receiving_first_downs,
+        w.raw_payload_json AS source_payload_json
+    FROM {stg_table} s
+    JOIN {raw_table} w
+      ON s.season = w.season
+      AND s.week = w.week
+      AND s.team = w.team
+      AND COALESCE(s.nflverse_player_id, s.gsis_id, s.player_id_internal) = w.player_id
+    WHERE {filters}
+      AND JSON_VALUE(w.raw_payload_json, '$.season_type') = 'REG'
+    """, query_parameters
+
+
+def fetch_historical_nflverse_stat_rows(
+    client: bigquery.Client,
+    dataset_id: str,
+    *,
+    season_start: int,
+    season_end: int,
+    week_start: int | None = 1,
+    week_end: int | None = 18,
+    positions: tuple[str, ...] = SKILL_POSITIONS,
+    allow_large_query: bool = False,
+) -> pd.DataFrame:
+    sql, query_parameters = build_historical_nflverse_stat_sql(
+        client.project,
+        dataset_id,
+        season_start=season_start,
+        season_end=season_end,
+        week_start=week_start,
+        week_end=week_end,
+        positions=positions,
+    )
+    frame = query_to_dataframe(
+        client,
+        sql,
+        component="fantasy_points",
+        query_name="fetch_historical_nflverse_weekly",
+        query_parameters=query_parameters,
+        allow_large_query=allow_large_query,
+    )
+    logger.info("Fetched %s historical nflverse stat rows", len(frame))
+    return frame
+
+
+def missing_required_scoring_fields(stat_row: dict[str, Any]) -> list[str]:
+    missing = []
+    for field in HISTORICAL_NFLVERSE_REQUIRED_FIELDS:
+        value = stat_row.get(field)
+        if _is_missing_value(value):
+            missing.append(field)
+    return missing
+
+
+def _is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def validate_complete_scoring_source(
+    stat_frame: pd.DataFrame,
+    *,
+    scoring_profile_ids: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    required_fields = list(HISTORICAL_NFLVERSE_REQUIRED_FIELDS)
+    if "gng_keeper" in scoring_profile_ids:
+        required_fields.extend(HISTORICAL_NFLVERSE_GNG_REQUIRED_FIELDS)
+    missing_counts = {field: int(stat_frame[field].isna().sum()) if field in stat_frame else len(stat_frame) for field in required_fields}
+    missing_fields = {field: count for field, count in missing_counts.items() if count}
+    if missing_fields:
+        return {
+            "complete": False,
+            "row_count": int(len(stat_frame)),
+            "missing_field_counts": missing_fields,
+        }
+    return {
+        "complete": True,
+        "row_count": int(len(stat_frame)),
+        "missing_field_counts": {},
+    }
 
 
 def fetch_stat_rows(
@@ -193,6 +389,9 @@ def _identity_maps(identity_frame: pd.DataFrame) -> dict[str, Any]:
 
 
 def _match_identity(stat_row: dict[str, Any], maps: dict[str, Any]) -> str | None:
+    if stat_row.get("player_id_internal"):
+        return str(stat_row["player_id_internal"])
+
     source_player_key = stat_row.get("source_player_key")
     if source_player_key and str(source_player_key) in maps["gsis"]:
         return maps["gsis"][str(source_player_key)]
@@ -409,6 +608,74 @@ def materialize_fantasy_points(
     return rows
 
 
+def materialize_historical_nflverse_fantasy_points(
+    client: bigquery.Client,
+    *,
+    dataset_id: str = DEFAULT_DATASET,
+    season_start: int,
+    season_end: int,
+    week_start: int | None = 1,
+    week_end: int | None = 18,
+    positions: tuple[str, ...] = SKILL_POSITIONS,
+    scoring_profile_ids: list[str] | tuple[str, ...] | None = None,
+    dry_run: bool = False,
+    allow_large_query: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    profile_ids = tuple(scoring_profile_ids or DEFAULT_PROFILE_IDS)
+    profiles = load_scoring_profiles(client, dataset_id, profile_ids=profile_ids)
+    missing_profiles = set(profile_ids) - set(profiles)
+    if missing_profiles:
+        raise RuntimeError(f"Missing scoring profiles: {', '.join(sorted(missing_profiles))}")
+
+    stat_frame = fetch_historical_nflverse_stat_rows(
+        client,
+        dataset_id,
+        season_start=season_start,
+        season_end=season_end,
+        week_start=week_start,
+        week_end=week_end,
+        positions=positions,
+        allow_large_query=allow_large_query,
+    )
+    source_validation = validate_complete_scoring_source(stat_frame, scoring_profile_ids=profile_ids)
+    if not source_validation["complete"]:
+        details = ", ".join(
+            f"{field}={count}"
+            for field, count in sorted(source_validation["missing_field_counts"].items())
+        )
+        raise RuntimeError(
+            "Historical nflverse scoring source is incomplete; "
+            f"missing required stat fields: {details}"
+        )
+
+    rows = build_fantasy_point_rows(
+        stat_frame,
+        profiles,
+        identity_frame=pd.DataFrame(),
+        source_table="raw_nflverse_weekly",
+    )
+    summary = {
+        "source_table": "raw_nflverse_weekly",
+        "season_start": season_start,
+        "season_end": season_end,
+        "week_start": week_start,
+        "week_end": week_end,
+        "positions": list(positions),
+        "scoring_profile_ids": sorted(profiles),
+        "source_row_count": int(len(stat_frame)),
+        "built_row_count": int(len(rows)),
+        "source_validation": source_validation,
+    }
+    logger.info(
+        "Built %s historical nflverse fantasy point rows from %s source rows",
+        len(rows),
+        len(stat_frame),
+    )
+    if not dry_run:
+        _merge_output_rows(client, dataset_id, rows)
+    return rows, summary
+
+
 def _parse_profile_ids(values: list[str] | None) -> list[str] | None:
     if not values:
         return None
@@ -418,12 +685,30 @@ def _parse_profile_ids(values: list[str] | None) -> list[str] | None:
     return profile_ids or None
 
 
+def _parse_positions(values: list[str] | None) -> tuple[str, ...]:
+    if not values:
+        return SKILL_POSITIONS
+    positions = []
+    for value in values:
+        positions.extend(item.strip().upper() for item in value.split(",") if item.strip())
+    invalid = sorted(set(positions) - set(SKILL_POSITIONS))
+    if invalid:
+        raise ValueError(f"Unsupported position filters: {', '.join(invalid)}")
+    return tuple(dict.fromkeys(positions)) or SKILL_POSITIONS
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Materialize profile-aware fantasy points.")
     parser.add_argument("--project", default=get_bigquery_project())
     parser.add_argument("--dataset", default=get_bigquery_dataset())
+    parser.add_argument("--source", choices=("auto", "historical-nflverse"), default="auto")
     parser.add_argument("--season", type=int)
+    parser.add_argument("--season-start", type=int)
+    parser.add_argument("--season-end", type=int)
     parser.add_argument("--week", type=int)
+    parser.add_argument("--week-start", type=int, default=1)
+    parser.add_argument("--week-end", type=int, default=18)
+    parser.add_argument("--position", action="append")
     parser.add_argument("--scoring-profile-id", action="append")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-large-query", action="store_true")
@@ -435,6 +720,27 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
     client = bigquery.Client(project=args.project)
+    if args.source == "historical-nflverse":
+        season_start = args.season_start if args.season_start is not None else args.season
+        season_end = args.season_end if args.season_end is not None else args.season
+        if season_start is None or season_end is None:
+            raise SystemExit("--source historical-nflverse requires --season or --season-start/--season-end")
+        rows, summary = materialize_historical_nflverse_fantasy_points(
+            client,
+            dataset_id=args.dataset,
+            season_start=season_start,
+            season_end=season_end,
+            week_start=args.week_start,
+            week_end=args.week_end,
+            positions=_parse_positions(args.position),
+            scoring_profile_ids=_parse_profile_ids(args.scoring_profile_id),
+            dry_run=args.dry_run,
+            allow_large_query=args.allow_large_query,
+        )
+        print(json.dumps({**summary, "dry_run": bool(args.dry_run), "wrote": not args.dry_run}, sort_keys=True))
+        print(f"{OUTPUT_TABLE} rows built: {len(rows)}")
+        return
+
     rows = materialize_fantasy_points(
         client,
         dataset_id=args.dataset,

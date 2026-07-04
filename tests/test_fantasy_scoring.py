@@ -138,6 +138,27 @@ class FantasyScoringTests(unittest.TestCase):
         self.assertEqual(profile["sleeper_scoring_settings"]["pass_td_40p"], 0.0)
         self.assertEqual(profile["sleeper_scoring_settings"]["bonus_pass_yd_300"], 1.0)
 
+    def test_gng_keeper_available_weekly_bonuses_apply(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        points = calculate_fantasy_points(
+            {
+                "position": "RB",
+                "rushing_yards": 101,
+                "rushing_tds": 1,
+                "rushing_attempts": 20,
+                "rushing_first_downs": 3,
+                "receptions": 2,
+                "receiving_yards": 100,
+                "receiving_tds": 1,
+                "receiving_first_downs": 2,
+                "sacks_taken": 1,
+            },
+            profile,
+        )
+
+        self.assertAlmostEqual(points, 23.74)
+
     def test_default_scoring_profile_includes_gng_keeper(self):
         profile = get_default_scoring_profile("gng_keeper")
 
