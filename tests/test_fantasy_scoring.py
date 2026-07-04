@@ -108,6 +108,36 @@ class FantasyScoringTests(unittest.TestCase):
         self.assertEqual(profile["source_metadata"]["source_league_id"], "1369406895588143104")
         self.assertEqual(profile["source_metadata"]["league_status_at_retrieval"], "pre_draft")
 
+    def test_gng_keeper_reception_bonus_applies_by_position(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        te = calculate_fantasy_breakdown({"position": "TE", "receptions": 1}, profile)
+        wr = calculate_fantasy_breakdown({"position": "WR", "receptions": 1}, profile)
+        rb = calculate_fantasy_breakdown({"position": "RB", "receptions": 1}, profile)
+
+        self.assertAlmostEqual(te["reception_points"], 0.3)
+        self.assertAlmostEqual(wr["reception_points"], 0.2)
+        self.assertAlmostEqual(rb["reception_points"], 0.1)
+
+    def test_gng_keeper_core_player_scoring_values(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        points = calculate_fantasy_points(
+            {
+                "position": "QB",
+                "passing_yards": 100,
+                "passing_tds": 1,
+                "rushing_yards": 10,
+                "receiving_yards": 10,
+                "fumbles_lost": 1,
+            },
+            profile,
+        )
+
+        self.assertAlmostEqual(points, 5.8)
+        self.assertEqual(profile["sleeper_scoring_settings"]["pass_td_40p"], 0.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["bonus_pass_yd_300"], 1.0)
+
     def test_default_scoring_profile_includes_gng_keeper(self):
         profile = get_default_scoring_profile("gng_keeper")
 

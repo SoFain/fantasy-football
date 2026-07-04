@@ -216,6 +216,23 @@ def _settings_from_profile(scoring_profile: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _sleeper_setting(scoring_profile: dict[str, Any], key: str) -> float:
+    for source_key in ("sleeper_scoring_settings", "unmapped_settings"):
+        source = scoring_profile.get(source_key) or {}
+        if key in source:
+            return _as_float(source.get(key))
+    return 0.0
+
+
+def _position_reception_bonus(stat_row: dict[str, Any], scoring_profile: dict[str, Any]) -> float:
+    position = str(stat_row.get("position") or stat_row.get("pos") or "").upper()
+    if position == "WR":
+        return _sleeper_setting(scoring_profile, "bonus_rec_wr")
+    if position == "TE":
+        return _sleeper_setting(scoring_profile, "bonus_rec_te")
+    return 0.0
+
+
 def get_default_scoring_profile(profile_id: str) -> dict[str, Any]:
     """Return the local copy of the BigQuery seed scoring profile for offline use."""
 
@@ -364,7 +381,9 @@ def calculate_fantasy_breakdown(
         + normalized_stats["receiving_tds"] * settings["receiving_tds"]
         + normalized_stats["receiving_2pt_conversions"] * settings["receiving_2pt_conversions"]
     )
-    reception_points = normalized_stats["receptions"] * settings["receptions"]
+    reception_points = normalized_stats["receptions"] * (
+        settings["receptions"] + _position_reception_bonus(stat_row, scoring_profile)
+    )
     turnover_points = (
         normalized_stats["interceptions"] * settings["interceptions"]
         + normalized_stats["fumbles_lost"] * settings["fumbles_lost"]
