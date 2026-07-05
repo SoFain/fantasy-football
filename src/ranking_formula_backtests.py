@@ -108,6 +108,16 @@ BQML_NUMERIC_PREDICTORS = (
     "improving_3yr",
     "declining_3yr",
     "breakout_trajectory_3yr",
+    "xfp_score_3yr",
+    "xfp_share_3yr",
+    "fantasy_points_over_expectation_3yr",
+    "offensive_snap_share_3yr",
+    "snap_role_stability_3yr",
+    "receiving_role_dominance_xfp_3yr",
+    "high_value_xfp_score_3yr",
+    "qb_ngs_efficiency_score_3yr",
+    "injury_risk_score_3yr",
+    "depth_chart_role_score_3yr",
 )
 BQML_CATEGORICAL_PREDICTORS = ("scoring_profile_id", "position")
 ENSEMBLE_REFERENCE_SEASONS = tuple(range(2017, 2024))
@@ -187,9 +197,22 @@ TREND_FEATURES = {
     "declining_3yr",
     "breakout_trajectory_3yr",
 }
+IDEAL_STAT_FEATURES = {
+    "xfp_score_3yr",
+    "xfp_share_3yr",
+    "fantasy_points_over_expectation_3yr",
+    "offensive_snap_share_3yr",
+    "snap_role_stability_3yr",
+    "receiving_role_dominance_xfp_3yr",
+    "high_value_xfp_score_3yr",
+    "qb_ngs_efficiency_score_3yr",
+    "injury_risk_score_3yr",
+    "depth_chart_role_score_3yr",
+}
 POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "QB": COMMON_FEATURES
     | TREND_FEATURES
+    | IDEAL_STAT_FEATURES
     | {
         "passing_epa_per_play",
         "passing_success_rate",
@@ -201,6 +224,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     },
     "RB": COMMON_FEATURES
     | TREND_FEATURES
+    | IDEAL_STAT_FEATURES
     | {
         "carries",
         "targets",
@@ -211,6 +235,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     },
     "WR": COMMON_FEATURES
     | TREND_FEATURES
+    | IDEAL_STAT_FEATURES
     | {
         "targets",
         "air_yards",
@@ -221,6 +246,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     },
     "TE": COMMON_FEATURES
     | TREND_FEATURES
+    | IDEAL_STAT_FEATURES
     | {
         "targets",
         "air_yards",
@@ -247,6 +273,7 @@ ALLOWED_INPUT_TABLES = (
     "analytics_player_weekly_truth",
     "analytics_player_fantasy_points_by_profile",
     "player_week_opportunity_metrics",
+    "player_week_ideal_opportunity_metrics",
 )
 ALLOWED_CANDIDATE_STATUSES = ("draft", "reviewed", "approved")
 FEATURE_SOURCE_MAP = {
@@ -302,6 +329,16 @@ FEATURE_SOURCE_MAP = {
     "improving_3yr": "improving_3yr",
     "declining_3yr": "declining_3yr",
     "breakout_trajectory_3yr": "breakout_trajectory_3yr",
+    "xfp_score_3yr": "xfp_score_3yr",
+    "xfp_share_3yr": "xfp_share_3yr",
+    "fantasy_points_over_expectation_3yr": "fantasy_points_over_expectation_3yr",
+    "offensive_snap_share_3yr": "offensive_snap_share_3yr",
+    "snap_role_stability_3yr": "snap_role_stability_3yr",
+    "receiving_role_dominance_xfp_3yr": "receiving_role_dominance_xfp_3yr",
+    "high_value_xfp_score_3yr": "high_value_xfp_score_3yr",
+    "qb_ngs_efficiency_score_3yr": "qb_ngs_efficiency_score_3yr",
+    "injury_risk_score_3yr": "injury_risk_score_3yr",
+    "depth_chart_role_score_3yr": "depth_chart_role_score_3yr",
 }
 FORBIDDEN_TABLE_REFERENCES = {
     "weekly_metrics",
@@ -2357,6 +2394,7 @@ def build_feature_mart_insert_sql(*, project_id: str, dataset_id: str) -> str:
     points_table = table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")
     packet_table = table_id(project_id, dataset_id, "pigskin_player_context_packet_current")
     opportunity_table = table_id(project_id, dataset_id, "player_week_opportunity_metrics")
+    ideal_table = table_id(project_id, dataset_id, "player_week_ideal_opportunity_metrics")
     return f"""
 CREATE TEMP FUNCTION _slope(points ARRAY<STRUCT<season INT64, value FLOAT64>>)
 RETURNS FLOAT64
@@ -2435,6 +2473,16 @@ INSERT INTO `{mart_table}` (
     improving_3yr,
     declining_3yr,
     breakout_trajectory_3yr,
+    xfp_score_3yr,
+    xfp_share_3yr,
+    fantasy_points_over_expectation_3yr,
+    offensive_snap_share_3yr,
+    snap_role_stability_3yr,
+    receiving_role_dominance_xfp_3yr,
+    high_value_xfp_score_3yr,
+    qb_ngs_efficiency_score_3yr,
+    injury_risk_score_3yr,
+    depth_chart_role_score_3yr,
     target_fantasy_points,
     actual_position_rank,
     actual_overall_rank,
@@ -2504,6 +2552,16 @@ season_features AS (
         LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.red_zone_targets, 0) * 4.0 + COALESCE(opportunity.red_zone_carries, 0) * 4.0 + COALESCE(opportunity.red_zone_touches, 0) * 3.0))) AS red_zone_usage_score,
         LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.inside_5_carries, 0) * 12.0 + COALESCE(opportunity.inside_10_carries, 0) * 6.0))) AS goal_line_usage_score,
         AVG(opportunity.team_environment_score) AS opportunity_team_environment_score,
+        AVG(ideal.xfp_score) AS xfp_score,
+        AVG(ideal.xfp_share) AS xfp_share,
+        AVG(ideal.fantasy_points_over_expectation) AS fantasy_points_over_expectation,
+        AVG(ideal.offensive_snap_share) AS ideal_offensive_snap_share,
+        AVG(ideal.role_stability_from_snaps) AS ideal_role_stability_from_snaps,
+        AVG(ideal.receiving_role_dominance_xfp) AS receiving_role_dominance_xfp,
+        AVG(ideal.high_value_xfp_score) AS high_value_xfp_score,
+        AVG(ideal.qb_ngs_efficiency_score) AS qb_ngs_efficiency_score,
+        AVG(ideal.injury_risk_score) AS injury_risk_score,
+        AVG(ideal.depth_chart_role_score) AS depth_chart_role_score,
         AVG(IF(opportunity.spike_week_flag, 1.0, 0.0)) AS spike_week_rate,
         AVG(IF(opportunity.bust_week_flag, 1.0, 0.0)) AS bust_week_rate,
         AVG(IF(opportunity.elite_week_flag, 1.0, 0.0)) AS elite_week_rate,
@@ -2513,7 +2571,9 @@ season_features AS (
         ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
         ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags,
         ANY_VALUE(opportunity.source_freshness_json) AS opportunity_source_freshness_json,
-        ANY_VALUE(opportunity.missing_flags_json) AS opportunity_missing_flags
+        ANY_VALUE(opportunity.missing_flags_json) AS opportunity_missing_flags,
+        ANY_VALUE(ideal.source_provenance_json) AS ideal_source_provenance_json,
+        ANY_VALUE(ideal.missing_flags_json) AS ideal_missing_flags
     FROM `{metrics_table}` metrics
     JOIN positions
       ON metrics.position = positions.position
@@ -2534,6 +2594,12 @@ season_features AS (
      AND metrics.week = opportunity.week
      AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(opportunity.player_id_internal, r'^gsis:', '')
      AND metrics.position = opportunity.position
+    LEFT JOIN `{ideal_table}` ideal
+      ON metrics.season = ideal.season
+     AND metrics.week = ideal.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(ideal.player_id_internal, r'^gsis:', '')
+     AND metrics.position = ideal.position
+     AND ideal.source_version = 'ffopportunity_weekly_latest'
     WHERE metrics.season BETWEEN @source_window_start_season AND @source_window_end_season
       AND metrics.season < @target_season
       AND metrics.scoring_profile_id = 'ppr'
@@ -2580,6 +2646,16 @@ source_features AS (
         AVG(red_zone_usage_score) AS red_zone_usage_score,
         AVG(goal_line_usage_score) AS goal_line_usage_score,
         AVG(opportunity_team_environment_score) AS opportunity_team_environment_score,
+        AVG(xfp_score) AS xfp_score_3yr,
+        AVG(xfp_share) AS xfp_share_3yr,
+        AVG(fantasy_points_over_expectation) AS fantasy_points_over_expectation_3yr,
+        AVG(ideal_offensive_snap_share) AS offensive_snap_share_3yr,
+        AVG(ideal_role_stability_from_snaps) AS snap_role_stability_3yr,
+        AVG(receiving_role_dominance_xfp) AS receiving_role_dominance_xfp_3yr,
+        AVG(high_value_xfp_score) AS high_value_xfp_score_3yr,
+        AVG(qb_ngs_efficiency_score) AS qb_ngs_efficiency_score_3yr,
+        AVG(injury_risk_score) AS injury_risk_score_3yr,
+        AVG(depth_chart_role_score) AS depth_chart_role_score_3yr,
         AVG(spike_week_rate) AS spike_week_rate_3yr,
         AVG(bust_week_rate) AS bust_week_rate_3yr,
         AVG(elite_week_rate) AS elite_week_rate_3yr,
@@ -2604,7 +2680,9 @@ source_features AS (
         ANY_VALUE(metrics_source_freshness_json HAVING MAX season) AS metrics_source_freshness_json,
         ANY_VALUE(metrics_missing_flags HAVING MAX season) AS metrics_missing_flags,
         ANY_VALUE(opportunity_source_freshness_json HAVING MAX season) AS opportunity_source_freshness_json,
-        ANY_VALUE(opportunity_missing_flags HAVING MAX season) AS opportunity_missing_flags
+        ANY_VALUE(opportunity_missing_flags HAVING MAX season) AS opportunity_missing_flags,
+        ANY_VALUE(ideal_source_provenance_json HAVING MAX season) AS ideal_source_provenance_json,
+        ANY_VALUE(ideal_missing_flags HAVING MAX season) AS ideal_missing_flags
     FROM season_features
     GROUP BY scoring_profile_id, player_key, position
 ),
@@ -2709,11 +2787,23 @@ with_source AS (
         source.improving_3yr,
         source.declining_3yr,
         source.breakout_trajectory_3yr,
+        source.xfp_score_3yr,
+        source.xfp_share_3yr,
+        source.fantasy_points_over_expectation_3yr,
+        source.offensive_snap_share_3yr,
+        source.snap_role_stability_3yr,
+        source.receiving_role_dominance_xfp_3yr,
+        source.high_value_xfp_score_3yr,
+        source.qb_ngs_efficiency_score_3yr,
+        source.injury_risk_score_3yr,
+        source.depth_chart_role_score_3yr,
         target.target_fantasy_points,
         source.metrics_source_freshness_json,
         source.metrics_missing_flags,
         source.opportunity_source_freshness_json,
         source.opportunity_missing_flags,
+        source.ideal_source_provenance_json,
+        source.ideal_missing_flags,
         packet.packet_source_freshness_json
     FROM target_points target
     JOIN source_features source
@@ -2810,6 +2900,16 @@ SELECT
     improving_3yr,
     declining_3yr,
     breakout_trajectory_3yr,
+    xfp_score_3yr,
+    xfp_share_3yr,
+    fantasy_points_over_expectation_3yr,
+    offensive_snap_share_3yr,
+    snap_role_stability_3yr,
+    receiving_role_dominance_xfp_3yr,
+    high_value_xfp_score_3yr,
+    qb_ngs_efficiency_score_3yr,
+    injury_risk_score_3yr,
+    depth_chart_role_score_3yr,
     target_fantasy_points,
     actual_position_rank,
     actual_overall_rank,
@@ -2840,8 +2940,16 @@ SELECT
         red_zone_usage_score IS NULL AS red_zone_usage_score_missing,
         goal_line_usage_score IS NULL AS goal_line_usage_score_missing,
         team_environment_score IS NULL AS team_environment_score_missing,
+        xfp_score_3yr IS NULL AS xfp_score_3yr_missing,
+        xfp_share_3yr IS NULL AS xfp_share_3yr_missing,
+        offensive_snap_share_3yr IS NULL AS offensive_snap_share_3yr_missing,
+        receiving_role_dominance_xfp_3yr IS NULL AS receiving_role_dominance_xfp_3yr_missing,
+        qb_ngs_efficiency_score_3yr IS NULL AS qb_ngs_efficiency_score_3yr_missing,
+        injury_risk_score_3yr IS NULL AS injury_risk_score_3yr_missing,
+        depth_chart_role_score_3yr IS NULL AS depth_chart_role_score_3yr_missing,
         metrics_missing_flags AS source_missing_flags,
-        opportunity_missing_flags AS opportunity_missing_flags
+        opportunity_missing_flags AS opportunity_missing_flags,
+        ideal_missing_flags AS ideal_missing_flags
     )) AS predictor_missing_flags_json,
     TO_JSON_STRING(STRUCT(
         target_fantasy_points IS NULL AS target_fantasy_points_missing,
@@ -2850,6 +2958,7 @@ SELECT
     TO_JSON_STRING(STRUCT(
         metrics_source_freshness_json AS metrics_source_freshness_json,
         opportunity_source_freshness_json AS opportunity_source_freshness_json,
+        ideal_source_provenance_json AS ideal_source_provenance_json,
         packet_source_freshness_json AS packet_source_freshness_json
     )) AS source_freshness_json,
     TO_JSON_STRING(STRUCT(
@@ -3206,6 +3315,16 @@ feature_values AS (
       WHEN 'improving_3yr' THEN improving_3yr
       WHEN 'declining_3yr' THEN declining_3yr
       WHEN 'breakout_trajectory_3yr' THEN breakout_trajectory_3yr
+      WHEN 'xfp_score_3yr' THEN xfp_score_3yr
+      WHEN 'xfp_share_3yr' THEN xfp_share_3yr
+      WHEN 'fantasy_points_over_expectation_3yr' THEN fantasy_points_over_expectation_3yr
+      WHEN 'offensive_snap_share_3yr' THEN offensive_snap_share_3yr
+      WHEN 'snap_role_stability_3yr' THEN snap_role_stability_3yr
+      WHEN 'receiving_role_dominance_xfp_3yr' THEN receiving_role_dominance_xfp_3yr
+      WHEN 'high_value_xfp_score_3yr' THEN high_value_xfp_score_3yr
+      WHEN 'qb_ngs_efficiency_score_3yr' THEN qb_ngs_efficiency_score_3yr
+      WHEN 'injury_risk_score_3yr' THEN injury_risk_score_3yr
+      WHEN 'depth_chart_role_score_3yr' THEN depth_chart_role_score_3yr
       ELSE NULL
     END AS raw_feature_value
   FROM mart
@@ -3221,6 +3340,9 @@ scored_features AS (
       WHEN feature_name IN ('target_share_slope_3yr', 'carry_share_slope_3yr', 'wopr_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 250.0))
       WHEN feature_name = 'availability_rate_3yr' THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
       WHEN feature_name = 'weekly_volatility_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value * 10.0))
+      WHEN feature_name IN ('xfp_share_3yr', 'offensive_snap_share_3yr') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name = 'fantasy_points_over_expectation_3yr' THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 5.0))
+      WHEN feature_name = 'injury_risk_score_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value))
       WHEN feature_name IN ('improving_3yr', 'breakout_trajectory_3yr') THEN IF(raw_feature_value > 0, 100.0, 0.0)
       WHEN feature_name = 'declining_3yr' THEN IF(raw_feature_value > 0, 0.0, 100.0)
       WHEN feature_name IN ('success_rate', 'cpoe', 'snap_share_proxy') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
@@ -3609,6 +3731,83 @@ def opportunity_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
     ]
 
 
+def ideal_stats_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
+    specs = [
+        (
+            "ranking_formula_qb_ideal_stats_diagnostic_v0_2026_001",
+            "QB Ideal Stats Diagnostic",
+            {
+                "version": "qb_ideal_stats_diagnostic_v0",
+                "position": "QB",
+                "features": ["profile_points_score", "xfp_score_3yr", "qb_ngs_efficiency_score_3yr", "snap_role_stability_3yr"],
+                "weights": {
+                    "profile_points_score": 0.35,
+                    "xfp_score_3yr": 0.30,
+                    "qb_ngs_efficiency_score_3yr": 0.20,
+                    "snap_role_stability_3yr": 0.15,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+        (
+            "ranking_formula_rb_ideal_stats_diagnostic_v0_2026_001",
+            "RB Ideal Stats Diagnostic",
+            {
+                "version": "rb_ideal_stats_diagnostic_v0",
+                "position": "RB",
+                "features": ["profile_points_score", "high_value_xfp_score_3yr", "offensive_snap_share_3yr", "snap_role_stability_3yr"],
+                "weights": {
+                    "profile_points_score": 0.30,
+                    "high_value_xfp_score_3yr": 0.35,
+                    "offensive_snap_share_3yr": 0.20,
+                    "snap_role_stability_3yr": 0.15,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+        (
+            "ranking_formula_wr_ideal_stats_diagnostic_v0_2026_001",
+            "WR Ideal Stats Diagnostic",
+            {
+                "version": "wr_ideal_stats_diagnostic_v0",
+                "position": "WR",
+                "features": ["profile_points_score", "xfp_share_3yr", "receiving_role_dominance_xfp_3yr", "fantasy_points_over_expectation_3yr"],
+                "weights": {
+                    "profile_points_score": 0.30,
+                    "xfp_share_3yr": 0.25,
+                    "receiving_role_dominance_xfp_3yr": 0.30,
+                    "fantasy_points_over_expectation_3yr": 0.15,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+        (
+            "ranking_formula_te_ideal_stats_diagnostic_v0_2026_001",
+            "TE Ideal Stats Diagnostic",
+            {
+                "version": "te_ideal_stats_diagnostic_v0",
+                "position": "TE",
+                "features": ["profile_points_score", "xfp_share_3yr", "receiving_role_dominance_xfp_3yr", "offensive_snap_share_3yr"],
+                "weights": {
+                    "profile_points_score": 0.30,
+                    "xfp_share_3yr": 0.25,
+                    "receiving_role_dominance_xfp_3yr": 0.30,
+                    "offensive_snap_share_3yr": 0.15,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+    ]
+    return [
+        build_candidate_row(formula, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, formula in specs
+    ]
+
+
 def estimate_sql_native_tournament(
     *,
     client: Any,
@@ -3667,6 +3866,7 @@ def build_sql_native_tournament_summary_write_sql(
     formula_version: str = "ranking_backtest_sql_native_v0_rolling_2017_2025",
     league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
     roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+    candidate_rows: list[Mapping[str, Any]] | None = None,
 ) -> str:
     summary_sql = build_sql_native_tournament_summary_sql(
         project_id=project_id,
@@ -3674,6 +3874,7 @@ def build_sql_native_tournament_summary_write_sql(
         target_seasons=target_seasons,
         scoring_profile_ids=scoring_profile_ids,
         positions=positions,
+        candidate_rows=candidate_rows,
         league_type_id=league_type_id,
         roster_format_id=roster_format_id,
     )
@@ -3798,6 +3999,9 @@ def write_sql_native_tournament_summaries(
     target_seasons: list[int] | tuple[int, ...] = tuple(range(2017, 2026)),
     scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
     positions: list[str] | tuple[str, ...] = POSITIONS,
+    backtest_run_id_prefix: str = "ranking_backtest_sql_native_v0_rolling_2017_2025",
+    formula_version: str = "ranking_backtest_sql_native_v0_rolling_2017_2025",
+    candidate_rows: list[Mapping[str, Any]] | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     require_write_authorization(env)
@@ -3807,6 +4011,9 @@ def write_sql_native_tournament_summaries(
         target_seasons=target_seasons,
         scoring_profile_ids=scoring_profile_ids,
         positions=positions,
+        backtest_run_id_prefix=backtest_run_id_prefix,
+        formula_version=formula_version,
+        candidate_rows=candidate_rows,
     )
     job = client.query(sql)
     job.result()
@@ -5586,8 +5793,12 @@ def _feature_value_to_score(feature: str, value: float) -> float:
         return max(0.0, min(100.0, 50.0 + (value * 250.0)))
     if feature == "availability_rate_3yr":
         return max(0.0, min(100.0, value * 100.0 if value <= 1 else value))
+    if feature in {"xfp_share_3yr", "offensive_snap_share_3yr"}:
+        return max(0.0, min(100.0, value * 100.0 if value <= 1 else value))
     if feature == "weekly_volatility_3yr":
         return max(0.0, min(100.0, 100.0 - (value * 10.0)))
+    if feature == "injury_risk_score_3yr":
+        return max(0.0, min(100.0, 100.0 - value))
     if feature in {"improving_3yr", "breakout_trajectory_3yr"}:
         return 100.0 if value > 0 else 0.0
     if feature == "declining_3yr":
@@ -5602,6 +5813,8 @@ def _feature_value_to_score(feature: str, value: float) -> float:
         return max(0.0, min(100.0, value * 100.0))
     if feature in {"air_yards", "receiving_yards"}:
         return max(0.0, min(100.0, (value / 150.0) * 100.0))
+    if feature == "fantasy_points_over_expectation_3yr":
+        return max(0.0, min(100.0, 50.0 + (value * 5.0)))
     if feature in {"targets", "carries", "dropbacks", "rushing_attempts", "usage_volume", "red_zone_targets", "red_zone_opportunities", "goal_line_opportunities"}:
         return max(0.0, min(100.0, (value / 25.0) * 100.0))
     return max(0.0, min(100.0, value))

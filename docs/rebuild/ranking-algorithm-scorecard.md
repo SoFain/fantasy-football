@@ -438,6 +438,38 @@ Warning: RB VOR captured rate was null in the bounded diagnostic summary, likely
 
 Blocked source concepts remain blocked: first-read share, true route share as a reliable feature, YPRR without true routes, and end-zone targets.
 
+## Phase 32.13 ffopportunity Ideal Stats
+
+Phase 32.13 added a bounded ffopportunity weekly xFP lane and refreshed `ranking_backtest_feature_mart` for target seasons 2017 through 2025. No live rankings, champions, Pigskin tools, or detail backtest rows were changed.
+
+Backfill and mart refresh:
+
+| Object | Scope | Rows |
+|---|---|---:|
+| `raw_ffopportunity_weekly` | 2014-2025 source weeks | 64,624 |
+| `player_week_ideal_opportunity_metrics` | 2014-2025 source weeks | 64,624 |
+| `ranking_backtest_feature_mart` | 2017-2025 targets, four profiles, QB/RB/WR/TE | 156,244 |
+
+PPR diagnostic summary over 2024 validation and 2025 holdout:
+
+| Candidate | Position | Sample size | Pairwise | Top-N | Captured points | Missing |
+|---|---|---:|---:|---:|---:|---:|
+| ideal xFP QB diagnostic | QB | 868 | 0.7001 | 0.6921 | 0.8389 | 0.0000 |
+| ideal xFP RB diagnostic | RB | 1,642 | 0.7683 | 0.8113 | 0.8892 | 0.0013 |
+| ideal xFP TE diagnostic | TE | 1,479 | 0.7725 | 0.6343 | 0.7695 | 0.0054 |
+| ideal xFP WR diagnostic | WR | 2,620 | 0.7738 | 0.6447 | 0.7866 | 0.0019 |
+
+Controlled summary-only write:
+
+- version: `ranking_backtest_sql_native_ideal_stats_diagnostics_v0`
+- write job ID: `ae1e7417-b036-44dd-a7e3-7cb5ba496b15`
+- run rows written: 1
+- summary rows written: 4
+- detail rows written: 0
+- champions written: 0
+
+Warning: direct injury and depth-chart scores remain null with explicit missing flags. The current useful signal is xFP plus snap/role context, not a complete health/depth model.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
