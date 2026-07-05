@@ -439,6 +439,164 @@ class NflverseBackfillExecutorTests(unittest.TestCase):
         self.assertEqual(row["player_name"], "Snap Player")
         self.assertEqual(row["offense_snaps"], 40)
 
+    def test_injuries_schema_maps_to_contract_fields(self):
+        family = SOURCE_FAMILY_REGISTRY["injuries"]
+        source_df = pd.DataFrame(
+            [
+                {
+                    "season": 2025,
+                    "week": 1,
+                    "team": "MIA",
+                    "gsis_id": "00-abc",
+                    "full_name": "Injured Player",
+                    "position": "WR",
+                    "report_primary_injury": "Knee",
+                    "report_status": "Questionable",
+                    "practice_status": "Limited Participation in Practice",
+                },
+                {
+                    "season": 2025,
+                    "week": 1,
+                    "team": "MIA",
+                    "gsis_id": "00-def",
+                    "full_name": "Practice Only",
+                    "position": "RB",
+                    "practice_primary_injury": "Rest",
+                    "practice_status": "Did Not Participate In Practice",
+                }
+            ]
+        )
+        schema = [
+            Field("season", "INTEGER"),
+            Field("week", "INTEGER"),
+            Field("team"),
+            Field("gsis_id"),
+            Field("player_name"),
+            Field("position"),
+            Field("report_status"),
+            Field("practice_status"),
+            Field("game_status"),
+            Field("injury_notes"),
+            Field("source_system"),
+            Field("source_loader"),
+            Field("source_version"),
+            Field("source_season", "INTEGER"),
+            Field("source_week", "INTEGER"),
+            Field("source_refresh_id"),
+            Field("loaded_at", "TIMESTAMP"),
+            Field("loaded_by"),
+            Field("row_hash"),
+            Field("raw_payload_json"),
+        ]
+
+        prepared = backfill.prepare_rows(
+            source_df,
+            family,
+            schema,
+            source_refresh_id="refresh",
+            source_version="1.0",
+            loaded_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            loaded_by="tester",
+            season_start=2025,
+            season_end=2025,
+        )
+
+        row = prepared.dataframe.iloc[0].to_dict()
+        self.assertEqual(prepared.prepared_row_count, 2)
+        self.assertEqual(row["player_name"], "Injured Player")
+        self.assertEqual(row["game_status"], "Questionable")
+        self.assertEqual(row["injury_notes"], "Knee")
+        practice_row = prepared.dataframe.iloc[1].to_dict()
+        self.assertIsNone(practice_row["report_status"])
+        self.assertEqual(practice_row["injury_notes"], "Rest")
+
+    def test_depth_chart_current_snapshot_lacks_historical_keys(self):
+        family = SOURCE_FAMILY_REGISTRY["depth_charts"]
+        source_df = pd.DataFrame(
+            [
+                {
+                    "dt": "2026-03-14T07:32:09Z",
+                    "team": "MIA",
+                    "gsis_id": "00-def",
+                    "player_name": "Depth Player",
+                    "pos_abb": "WR",
+                    "pos_rank": 2,
+                }
+            ]
+        )
+        schema = [
+            Field("season", "INTEGER"),
+            Field("week", "INTEGER"),
+            Field("team"),
+            Field("gsis_id"),
+            Field("player_name"),
+            Field("position"),
+            Field("depth_rank", "INTEGER"),
+            Field("depth_role"),
+            Field("source_system"),
+            Field("source_loader"),
+            Field("source_version"),
+            Field("source_season", "INTEGER"),
+            Field("source_week", "INTEGER"),
+            Field("source_refresh_id"),
+            Field("loaded_at", "TIMESTAMP"),
+            Field("loaded_by"),
+            Field("row_hash"),
+            Field("raw_payload_json"),
+        ]
+
+        prepared = backfill.prepare_rows(
+            source_df,
+            family,
+            schema,
+            source_refresh_id="refresh",
+            source_version="1.0",
+            loaded_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            loaded_by="tester",
+            season_start=2025,
+            season_end=2025,
+        )
+
+        self.assertEqual(prepared.prepared_row_count, 0)
+        self.assertIn("season=1", " ".join(prepared.warnings))
+        self.assertIn("week=1", " ".join(prepared.warnings))
+
+    def test_live_loader_dispatch_supports_injury_and_depth_families(self):
+        class FakeNfl:
+            @staticmethod
+            def load_injuries(seasons):
+                return pd.DataFrame([{"season": seasons[0], "week": 1}])
+
+            @staticmethod
+            def load_depth_charts(seasons):
+                return pd.DataFrame([{"dt": "2026-03-14T07:32:09Z"}])
+
+        with patch.dict(sys.modules, {"nflreadpy": FakeNfl}):
+            injuries = backfill._call_loader(SOURCE_FAMILY_REGISTRY["injuries"], [2025])
+            depth = backfill._call_loader(SOURCE_FAMILY_REGISTRY["depth_charts"], [2025])
+
+        self.assertEqual(len(injuries), 1)
+        self.assertEqual(len(depth), 1)
+
+    def test_live_loader_dispatch_supports_ngs_fallback_families(self):
+        calls = []
+
+        class FakeNfl:
+            @staticmethod
+            def load_nextgen_stats(seasons, stat_type="passing"):
+                calls.append((tuple(seasons), stat_type))
+                return pd.DataFrame([{"season": seasons[0], "stat_type": stat_type}])
+
+        with patch.dict(sys.modules, {"nflreadpy": FakeNfl}):
+            passing = backfill._call_loader(SOURCE_FAMILY_REGISTRY["ngs_passing"], [2025])
+            rushing = backfill._call_loader(SOURCE_FAMILY_REGISTRY["ngs_rushing"], [2025])
+            receiving = backfill._call_loader(SOURCE_FAMILY_REGISTRY["ngs_receiving"], [2025])
+
+        self.assertEqual(len(passing), 1)
+        self.assertEqual(len(rushing), 1)
+        self.assertEqual(len(receiving), 1)
+        self.assertEqual(calls, [((2025,), "passing"), ((2025,), "rushing"), ((2025,), "receiving")])
+
     def test_weekly_missing_key_diagnostic_classifies_missing_player_id(self):
         family = SOURCE_FAMILY_REGISTRY["weekly"]
         source_df = pd.DataFrame(

@@ -55,6 +55,9 @@ BLOCKED_TARGETS = {
     "trade_player_scores",
     "trade_pick_scores",
 }
+NULLABLE_NATURAL_KEY_FIELDS: dict[str, set[str]] = {
+    "injuries": {"report_status", "practice_status", "injury_notes"},
+}
 SOURCE_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "game_date": ("game_date", "gameday", "game_datetime"),
     "game_id": ("game_id", "old_game_id"),
@@ -81,6 +84,17 @@ SOURCE_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "opponent_team": ("opponent_team", "opponent"),
     "position": ("position", "position_group"),
     "status": ("status", "status_description", "status_description_abbr"),
+    "report_status": ("report_status", "game_status"),
+    "game_status": ("game_status", "report_status"),
+    "injury_notes": (
+        "injury_notes",
+        "report_primary_injury",
+        "report_secondary_injury",
+        "practice_primary_injury",
+        "practice_secondary_injury",
+    ),
+    "depth_rank": ("depth_rank", "pos_rank"),
+    "depth_role": ("depth_role", "pos_abb", "pos_name", "pos_grp"),
     "offense_snaps": ("offense_snaps", "offense", "offense_snap_count"),
     "offense_pct": ("offense_pct", "offense_pct_num", "offense_snap_pct"),
     "defense_snaps": ("defense_snaps", "defense", "defense_snap_count"),
@@ -288,6 +302,16 @@ def _call_loader(family: SourceFamily, seasons: list[int]) -> pd.DataFrame:
         return _to_pandas(nfl.load_pbp(seasons))
     if family.source_family == "snap_counts":
         return _to_pandas(nfl.load_snap_counts(seasons))
+    if family.source_family == "injuries":
+        return _to_pandas(nfl.load_injuries(seasons))
+    if family.source_family == "depth_charts":
+        return _to_pandas(nfl.load_depth_charts(seasons))
+    if family.source_family == "ngs_passing":
+        return _to_pandas(nfl.load_nextgen_stats(seasons, stat_type="passing"))
+    if family.source_family == "ngs_rushing":
+        return _to_pandas(nfl.load_nextgen_stats(seasons, stat_type="rushing"))
+    if family.source_family == "ngs_receiving":
+        return _to_pandas(nfl.load_nextgen_stats(seasons, stat_type="receiving"))
     raise BackfillError(f"Live loader is not implemented for source family: {family.source_family}")
 
 
@@ -336,11 +360,14 @@ def source_schema_summary(df: pd.DataFrame, family: SourceFamily) -> dict[str, A
 
 
 def _source_value(row: pd.Series, target_column: str) -> Any:
+    candidate_columns = []
     if target_column in row.index:
-        return row[target_column]
-    for alias in SOURCE_COLUMN_ALIASES.get(target_column, ()):
-        if alias in row.index:
-            return row[alias]
+        candidate_columns.append(target_column)
+    candidate_columns.extend(alias for alias in SOURCE_COLUMN_ALIASES.get(target_column, ()) if alias in row.index)
+    for column in candidate_columns:
+        value = row[column]
+        if not pd.isna(value):
+            return value
     return None
 
 
@@ -474,6 +501,8 @@ def prepare_rows(
         for key in family.natural_key_fields:
             if key not in prepared.columns:
                 warnings.append(f"Natural key field is not in target schema and cannot be checked: {key}")
+                continue
+            if key in NULLABLE_NATURAL_KEY_FIELDS.get(family.source_family, set()):
                 continue
             key_missing = prepared[key].isna()
             missing_key_counts[key] = int(key_missing.sum())

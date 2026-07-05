@@ -206,7 +206,7 @@ SOURCE_FAMILY_REGISTRY: dict[str, SourceFamily] = {
         "nflreadpy.load_injuries",
         "raw_nflverse_injuries",
         "season_range",
-        ["season", "week", "team", "gsis_id", "report_status"],
+        ["season", "week", "team", "gsis_id", "report_status", "practice_status", "injury_notes"],
         ["week", "team", "gsis_id"],
         ["stg_player_identity", "pigskin_player_context_packet_current"],
         ["raw_nflverse", "stg_", "compat_pigskin"],

@@ -749,13 +749,28 @@ VOR baseline sensitivity, 2024-2025 PPR:
 
 Decision:
 
-- Injury/depth role scoring is blocked by empty raw source tables.
+- Injury role scoring is no longer blocked after Phase 32.19. Historical injury rows are loaded, and `player_week_role_context_metrics` contains grouped 2014-2025 player-week risk context. It still needs a controlled ideal-stat and feature-mart refresh before another tournament.
+- Depth role scoring remains blocked. The available `nflreadpy.load_depth_charts` output is current snapshot-style data without historical `season` and `week`, so no depth score should be fabricated.
 - First-down PBP proxies are real enough to keep in the feature mart and use as WR/RB components.
 - The first-down proxy family does not beat current Pigskin on aggregate or pairwise.
 - The explicit PPR RB weighted-opportunity diagnostic improves 2025 holdout but misses the aggregate threshold.
 - The deep VOR baseline `QB15/RB36/WR55/TE12` changed VOR captured and regret materially, but in the wrong direction for this slice.
 - No owner-review challenger is strong enough for champion consideration.
 - No champion formula was activated. Live rankings remain unchanged.
+
+### Phase 32.19: Source remediation checkpoint
+
+Phase 32.19 added source and context lanes only. It did not run a new tournament, activate a champion, regenerate live rankings, or expose a Pigskin chat tool.
+
+| Object | Result |
+|---|---:|
+| `raw_nflverse_injuries` | 65,866 rows, seasons 2014-2025 |
+| `raw_nflverse_depth_charts` | 0 rows, source blocked for historical season/week use |
+| `player_week_role_context_metrics` | 65,864 grouped player-week rows |
+| `raw_sleeper_players_snapshot` | 12,200 current Sleeper rows from the 2026 snapshot |
+| `sleeper_player_context_current` | 12,200 latest-context rows, one per Sleeper player |
+
+The ranking read stays unchanged until a later phase refreshes `player_week_ideal_stats`, rebuilds `ranking_backtest_feature_mart`, and reruns SQL-native summaries with the injury risk field populated.
 
 ## Current Baseline Score
 

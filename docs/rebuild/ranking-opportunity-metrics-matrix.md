@@ -21,8 +21,8 @@ Phase 32.12 added an explicit opportunity and role metrics lane for ranking rese
 | PBP red-zone and goal-line quality | `raw_ffopportunity_pbp_pass`, `raw_ffopportunity_pbp_rush`, `player_week_pbp_opportunity_metrics` | Available when `yardline_100` or `goal_to_go` context exists | `red_zone_xfp_score_3yr`, `goal_line_xfp_score_3yr`, `opportunity_quality_score_3yr` |
 | Snap role stability | `stg_participation_context`, `player_week_ideal_opportunity_metrics` | Available as snap-count and offensive-pct proxy where snap count identity maps | `offensive_snap_share_3yr`, `snap_role_stability_3yr` |
 | NGS QB efficiency | `player_week_advanced_metrics` | Proxy only in Phase 32.13 through existing `cpoe`; direct NGS fields remain deferred | `qb_ngs_efficiency_score_3yr` |
-| Injury context | `raw_nflverse_injuries` | Source exists in repo lane, direct derived scoring deferred | `injury_risk_score_3yr` remains null with missing flags |
-| Depth chart context | `raw_nflverse_depth_charts` | Source exists in repo lane, direct derived scoring deferred | `depth_chart_role_score_3yr` remains null with missing flags |
+| Injury context | `raw_nflverse_injuries`, `player_week_role_context_metrics` | Historical injury rows are loaded for 2014-2025 and grouped into player-week risk context | `injury_risk_score_3yr` has a direct source lane ready for a controlled ideal-stat and feature-mart refresh |
+| Depth chart context | `raw_nflverse_depth_charts` | Historical depth remains blocked. Current `nflreadpy.load_depth_charts` output lacks historical `season` and `week` keys | `depth_chart_role_score_3yr` remains null with missing flags |
 | True route share | `stg_participation_context` | Source flag exists, true route source is not consistently available | Missing flag only |
 | First-read share | No approved source | Unavailable | Missing flag only |
 | YPRR | No approved route source | Unavailable | Missing flag only |
@@ -201,6 +201,19 @@ Next missing source recommendation:
 2. Direct NGS receiving and rushing ingest if source coverage is real.
 3. A narrower WR refinement that preserves current Pigskin pairwise strength before adding PBP captured-points boosters.
 
+## Phase 32.19 Depth, Injury, and Sleeper Context Remediation
+
+Phase 32.19 fixed the historical injury source lane and added a current Sleeper player snapshot lane. It did not change live rankings, champion formulas, or Pigskin chat exposure.
+
+| Lane | Result |
+|---|---|
+| Historical injuries | `raw_nflverse_injuries` loaded 65,866 rows for 2014-2025. |
+| Injury role context | `player_week_role_context_metrics` materialized 65,864 grouped player-week rows. Injury risk is bounded 0-100. |
+| Historical depth charts | Still blocked. `nflreadpy.load_depth_charts` returned current snapshot-style rows without historical `season` and `week`, so no depth rows were written. |
+| Sleeper 2026 current snapshot | `raw_sleeper_players_snapshot` captured 12,200 rows from `/players/nfl`; `sleeper_player_context_current` exposes the latest point-in-time context. |
+| Tyreek current-team safety | Latest Sleeper context has `sleeper_current_team = null` for `00-0033040`; the identity bridge still has `identity_current_team = MIA`, so downstream current-roster displays should prefer Sleeper current team when avoiding stale-team inference. |
+| Feature mart | Existing `injury_risk_score_3yr` and `depth_chart_role_score_3yr` columns remain in place. A later controlled refresh should wire injury context into `player_week_ideal_stats` and `ranking_backtest_feature_mart`; depth stays flagged unavailable. |
+
 ## Phase 32.18 Role Context, First-Down Proxy, Weighted Opportunity, and VOR Sensitivity Matrix
 
 Phase 32.18 added first-down PBP proxy fields to the PBP derived table and ranking feature mart. These fields are chain-mover proxies from existing `ffopportunity` PBP fields. They are not route-based metrics and must not be described as `1D/RR`, route share, or first-read share.
@@ -214,8 +227,8 @@ Phase 32.18 added first-down PBP proxy fields to the PBP derived table and ranki
 | `receiving_chain_mover_score` | Bounded score from receiving first-down proxy | `receiving_chain_mover_score_3yr` | Strong WR/TE/RB receiving coverage. | Useful for WR/TE context. |
 | `rushing_chain_mover_score` | Bounded score from rushing first-down proxy | `rushing_chain_mover_score_3yr` | Strong RB/QB coverage. | Useful for RB/QB context. |
 | `gemini31_rb_weighted_opportunity_ppr` | `0.47 * outside_red_zone_carries + 1.28 * red_zone_carries + 1.54 * outside_red_zone_targets + 2.39 * red_zone_targets` | `gemini31_rb_weighted_opportunity_ppr` | Populated for PPR feature mart target seasons 2017-2025 after migration 0035. | PPR-only diagnostic. Do not apply to Standard, Half PPR, or GNG Keeper. |
-| `injury_risk_score_3yr` | `raw_nflverse_injuries` lane | existing feature mart field | Blocked. `raw_nflverse_injuries` currently has 0 rows. | Leave missing and flagged. Do not fabricate. |
-| `depth_chart_role_score_3yr` | `raw_nflverse_depth_charts` lane | existing feature mart field | Blocked. `raw_nflverse_depth_charts` currently has 0 rows. | Leave missing and flagged. Do not fabricate. |
+| `injury_risk_score_3yr` | `raw_nflverse_injuries`, `player_week_role_context_metrics` | existing feature mart field | Source lane implemented in Phase 32.19. `raw_nflverse_injuries` has 65,866 rows for 2014-2025. `player_week_role_context_metrics` has 65,864 grouped player-week rows. | Ready for a separate controlled ideal-stat and feature-mart refresh. Do not backfill live rankings in the source-remediation phase. |
+| `depth_chart_role_score_3yr` | `raw_nflverse_depth_charts` lane | existing feature mart field | Still blocked. `nflreadpy.load_depth_charts` returned 554,215 current snapshot rows with no historical `season` or `week`; the raw historical table remains empty. | Leave missing and flagged. Do not fabricate. |
 
 Feature refresh and validation:
 
