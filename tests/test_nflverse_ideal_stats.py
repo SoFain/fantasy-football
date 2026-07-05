@@ -54,6 +54,96 @@ class NflverseIdealStatsTests(unittest.TestCase):
         self.assertIn("source_version = @source_version", sql)
         self.assertNotIn("truncate", sql)
 
+    def test_normalize_pbp_pass_outputs_contract_columns(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    "season": 2024,
+                    "week": 1,
+                    "game_id": "2024_01_ARI_BUF",
+                    "play_id": 42,
+                    "passer_player_id": "00-0035228",
+                    "passer_full_name": "Kyler Murray",
+                    "passer_position": "QB",
+                    "receiver_player_id": "00-0039067",
+                    "receiver_full_name": "Marvin Harrison",
+                    "receiver_position": "WR",
+                    "posteam": "ARI",
+                    "yardline_100": 12,
+                    "goal_to_go": 0,
+                    "pass_completion_exp": 0.62,
+                    "pass_touchdown_exp": 0.18,
+                    "pass_first_down_exp": 0.44,
+                    "pass_interception_exp": 0.03,
+                    "two_point_conv_exp": 0.0,
+                }
+            ]
+        )
+        normalized = ideal.normalize_ffopportunity_pbp_pass(
+            frame,
+            source_version="pbp_test",
+            source_refresh_id="pbp-pass-test",
+            loaded_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            loaded_by="tester",
+        )
+
+        self.assertEqual(list(normalized.columns), list(ideal.RAW_PBP_PASS_COLUMNS))
+        self.assertEqual(normalized.loc[0, "passer_player_id_internal"], "gsis:00-0035228")
+        self.assertEqual(normalized.loc[0, "receiver_player_id_internal"], "gsis:00-0039067")
+
+    def test_normalize_pbp_rush_outputs_contract_columns(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    "season": 2024,
+                    "week": 1,
+                    "game_id": "2024_01_ARI_BUF",
+                    "play_id": 43,
+                    "rusher_player_id": "00-0035228",
+                    "full_name": "Kyler Murray",
+                    "position": "QB",
+                    "posteam": "ARI",
+                    "yardline_100": 4,
+                    "goal_to_go": 1,
+                    "rushing_yards_exp": 2.4,
+                    "rushing_td_exp": 0.31,
+                    "rushing_fd_exp": 0.5,
+                    "two_point_conv_exp": 0.0,
+                }
+            ]
+        )
+        normalized = ideal.normalize_ffopportunity_pbp_rush(
+            frame,
+            source_version="pbp_test",
+            source_refresh_id="pbp-rush-test",
+            loaded_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            loaded_by="tester",
+        )
+
+        self.assertEqual(list(normalized.columns), list(ideal.RAW_PBP_RUSH_COLUMNS))
+        self.assertEqual(normalized.loc[0, "rusher_player_id_internal"], "gsis:00-0035228")
+
+    def test_pbp_delete_sql_is_bounded_by_season_and_source(self):
+        sql = ideal.build_pbp_raw_delete_sql(project_id="p", dataset_id="d", table_name=ideal.RAW_PBP_PASS_TABLE).lower()
+
+        self.assertIn("season between @season_start and @season_end", sql)
+        self.assertIn("source_version = @source_version", sql)
+        self.assertNotIn("truncate", sql)
+
+    def test_pbp_insert_sql_uses_yardline_context_and_flags_proxy_policy(self):
+        sql = ideal.build_pbp_metrics_insert_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("raw_ffopportunity_pbp_pass", sql)
+        self.assertIn("raw_ffopportunity_pbp_rush", sql)
+        self.assertIn("yardline_100 <= 20", sql)
+        self.assertIn("yardline_100 <= 5", sql)
+        self.assertIn("exact_ffopportunity_fantasy_points_exp_unavailable", sql)
+        self.assertIn("source seasons only; target season excluded by feature mart", sql)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn(" as rows", lowered)
+
     def test_ideal_insert_sql_uses_safe_sources_and_flags_proxies(self):
         sql = ideal.build_ideal_metrics_insert_sql(project_id="p", dataset_id="d")
         lowered = sql.lower()
@@ -84,6 +174,11 @@ class NflverseIdealStatsTests(unittest.TestCase):
         for feature in ("xfp_score_3yr", "high_value_xfp_score_3yr", "receiving_role_dominance_xfp_3yr"):
             self.assertIn(feature, rfb.FEATURE_SOURCE_MAP)
         self.assertIn("player_week_ideal_opportunity_metrics", rfb.ALLOWED_INPUT_TABLES)
+
+    def test_pbp_features_are_allowed_and_mapped(self):
+        for feature in ("receiving_xfp_pbp_3yr", "rushing_xfp_pbp_3yr", "red_zone_xfp_score_3yr"):
+            self.assertIn(feature, rfb.FEATURE_SOURCE_MAP)
+        self.assertIn("player_week_pbp_opportunity_metrics", rfb.ALLOWED_INPUT_TABLES)
 
     def test_summary_write_sql_accepts_ideal_candidates_without_detail_rows(self):
         sql = rfb.build_sql_native_tournament_summary_write_sql(

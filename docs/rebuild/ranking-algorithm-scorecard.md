@@ -521,6 +521,70 @@ Next highest-ROI gaps:
 - Better TE route or participation source.
 - Direct receiving and rushing NGS features where source coverage is real.
 
+## Phase 32.15 PBP ffopportunity Split Diagnostics
+
+Phase 32.15 added the PBP split ffopportunity lane and refreshed the SQL-native feature mart. This was not a live ranking phase.
+
+Objects added:
+
+- `raw_ffopportunity_pbp_pass`
+- `raw_ffopportunity_pbp_rush`
+- `player_week_pbp_opportunity_metrics`
+- PBP feature columns on `ranking_backtest_feature_mart`
+
+Backfill and mart refresh:
+
+| Item | Result |
+|---|---:|
+| Pass PBP rows loaded | 227,146 |
+| Rush PBP rows loaded | 175,775 |
+| Derived PBP weekly rows | 65,358 |
+| Feature mart rows refreshed, 2017-2025 | 156,244 |
+| Summary write rows | 4 run rows, 16 candidate summary rows |
+| Detail rows written | 0 |
+
+SQL-native dry-run estimates:
+
+| Scope | Candidates | Summary rows | Estimated bytes |
+|---|---:|---:|---:|
+| 2024-2025 validation plus holdout | 4 | 16 | 14,060,961 |
+| 2017-2025 aggregate | 4 | 16 | 81,842,565 |
+
+2024-2025 PPR comparison:
+
+| Position | Candidate | Pairwise | Top-N | Captured points | Missing |
+|---|---|---:|---:|---:|---:|
+| QB | current Pigskin baseline | 0.6929 | 0.6829 | 0.8256 | 0.0000 |
+| QB | `pbp_xfp_qb_pass_rush_v0` | 0.7032 | 0.6759 | 0.8152 | 0.0000 |
+| RB | current Pigskin baseline | 0.7859 | 0.8067 | 0.8820 | 0.0008 |
+| RB | `pbp_xfp_rb_high_value_rush_recv_v0` | 0.7900 | 0.8171 | 0.8931 | 0.0052 |
+| RB | scarcity adjusted baseline | 0.7744 | 0.8345 | 0.9108 | 0.0192 |
+| TE | current Pigskin baseline | 0.7781 | 0.6181 | 0.7614 | 0.0037 |
+| TE | `pbp_xfp_te_receiving_role_v0` | 0.7721 | 0.6088 | 0.7520 | 0.0055 |
+| TE | Stats02 ideal TE | 0.7769 | 0.6343 | 0.7696 | 0.0057 |
+| WR | current Pigskin baseline | 0.7834 | 0.6424 | 0.7811 | 0.0018 |
+| WR | `pbp_xfp_wr_high_value_receiving_v0` | 0.7357 | 0.6458 | 0.7923 | 0.0027 |
+| WR | Stats02 ideal WR | 0.7658 | 0.6597 | 0.8011 | 0.0022 |
+
+2017-2025 PPR aggregate:
+
+| Position | Candidate | Pairwise | Top-N | Captured points | Missing |
+|---|---|---:|---:|---:|---:|
+| QB | `pbp_xfp_qb_pass_rush_v0` | 0.7068 | 0.5744 | 0.7864 | 0.0018 |
+| RB | `pbp_xfp_rb_high_value_rush_recv_v0` | 0.7533 | 0.6253 | 0.7630 | 0.0229 |
+| TE | `pbp_xfp_te_receiving_role_v0` | 0.7316 | 0.4800 | 0.6730 | 0.0196 |
+| WR | `pbp_xfp_wr_high_value_receiving_v0` | 0.7383 | 0.5144 | 0.7229 | 0.0124 |
+
+Decision:
+
+- PBP split xFP is useful source enrichment and should stay in the feature mart.
+- RB showed the best validation and holdout signal from PBP split features.
+- WR PBP split features improved captured points versus the current baseline on the 2024-2025 PPR slice, but current Pigskin still had a stronger pairwise read.
+- TE needs more than PBP xFP. Stats02 weekly ideal fields remain the better TE signal.
+- No champion formula was activated. Current Pigskin remains the live baseline.
+
+Next highest-ROI action: a small RB/WR refinement that blends PBP split xFP with the existing Stats02 ideal fields, plus a separate injury/depth role scoring lane.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:

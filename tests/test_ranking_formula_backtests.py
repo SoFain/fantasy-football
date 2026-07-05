@@ -1175,6 +1175,19 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertIn("player_week_opportunity_metrics", sql)
         self.assertIn("opportunity_source_freshness_json", sql)
 
+    def test_feature_mart_insert_sql_consumes_pbp_xfp_without_target_leakage(self):
+        sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("player_week_pbp_opportunity_metrics", sql)
+        self.assertIn("pbp_ideal.source_version = 'ffopportunity_pbp_latest'", sql)
+        self.assertIn("metrics.season < @target_season", sql)
+        self.assertIn("receiving_xfp_pbp_3yr", sql)
+        self.assertIn("pbp_xfp_missing_flags_json", sql)
+        self.assertIn("pbp_source_provenance_json", sql)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+
     def test_sql_native_scoring_keeps_missing_features_missing(self):
         sql = rfb.build_sql_native_scoring_prototype_sql(project_id="p", dataset_id="d")
 
@@ -1390,6 +1403,39 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertIn("ranking_backtest_candidate_summaries", lowered)
         self.assertNotIn("ranking_backtest_results", lowered)
         self.assertNotIn("analytics_pigskin_rankings", lowered)
+
+    def test_pbp_xfp_diagnostic_candidates_validate_and_use_sql_native(self):
+        candidates = rfb.pbp_xfp_diagnostic_tournament_candidates()
+        ids = {row["candidate_id"] for row in candidates}
+
+        self.assertEqual(len(candidates), 4)
+        self.assertIn("pbp_xfp_rb_high_value_rush_recv_v0", ids)
+        self.assertIn("pbp_xfp_wr_high_value_receiving_v0", ids)
+        self.assertIn("pbp_xfp_te_receiving_role_v0", ids)
+        for row in candidates:
+            formula = rfb.validate_formula(json.loads(row["formula_json"]))
+            self.assertEqual(formula["source_flags"]["uses_phase_32_15_pbp_ffopportunity"], True)
+            self.assertEqual(formula["source_flags"]["no_champion_activation"], True)
+            self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
+
+        sql = rfb.build_sql_native_tournament_summary_write_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2024, 2025),
+            scoring_profile_ids=("ppr",),
+            positions=("QB", "RB", "WR", "TE"),
+            candidate_rows=candidates,
+            backtest_run_id_prefix="ranking_backtest_sql_native_pbp_xfp_v0",
+            formula_version="ranking_backtest_sql_native_pbp_xfp_v0",
+        )
+        lowered = sql.lower()
+
+        self.assertIn("receiving_xfp_pbp_3yr", sql)
+        self.assertIn("rushing_xfp_pbp_3yr", sql)
+        self.assertIn("ranking_backtest_candidate_summaries", sql)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
 
     def test_sql_native_formula_rows_match_python_fixture_formula(self):
         sql = rfb.build_sql_native_tournament_summary_sql(

@@ -118,6 +118,16 @@ BQML_NUMERIC_PREDICTORS = (
     "qb_ngs_efficiency_score_3yr",
     "injury_risk_score_3yr",
     "depth_chart_role_score_3yr",
+    "receiving_xfp_pbp_3yr",
+    "rushing_xfp_pbp_3yr",
+    "passing_xfp_pbp_3yr",
+    "red_zone_xfp_score_3yr",
+    "goal_line_xfp_score_3yr",
+    "high_value_target_xfp_score_3yr",
+    "high_value_rush_xfp_score_3yr",
+    "receiving_xfp_share_pbp_3yr",
+    "rushing_xfp_share_pbp_3yr",
+    "opportunity_quality_score_3yr",
 )
 BQML_CATEGORICAL_PREDICTORS = ("scoring_profile_id", "position")
 ENSEMBLE_REFERENCE_SEASONS = tuple(range(2017, 2024))
@@ -209,10 +219,23 @@ IDEAL_STAT_FEATURES = {
     "injury_risk_score_3yr",
     "depth_chart_role_score_3yr",
 }
+PBP_XFP_FEATURES = {
+    "receiving_xfp_pbp_3yr",
+    "rushing_xfp_pbp_3yr",
+    "passing_xfp_pbp_3yr",
+    "red_zone_xfp_score_3yr",
+    "goal_line_xfp_score_3yr",
+    "high_value_target_xfp_score_3yr",
+    "high_value_rush_xfp_score_3yr",
+    "receiving_xfp_share_pbp_3yr",
+    "rushing_xfp_share_pbp_3yr",
+    "opportunity_quality_score_3yr",
+}
 POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "QB": COMMON_FEATURES
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
+    | PBP_XFP_FEATURES
     | {
         "passing_epa_per_play",
         "passing_success_rate",
@@ -225,6 +248,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "RB": COMMON_FEATURES
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
+    | PBP_XFP_FEATURES
     | {
         "carries",
         "targets",
@@ -236,6 +260,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "WR": COMMON_FEATURES
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
+    | PBP_XFP_FEATURES
     | {
         "targets",
         "air_yards",
@@ -247,6 +272,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "TE": COMMON_FEATURES
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
+    | PBP_XFP_FEATURES
     | {
         "targets",
         "air_yards",
@@ -274,6 +300,7 @@ ALLOWED_INPUT_TABLES = (
     "analytics_player_fantasy_points_by_profile",
     "player_week_opportunity_metrics",
     "player_week_ideal_opportunity_metrics",
+    "player_week_pbp_opportunity_metrics",
 )
 ALLOWED_CANDIDATE_STATUSES = ("draft", "reviewed", "approved")
 FEATURE_SOURCE_MAP = {
@@ -339,6 +366,16 @@ FEATURE_SOURCE_MAP = {
     "qb_ngs_efficiency_score_3yr": "qb_ngs_efficiency_score_3yr",
     "injury_risk_score_3yr": "injury_risk_score_3yr",
     "depth_chart_role_score_3yr": "depth_chart_role_score_3yr",
+    "receiving_xfp_pbp_3yr": "receiving_xfp_pbp_3yr",
+    "rushing_xfp_pbp_3yr": "rushing_xfp_pbp_3yr",
+    "passing_xfp_pbp_3yr": "passing_xfp_pbp_3yr",
+    "red_zone_xfp_score_3yr": "red_zone_xfp_score_3yr",
+    "goal_line_xfp_score_3yr": "goal_line_xfp_score_3yr",
+    "high_value_target_xfp_score_3yr": "high_value_target_xfp_score_3yr",
+    "high_value_rush_xfp_score_3yr": "high_value_rush_xfp_score_3yr",
+    "receiving_xfp_share_pbp_3yr": "receiving_xfp_share_pbp_3yr",
+    "rushing_xfp_share_pbp_3yr": "rushing_xfp_share_pbp_3yr",
+    "opportunity_quality_score_3yr": "opportunity_quality_score_3yr",
 }
 FORBIDDEN_TABLE_REFERENCES = {
     "weekly_metrics",
@@ -2395,6 +2432,7 @@ def build_feature_mart_insert_sql(*, project_id: str, dataset_id: str) -> str:
     packet_table = table_id(project_id, dataset_id, "pigskin_player_context_packet_current")
     opportunity_table = table_id(project_id, dataset_id, "player_week_opportunity_metrics")
     ideal_table = table_id(project_id, dataset_id, "player_week_ideal_opportunity_metrics")
+    pbp_ideal_table = table_id(project_id, dataset_id, "player_week_pbp_opportunity_metrics")
     return f"""
 CREATE TEMP FUNCTION _slope(points ARRAY<STRUCT<season INT64, value FLOAT64>>)
 RETURNS FLOAT64
@@ -2483,6 +2521,17 @@ INSERT INTO `{mart_table}` (
     qb_ngs_efficiency_score_3yr,
     injury_risk_score_3yr,
     depth_chart_role_score_3yr,
+    receiving_xfp_pbp_3yr,
+    rushing_xfp_pbp_3yr,
+    passing_xfp_pbp_3yr,
+    red_zone_xfp_score_3yr,
+    goal_line_xfp_score_3yr,
+    high_value_target_xfp_score_3yr,
+    high_value_rush_xfp_score_3yr,
+    receiving_xfp_share_pbp_3yr,
+    rushing_xfp_share_pbp_3yr,
+    opportunity_quality_score_3yr,
+    pbp_xfp_missing_flags_json,
     target_fantasy_points,
     actual_position_rank,
     actual_overall_rank,
@@ -2562,6 +2611,16 @@ season_features AS (
         AVG(ideal.qb_ngs_efficiency_score) AS qb_ngs_efficiency_score,
         AVG(ideal.injury_risk_score) AS injury_risk_score,
         AVG(ideal.depth_chart_role_score) AS depth_chart_role_score,
+        AVG(pbp_ideal.receiving_xfp_pbp) AS receiving_xfp_pbp,
+        AVG(pbp_ideal.rushing_xfp_pbp) AS rushing_xfp_pbp,
+        AVG(pbp_ideal.passing_xfp_pbp) AS passing_xfp_pbp,
+        AVG(pbp_ideal.red_zone_xfp_score) AS pbp_red_zone_xfp_score,
+        AVG(pbp_ideal.goal_line_xfp_score) AS pbp_goal_line_xfp_score,
+        AVG(pbp_ideal.high_value_target_xfp) AS high_value_target_xfp,
+        AVG(pbp_ideal.high_value_rush_xfp) AS high_value_rush_xfp,
+        AVG(pbp_ideal.receiving_xfp_share) AS receiving_xfp_share_pbp,
+        AVG(pbp_ideal.rushing_xfp_share) AS rushing_xfp_share_pbp,
+        AVG(pbp_ideal.opportunity_quality_score) AS pbp_opportunity_quality_score,
         AVG(IF(opportunity.spike_week_flag, 1.0, 0.0)) AS spike_week_rate,
         AVG(IF(opportunity.bust_week_flag, 1.0, 0.0)) AS bust_week_rate,
         AVG(IF(opportunity.elite_week_flag, 1.0, 0.0)) AS elite_week_rate,
@@ -2573,7 +2632,9 @@ season_features AS (
         ANY_VALUE(opportunity.source_freshness_json) AS opportunity_source_freshness_json,
         ANY_VALUE(opportunity.missing_flags_json) AS opportunity_missing_flags,
         ANY_VALUE(ideal.source_provenance_json) AS ideal_source_provenance_json,
-        ANY_VALUE(ideal.missing_flags_json) AS ideal_missing_flags
+        ANY_VALUE(ideal.missing_flags_json) AS ideal_missing_flags,
+        ANY_VALUE(pbp_ideal.source_provenance_json) AS pbp_source_provenance_json,
+        ANY_VALUE(pbp_ideal.missing_flags_json) AS pbp_missing_flags
     FROM `{metrics_table}` metrics
     JOIN positions
       ON metrics.position = positions.position
@@ -2600,6 +2661,12 @@ season_features AS (
      AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(ideal.player_id_internal, r'^gsis:', '')
      AND metrics.position = ideal.position
      AND ideal.source_version = 'ffopportunity_weekly_latest'
+    LEFT JOIN `{pbp_ideal_table}` pbp_ideal
+      ON metrics.season = pbp_ideal.season
+     AND metrics.week = pbp_ideal.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(pbp_ideal.player_id_internal, r'^gsis:', '')
+     AND metrics.position = pbp_ideal.position
+     AND pbp_ideal.source_version = 'ffopportunity_pbp_latest'
     WHERE metrics.season BETWEEN @source_window_start_season AND @source_window_end_season
       AND metrics.season < @target_season
       AND metrics.scoring_profile_id = 'ppr'
@@ -2656,6 +2723,16 @@ source_features AS (
         AVG(qb_ngs_efficiency_score) AS qb_ngs_efficiency_score_3yr,
         AVG(injury_risk_score) AS injury_risk_score_3yr,
         AVG(depth_chart_role_score) AS depth_chart_role_score_3yr,
+        AVG(receiving_xfp_pbp) AS receiving_xfp_pbp_3yr,
+        AVG(rushing_xfp_pbp) AS rushing_xfp_pbp_3yr,
+        AVG(passing_xfp_pbp) AS passing_xfp_pbp_3yr,
+        AVG(pbp_red_zone_xfp_score) AS red_zone_xfp_score_3yr,
+        AVG(pbp_goal_line_xfp_score) AS goal_line_xfp_score_3yr,
+        AVG(high_value_target_xfp) AS high_value_target_xfp_score_3yr,
+        AVG(high_value_rush_xfp) AS high_value_rush_xfp_score_3yr,
+        AVG(receiving_xfp_share_pbp) AS receiving_xfp_share_pbp_3yr,
+        AVG(rushing_xfp_share_pbp) AS rushing_xfp_share_pbp_3yr,
+        AVG(pbp_opportunity_quality_score) AS opportunity_quality_score_3yr,
         AVG(spike_week_rate) AS spike_week_rate_3yr,
         AVG(bust_week_rate) AS bust_week_rate_3yr,
         AVG(elite_week_rate) AS elite_week_rate_3yr,
@@ -2682,7 +2759,9 @@ source_features AS (
         ANY_VALUE(opportunity_source_freshness_json HAVING MAX season) AS opportunity_source_freshness_json,
         ANY_VALUE(opportunity_missing_flags HAVING MAX season) AS opportunity_missing_flags,
         ANY_VALUE(ideal_source_provenance_json HAVING MAX season) AS ideal_source_provenance_json,
-        ANY_VALUE(ideal_missing_flags HAVING MAX season) AS ideal_missing_flags
+        ANY_VALUE(ideal_missing_flags HAVING MAX season) AS ideal_missing_flags,
+        ANY_VALUE(pbp_source_provenance_json HAVING MAX season) AS pbp_source_provenance_json,
+        ANY_VALUE(pbp_missing_flags HAVING MAX season) AS pbp_missing_flags
     FROM season_features
     GROUP BY scoring_profile_id, player_key, position
 ),
@@ -2797,6 +2876,16 @@ with_source AS (
         source.qb_ngs_efficiency_score_3yr,
         source.injury_risk_score_3yr,
         source.depth_chart_role_score_3yr,
+        source.receiving_xfp_pbp_3yr,
+        source.rushing_xfp_pbp_3yr,
+        source.passing_xfp_pbp_3yr,
+        source.red_zone_xfp_score_3yr,
+        source.goal_line_xfp_score_3yr,
+        source.high_value_target_xfp_score_3yr,
+        source.high_value_rush_xfp_score_3yr,
+        source.receiving_xfp_share_pbp_3yr,
+        source.rushing_xfp_share_pbp_3yr,
+        source.opportunity_quality_score_3yr,
         target.target_fantasy_points,
         source.metrics_source_freshness_json,
         source.metrics_missing_flags,
@@ -2804,6 +2893,8 @@ with_source AS (
         source.opportunity_missing_flags,
         source.ideal_source_provenance_json,
         source.ideal_missing_flags,
+        source.pbp_source_provenance_json,
+        source.pbp_missing_flags,
         packet.packet_source_freshness_json
     FROM target_points target
     JOIN source_features source
@@ -2910,6 +3001,17 @@ SELECT
     qb_ngs_efficiency_score_3yr,
     injury_risk_score_3yr,
     depth_chart_role_score_3yr,
+    receiving_xfp_pbp_3yr,
+    rushing_xfp_pbp_3yr,
+    passing_xfp_pbp_3yr,
+    red_zone_xfp_score_3yr,
+    goal_line_xfp_score_3yr,
+    high_value_target_xfp_score_3yr,
+    high_value_rush_xfp_score_3yr,
+    receiving_xfp_share_pbp_3yr,
+    rushing_xfp_share_pbp_3yr,
+    opportunity_quality_score_3yr,
+    pbp_missing_flags AS pbp_xfp_missing_flags_json,
     target_fantasy_points,
     actual_position_rank,
     actual_overall_rank,
@@ -2947,9 +3049,16 @@ SELECT
         qb_ngs_efficiency_score_3yr IS NULL AS qb_ngs_efficiency_score_3yr_missing,
         injury_risk_score_3yr IS NULL AS injury_risk_score_3yr_missing,
         depth_chart_role_score_3yr IS NULL AS depth_chart_role_score_3yr_missing,
+        receiving_xfp_pbp_3yr IS NULL AS receiving_xfp_pbp_3yr_missing,
+        rushing_xfp_pbp_3yr IS NULL AS rushing_xfp_pbp_3yr_missing,
+        passing_xfp_pbp_3yr IS NULL AS passing_xfp_pbp_3yr_missing,
+        red_zone_xfp_score_3yr IS NULL AS red_zone_xfp_score_3yr_missing,
+        goal_line_xfp_score_3yr IS NULL AS goal_line_xfp_score_3yr_missing,
+        opportunity_quality_score_3yr IS NULL AS opportunity_quality_score_3yr_missing,
         metrics_missing_flags AS source_missing_flags,
         opportunity_missing_flags AS opportunity_missing_flags,
-        ideal_missing_flags AS ideal_missing_flags
+        ideal_missing_flags AS ideal_missing_flags,
+        pbp_missing_flags AS pbp_missing_flags
     )) AS predictor_missing_flags_json,
     TO_JSON_STRING(STRUCT(
         target_fantasy_points IS NULL AS target_fantasy_points_missing,
@@ -2959,6 +3068,7 @@ SELECT
         metrics_source_freshness_json AS metrics_source_freshness_json,
         opportunity_source_freshness_json AS opportunity_source_freshness_json,
         ideal_source_provenance_json AS ideal_source_provenance_json,
+        pbp_source_provenance_json AS pbp_source_provenance_json,
         packet_source_freshness_json AS packet_source_freshness_json
     )) AS source_freshness_json,
     TO_JSON_STRING(STRUCT(
@@ -3337,6 +3447,16 @@ feature_values AS (
       WHEN 'qb_ngs_efficiency_score_3yr' THEN qb_ngs_efficiency_score_3yr
       WHEN 'injury_risk_score_3yr' THEN injury_risk_score_3yr
       WHEN 'depth_chart_role_score_3yr' THEN depth_chart_role_score_3yr
+      WHEN 'receiving_xfp_pbp_3yr' THEN receiving_xfp_pbp_3yr
+      WHEN 'rushing_xfp_pbp_3yr' THEN rushing_xfp_pbp_3yr
+      WHEN 'passing_xfp_pbp_3yr' THEN passing_xfp_pbp_3yr
+      WHEN 'red_zone_xfp_score_3yr' THEN red_zone_xfp_score_3yr
+      WHEN 'goal_line_xfp_score_3yr' THEN goal_line_xfp_score_3yr
+      WHEN 'high_value_target_xfp_score_3yr' THEN high_value_target_xfp_score_3yr
+      WHEN 'high_value_rush_xfp_score_3yr' THEN high_value_rush_xfp_score_3yr
+      WHEN 'receiving_xfp_share_pbp_3yr' THEN receiving_xfp_share_pbp_3yr
+      WHEN 'rushing_xfp_share_pbp_3yr' THEN rushing_xfp_share_pbp_3yr
+      WHEN 'opportunity_quality_score_3yr' THEN opportunity_quality_score_3yr
       ELSE NULL
     END AS raw_feature_value
   FROM mart
@@ -3359,7 +3479,7 @@ scored_features AS (
       WHEN feature_name IN ('target_share_slope_3yr', 'carry_share_slope_3yr', 'wopr_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 250.0))
       WHEN feature_name = 'availability_rate_3yr' THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
       WHEN feature_name = 'weekly_volatility_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value * 10.0))
-      WHEN feature_name IN ('xfp_share_3yr', 'offensive_snap_share_3yr') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name IN ('xfp_share_3yr', 'offensive_snap_share_3yr', 'receiving_xfp_share_pbp_3yr', 'rushing_xfp_share_pbp_3yr') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
       WHEN feature_name = 'fantasy_points_over_expectation_3yr' THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 5.0))
       WHEN feature_name = 'injury_risk_score_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value))
       WHEN feature_name IN ('improving_3yr', 'breakout_trajectory_3yr') THEN IF(raw_feature_value > 0, 100.0, 0.0)
@@ -3371,6 +3491,7 @@ scored_features AS (
       WHEN feature_name = 'air_yards' AND raw_feature_value BETWEEN 0 AND 1 THEN LEAST(100.0, GREATEST(0.0, raw_feature_value * 100.0))
       WHEN feature_name IN ('air_yards', 'receiving_yards') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 150.0 * 100.0))
       WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
+      WHEN feature_name IN ('receiving_xfp_pbp_3yr', 'rushing_xfp_pbp_3yr', 'passing_xfp_pbp_3yr', 'high_value_target_xfp_score_3yr', 'high_value_rush_xfp_score_3yr') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 18.0 * 100.0))
       ELSE LEAST(100.0, GREATEST(0.0, raw_feature_value))
     END AS feature_score
   FROM feature_values
@@ -4055,6 +4176,146 @@ def stats02_ideal_tournament_candidates() -> list[dict[str, Any]]:
             )
         )
     return rows
+
+
+def pbp_xfp_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
+    def formula(
+        *,
+        position: str,
+        version: str,
+        features: list[str],
+        weights: dict[str, float],
+        profile_weights: dict[str, dict[str, float]] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "version": version,
+            "position": position,
+            "features": features,
+            "weights": weights,
+            "score_expression": "weighted_linear",
+            "normalization": {"method": "bounded_0_100_sql"},
+            "source_flags": {
+                "uses_phase_32_15_pbp_ffopportunity": True,
+                "pbp_xfp_is_component_proxy": True,
+                "no_2025_holdout_weight_tuning": True,
+                "no_champion_activation": True,
+            },
+        }
+        if profile_weights:
+            payload["scoring_profile_weights"] = profile_weights
+        return payload
+
+    specs = [
+        (
+            "pbp_xfp_qb_pass_rush_v0",
+            "PBP XFP QB Pass Rush Diagnostic",
+            formula(
+                position="QB",
+                version="pbp_xfp_diagnostic_v0",
+                features=["profile_points_score", "passing_xfp_pbp_3yr", "rushing_xfp_pbp_3yr", "opportunity_quality_score_3yr"],
+                weights={
+                    "profile_points_score": 0.35,
+                    "passing_xfp_pbp_3yr": 0.30,
+                    "rushing_xfp_pbp_3yr": 0.20,
+                    "opportunity_quality_score_3yr": 0.15,
+                },
+            ),
+        ),
+        (
+            "pbp_xfp_rb_high_value_rush_recv_v0",
+            "PBP XFP RB High Value Rush Receive Diagnostic",
+            formula(
+                position="RB",
+                version="pbp_xfp_diagnostic_v0",
+                features=[
+                    "profile_points_score",
+                    "rushing_xfp_pbp_3yr",
+                    "receiving_xfp_pbp_3yr",
+                    "high_value_rush_xfp_score_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "goal_line_xfp_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.28,
+                    "rushing_xfp_pbp_3yr": 0.22,
+                    "receiving_xfp_pbp_3yr": 0.14,
+                    "high_value_rush_xfp_score_3yr": 0.16,
+                    "high_value_target_xfp_score_3yr": 0.10,
+                    "goal_line_xfp_score_3yr": 0.10,
+                },
+                profile_weights={
+                    "standard": {"goal_line_xfp_score_3yr": 0.16, "receiving_xfp_pbp_3yr": 0.08},
+                    "ppr": {"receiving_xfp_pbp_3yr": 0.18, "high_value_target_xfp_score_3yr": 0.12},
+                    "half_ppr": {"receiving_xfp_pbp_3yr": 0.15},
+                    "gng_keeper": {"receiving_xfp_pbp_3yr": 0.16, "opportunity_quality_score_3yr": 0.10},
+                },
+            ),
+        ),
+        (
+            "pbp_xfp_wr_high_value_receiving_v0",
+            "PBP XFP WR High Value Receiving Diagnostic",
+            formula(
+                position="WR",
+                version="pbp_xfp_diagnostic_v0",
+                features=[
+                    "profile_points_score",
+                    "receiving_xfp_pbp_3yr",
+                    "receiving_xfp_share_pbp_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "red_zone_xfp_score_3yr",
+                    "opportunity_quality_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.30,
+                    "receiving_xfp_pbp_3yr": 0.22,
+                    "receiving_xfp_share_pbp_3yr": 0.18,
+                    "high_value_target_xfp_score_3yr": 0.14,
+                    "red_zone_xfp_score_3yr": 0.08,
+                    "opportunity_quality_score_3yr": 0.08,
+                },
+                profile_weights={
+                    "standard": {"red_zone_xfp_score_3yr": 0.12, "receiving_xfp_share_pbp_3yr": 0.14},
+                    "ppr": {"receiving_xfp_share_pbp_3yr": 0.21, "receiving_xfp_pbp_3yr": 0.24},
+                    "half_ppr": {"receiving_xfp_pbp_3yr": 0.23},
+                    "gng_keeper": {"receiving_xfp_share_pbp_3yr": 0.20},
+                },
+            ),
+        ),
+        (
+            "pbp_xfp_te_receiving_role_v0",
+            "PBP XFP TE Receiving Role Diagnostic",
+            formula(
+                position="TE",
+                version="pbp_xfp_diagnostic_v0",
+                features=[
+                    "profile_points_score",
+                    "receiving_xfp_pbp_3yr",
+                    "receiving_xfp_share_pbp_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "red_zone_xfp_score_3yr",
+                    "goal_line_xfp_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.28,
+                    "receiving_xfp_pbp_3yr": 0.24,
+                    "receiving_xfp_share_pbp_3yr": 0.18,
+                    "high_value_target_xfp_score_3yr": 0.12,
+                    "red_zone_xfp_score_3yr": 0.10,
+                    "goal_line_xfp_score_3yr": 0.08,
+                },
+                profile_weights={
+                    "standard": {"red_zone_xfp_score_3yr": 0.14, "goal_line_xfp_score_3yr": 0.12},
+                    "ppr": {"receiving_xfp_share_pbp_3yr": 0.21, "receiving_xfp_pbp_3yr": 0.26},
+                    "half_ppr": {"receiving_xfp_pbp_3yr": 0.25},
+                    "gng_keeper": {"receiving_xfp_share_pbp_3yr": 0.20},
+                },
+            ),
+        ),
+    ]
+    return [
+        build_candidate_row(payload, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, payload in specs
+    ]
 
 
 def estimate_sql_native_tournament(
