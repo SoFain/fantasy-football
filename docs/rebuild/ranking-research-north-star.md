@@ -38,6 +38,20 @@ It proved the SQL-native evaluator can blend normalized current Pigskin, simple 
 
 Next useful work is feature work, not more tiny weight-grid tuning. The warehouse needs better opportunity and route-level signals before another ensemble pass is likely to matter.
 
+## Phase 32.12 Feature Direction
+
+The first feature-work pass added real opportunity and role inputs from approved warehouse sources:
+
+- QB rushing leverage from carries, carry share, red-zone carries, and inside-five carries.
+- RB high-value opportunity from red-zone touches, high-value touches, target share, and opportunity share.
+- WR and TE dominance from target share, air-yards share, WOPR, and red-zone targets.
+- Team environment from plays, EPA per play, and neutral pass rate.
+- Ceiling and bust history from profile fantasy point outcomes.
+
+This is now a better research base than more weight-grid tuning. The next comparison should test whether these features improve multi-year SQL-native summaries against current Pigskin, simple projection, and the BQML challengers.
+
+Still blocked: first-read share, true route share as a reliable feature, YPRR without route source proof, and end-zone targets. Missing flags are part of the feature contract.
+
 ## Safety Rules
 
 - No live ranking regeneration during research phases.

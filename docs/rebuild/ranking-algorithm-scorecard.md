@@ -405,6 +405,39 @@ Decision: no ensemble beats the current baseline strongly enough for owner-revie
 
 Next research direction: improve the feature warehouse before another blend pass. Better opportunity and route-level metrics are more likely to help than reweighting the same ingredients.
 
+## Phase 32.12 Opportunity Metrics Warehouse
+
+Phase 32.12 added an additive `player_week_opportunity_metrics` lane and enriched `ranking_backtest_feature_mart` for target seasons 2017 through 2025. No live rankings, champions, Pigskin tools, or ranking formula/backtest tables were changed.
+
+New feature families:
+
+- QB rushing leverage.
+- RB high-value opportunity.
+- WR and TE receiving role dominance.
+- Red-zone and goal-line usage.
+- Team environment.
+- Spike, bust, and elite week rates.
+
+Backfill and mart refresh:
+
+| Object | Scope | Rows |
+|---|---|---:|
+| `player_week_opportunity_metrics` | 2014-2025 source weeks | 70,356 |
+| `ranking_backtest_feature_mart` | 2017-2025 targets, four profiles, QB/RB/WR/TE | 156,244 |
+
+Bounded 2025 PPR diagnostic smoke:
+
+| Candidate | Position | Sample size | Top-N | NDCG@K | Missing |
+|---|---|---:|---:|---:|---:|
+| QB opportunity diagnostic | QB | 295 | 0.8333 | 0.8259 | 0.0000 |
+| RB opportunity diagnostic | RB | 366 | 1.0000 | 0.9041 | 0.0000 |
+| TE opportunity diagnostic | TE | 392 | 0.7778 | 0.7544 | 0.0000 |
+| WR opportunity diagnostic | WR | 638 | 0.8356 | 0.7931 | 0.0000 |
+
+Warning: RB VOR captured rate was null in the bounded diagnostic summary, likely because the denominator was zero for that slice. Do not use that single RB VOR result as a champion signal.
+
+Blocked source concepts remain blocked: first-read share, true route share as a reliable feature, YPRR without true routes, and end-zone targets.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:

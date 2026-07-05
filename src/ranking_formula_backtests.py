@@ -85,6 +85,15 @@ BQML_NUMERIC_PREDICTORS = (
     "snap_share_proxy",
     "air_yards",
     "team_pass_rate",
+    "qb_rushing_leverage_index",
+    "rb_high_value_opportunity_score",
+    "receiving_role_dominance_score",
+    "red_zone_usage_score",
+    "goal_line_usage_score",
+    "team_environment_score",
+    "spike_week_rate_3yr",
+    "bust_week_rate_3yr",
+    "elite_week_rate_3yr",
     "points_per_game_slope_3yr",
     "total_points_slope_3yr",
     "opportunity_slope_3yr",
@@ -155,6 +164,12 @@ COMMON_FEATURES = {
     "team_epa_per_play",
     "opponent_allowed_points",
     "pigskin_context_score",
+    "team_environment_score",
+    "red_zone_usage_score",
+    "goal_line_usage_score",
+    "spike_week_rate_3yr",
+    "bust_week_rate_3yr",
+    "elite_week_rate_3yr",
 }
 TREND_FEATURES = {
     "points_per_game_slope_3yr",
@@ -182,6 +197,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
         "dropbacks",
         "rushing_attempts",
         "designed_rush_share_proxy",
+        "qb_rushing_leverage_index",
     },
     "RB": COMMON_FEATURES
     | TREND_FEATURES
@@ -191,6 +207,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
         "rush_success_rate",
         "receiving_usage",
         "goal_line_opportunities",
+        "rb_high_value_opportunity_score",
     },
     "WR": COMMON_FEATURES
     | TREND_FEATURES
@@ -200,6 +217,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
         "receiving_yards",
         "receiving_epa",
         "red_zone_targets",
+        "receiving_role_dominance_score",
     },
     "TE": COMMON_FEATURES
     | TREND_FEATURES
@@ -210,6 +228,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
         "receiving_epa",
         "red_zone_targets",
         "team_pass_rate",
+        "receiving_role_dominance_score",
     },
 }
 BLOCKED_METRIC_FEATURES = {
@@ -227,6 +246,7 @@ ALLOWED_INPUT_TABLES = (
     "pigskin_player_context_packet_current",
     "analytics_player_weekly_truth",
     "analytics_player_fantasy_points_by_profile",
+    "player_week_opportunity_metrics",
 )
 ALLOWED_CANDIDATE_STATUSES = ("draft", "reviewed", "approved")
 FEATURE_SOURCE_MAP = {
@@ -259,6 +279,15 @@ FEATURE_SOURCE_MAP = {
     "snap_share_proxy": "snap_share_proxy",
     "air_yards": "air_yards",
     "team_pass_rate": "team_pass_rate",
+    "qb_rushing_leverage_index": "qb_rushing_leverage_index",
+    "rb_high_value_opportunity_score": "rb_high_value_opportunity_score",
+    "receiving_role_dominance_score": "receiving_role_dominance_score",
+    "red_zone_usage_score": "red_zone_usage_score",
+    "goal_line_usage_score": "goal_line_usage_score",
+    "team_environment_score": "team_environment_score",
+    "spike_week_rate_3yr": "spike_week_rate_3yr",
+    "bust_week_rate_3yr": "bust_week_rate_3yr",
+    "elite_week_rate_3yr": "elite_week_rate_3yr",
     "points_per_game_slope_3yr": "points_per_game_slope_3yr",
     "total_points_slope_3yr": "total_points_slope_3yr",
     "opportunity_slope_3yr": "opportunity_slope_3yr",
@@ -1775,11 +1804,26 @@ WITH season_features AS (
         AVG(metrics.snap_share) AS snap_share_proxy,
         AVG(metrics.air_yards_share) AS air_yards,
         AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
+        AVG(opportunity.qb_rushing_leverage_index) AS qb_rushing_leverage_index,
+        AVG(CASE WHEN metrics.position = 'RB' THEN opportunity.high_value_opportunity_score ELSE NULL END) AS rb_high_value_opportunity_score,
+        AVG(CASE
+            WHEN metrics.position = 'WR' THEN opportunity.wr_dominance_score
+            WHEN metrics.position = 'TE' THEN opportunity.te_receiving_role_dominance_score
+            ELSE NULL
+        END) AS receiving_role_dominance_score,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.red_zone_targets, 0) * 4.0 + COALESCE(opportunity.red_zone_carries, 0) * 4.0 + COALESCE(opportunity.red_zone_touches, 0) * 3.0))) AS red_zone_usage_score,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.inside_5_carries, 0) * 12.0 + COALESCE(opportunity.inside_10_carries, 0) * 6.0))) AS goal_line_usage_score,
+        AVG(opportunity.team_environment_score) AS opportunity_team_environment_score,
+        AVG(IF(opportunity.spike_week_flag, 1.0, 0.0)) AS spike_week_rate,
+        AVG(IF(opportunity.bust_week_flag, 1.0, 0.0)) AS bust_week_rate,
+        AVG(IF(opportunity.elite_week_flag, 1.0, 0.0)) AS elite_week_rate,
         SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) AS availability_rate,
         STDDEV(metrics.opportunities) AS weekly_volatility,
         LEAST(100.0, GREATEST(0.0, SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) * 100.0 - COALESCE(STDDEV(metrics.opportunities), 0.0) * 2.0)) AS role_stability_score,
         ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
-        ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags
+        ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags,
+        ANY_VALUE(opportunity.source_freshness_json) AS opportunity_source_freshness_json,
+        ANY_VALUE(opportunity.missing_flags_json) AS opportunity_missing_flags
     FROM `{table_id(project_id, dataset_id, "player_week_advanced_metrics")}` metrics
     LEFT JOIN `{table_id(project_id, dataset_id, "analytics_player_weekly_truth")}` truth
       ON metrics.season = truth.season
@@ -1832,6 +1876,15 @@ source_features AS (
         AVG(snap_share_proxy) AS snap_share_proxy,
         AVG(air_yards) AS air_yards,
         AVG(team_pass_rate) AS team_pass_rate,
+        AVG(qb_rushing_leverage_index) AS qb_rushing_leverage_index,
+        AVG(rb_high_value_opportunity_score) AS rb_high_value_opportunity_score,
+        AVG(receiving_role_dominance_score) AS receiving_role_dominance_score,
+        AVG(red_zone_usage_score) AS red_zone_usage_score,
+        AVG(goal_line_usage_score) AS goal_line_usage_score,
+        AVG(opportunity_team_environment_score) AS opportunity_team_environment_score,
+        AVG(spike_week_rate) AS spike_week_rate_3yr,
+        AVG(bust_week_rate) AS bust_week_rate_3yr,
+        AVG(elite_week_rate) AS elite_week_rate_3yr,
         _slope(ARRAY_AGG(STRUCT(season, points_per_game AS value) ORDER BY season)) AS points_per_game_slope_3yr,
         _slope(ARRAY_AGG(STRUCT(season, total_points AS value) ORDER BY season)) AS total_points_slope_3yr,
         _slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) AS opportunity_slope_3yr,
@@ -1851,7 +1904,9 @@ source_features AS (
         IF(_slope(ARRAY_AGG(STRUCT(season, target_share AS value) ORDER BY season)) > 0
            OR _slope(ARRAY_AGG(STRUCT(season, carry_share AS value) ORDER BY season)) > 0, 1.0, 0.0) AS breakout_trajectory_3yr,
         ANY_VALUE(metrics_source_freshness_json HAVING MAX season) AS metrics_source_freshness_json,
-        ANY_VALUE(metrics_missing_flags HAVING MAX season) AS metrics_missing_flags
+        ANY_VALUE(metrics_missing_flags HAVING MAX season) AS metrics_missing_flags,
+        ANY_VALUE(opportunity_source_freshness_json HAVING MAX season) AS opportunity_source_freshness_json,
+        ANY_VALUE(opportunity_missing_flags HAVING MAX season) AS opportunity_missing_flags
     FROM season_features
     GROUP BY player_key, position
 ),
@@ -1969,12 +2024,339 @@ WHERE target_season = @target_season
 """.strip()
 
 
+def build_opportunity_metrics_delete_sql(*, project_id: str, dataset_id: str) -> str:
+    return f"""
+DELETE FROM `{table_id(project_id, dataset_id, "player_week_opportunity_metrics")}`
+WHERE season BETWEEN @season_start AND @season_end
+""".strip()
+
+
+def build_opportunity_metrics_insert_sql(*, project_id: str, dataset_id: str) -> str:
+    opportunity_table = table_id(project_id, dataset_id, "player_week_opportunity_metrics")
+    metrics_table = table_id(project_id, dataset_id, "player_week_advanced_metrics")
+    stats_table = table_id(project_id, dataset_id, "stg_player_week_stats")
+    team_table = table_id(project_id, dataset_id, "stg_team_week_stats")
+    points_table = table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")
+    participation_table = table_id(project_id, dataset_id, "stg_participation_context")
+    return f"""
+INSERT INTO `{opportunity_table}` (
+    opportunity_metric_version,
+    opportunity_run_id,
+    season,
+    week,
+    player_id_internal,
+    player_name,
+    team,
+    opponent_team,
+    position,
+    targets,
+    carries,
+    receptions,
+    air_yards,
+    rushing_yards,
+    receiving_yards,
+    passing_yards,
+    pass_attempts,
+    rush_attempts,
+    team_plays,
+    team_pass_attempts,
+    team_rush_attempts,
+    team_targets,
+    team_air_yards,
+    team_epa_per_play,
+    team_neutral_pass_rate,
+    target_share,
+    carry_share,
+    opportunity_share,
+    air_yards_share,
+    weighted_opportunity,
+    wopr,
+    red_zone_targets,
+    red_zone_carries,
+    red_zone_touches,
+    inside_10_carries,
+    inside_5_carries,
+    goal_line_carry_share,
+    red_zone_opportunity_share,
+    high_value_touches,
+    high_value_opportunity_score,
+    receiving_equity_score,
+    qb_rushing_leverage_index,
+    wr_dominance_score,
+    te_receiving_role_dominance_score,
+    team_environment_score,
+    spike_week_flag,
+    bust_week_flag,
+    elite_week_flag,
+    source_freshness_json,
+    missing_flags_json,
+    provenance_json,
+    created_at
+)
+WITH participation AS (
+    SELECT
+        season,
+        week,
+        REGEXP_REPLACE(player_id_internal, r'^gsis:', '') AS player_key,
+        LOGICAL_OR(COALESCE(has_true_route_source, FALSE)) AS has_true_route_source
+    FROM `{participation_table}`
+    WHERE season BETWEEN @season_start AND @season_end
+    GROUP BY 1, 2, 3
+),
+base AS (
+    SELECT
+        metrics.*,
+        team.plays AS team_plays,
+        team.pass_attempts AS team_pass_attempts,
+        team.rush_attempts AS team_rush_attempts,
+        team.team_targets,
+        team.team_air_yards,
+        team.epa_per_play AS team_epa_per_play,
+        team.neutral_pass_rate AS team_neutral_pass_rate,
+        team.red_zone_pass_rate,
+        team.red_zone_rush_rate,
+        stats.receptions AS source_receptions,
+        stats.air_yards AS source_air_yards,
+        stats.rushing_yards AS source_rushing_yards,
+        stats.receiving_yards AS source_receiving_yards,
+        stats.passing_yards AS source_passing_yards,
+        profile_points.total_fantasy_points AS ppr_points,
+        COALESCE(participation.has_true_route_source, FALSE) AS has_true_route_source
+    FROM `{metrics_table}` metrics
+    LEFT JOIN `{stats_table}` stats
+      ON metrics.season = stats.season
+     AND metrics.week = stats.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(stats.player_id_internal, r'^gsis:', '')
+    LEFT JOIN `{team_table}` team
+      ON metrics.season = team.season
+     AND metrics.week = team.week
+     AND metrics.team = team.team
+    LEFT JOIN `{points_table}` profile_points
+      ON metrics.season = profile_points.season
+     AND metrics.week = profile_points.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(profile_points.player_id_internal, r'^gsis:', '')
+     AND profile_points.scoring_profile_id = 'ppr'
+     AND COALESCE(profile_points.league_type_id, 'redraft') = 'redraft'
+     AND COALESCE(profile_points.roster_format_id, 'one_qb') = 'one_qb'
+    LEFT JOIN participation
+      ON metrics.season = participation.season
+     AND metrics.week = participation.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = participation.player_key
+    WHERE metrics.season BETWEEN @season_start AND @season_end
+      AND metrics.scoring_profile_id = 'ppr'
+      AND metrics.league_type_id = 'redraft'
+      AND metrics.roster_format_id = 'one_qb'
+      AND metrics.player_id_internal IS NOT NULL
+      AND metrics.position IN ('QB', 'RB', 'WR', 'TE')
+),
+scored AS (
+    SELECT
+        *,
+        SAFE_DIVIDE(inside_5_carries, NULLIF(red_zone_carries, 0)) AS goal_line_carry_share_calc,
+        SAFE_DIVIDE(
+            red_zone_touches,
+            NULLIF((COALESCE(red_zone_pass_rate, 0) * COALESCE(team_pass_attempts, 0)) + (COALESCE(red_zone_rush_rate, 0) * COALESCE(team_rush_attempts, 0)), 0)
+        ) AS red_zone_opportunity_share_calc,
+        LEAST(100.0, GREATEST(0.0,
+            COALESCE(red_zone_touches, 0) * 6.0
+            + COALESCE(high_value_touches, 0) * 8.0
+            + COALESCE(target_share, 0) * 35.0
+            + COALESCE(opportunity_share, 0) * 35.0
+        )) AS high_value_opportunity_score_calc,
+        LEAST(100.0, GREATEST(0.0,
+            COALESCE(target_share, 0) * 45.0
+            + COALESCE(air_yards_share, 0) * 30.0
+            + COALESCE(wopr, 0) * 25.0
+        )) AS receiving_equity_score_calc,
+        CASE
+          WHEN position = 'QB' THEN LEAST(100.0, GREATEST(0.0,
+              COALESCE(carry_share, 0) * 40.0
+              + COALESCE(carries, 0) * 2.0
+              + COALESCE(red_zone_carries, 0) * 7.0
+              + COALESCE(inside_5_carries, 0) * 12.0
+          ))
+          ELSE NULL
+        END AS qb_rushing_leverage_index_calc,
+        CASE
+          WHEN position = 'WR' THEN LEAST(100.0, GREATEST(0.0,
+              COALESCE(target_share, 0) * 45.0
+              + COALESCE(air_yards_share, 0) * 35.0
+              + COALESCE(wopr, 0) * 20.0
+              + COALESCE(red_zone_targets, 0) * 3.0
+          ))
+          ELSE NULL
+        END AS wr_dominance_score_calc,
+        CASE
+          WHEN position = 'TE' THEN LEAST(100.0, GREATEST(0.0,
+              COALESCE(target_share, 0) * 45.0
+              + COALESCE(air_yards_share, 0) * 20.0
+              + COALESCE(wopr, 0) * 25.0
+              + COALESCE(red_zone_targets, 0) * 4.0
+              + COALESCE(snap_share, 0) * 10.0
+          ))
+          ELSE NULL
+        END AS te_receiving_role_dominance_score_calc,
+        LEAST(100.0, GREATEST(0.0,
+            50.0
+            + COALESCE(team_epa_per_play, 0) * 40.0
+            + COALESCE(team_neutral_pass_rate, 0) * 25.0
+            + LEAST(COALESCE(team_plays, 0), 75) / 75.0 * 25.0
+        )) AS team_environment_score_calc
+    FROM base
+)
+SELECT
+    @opportunity_metric_version AS opportunity_metric_version,
+    @opportunity_run_id AS opportunity_run_id,
+    season,
+    week,
+    REGEXP_REPLACE(player_id_internal, r'^gsis:', '') AS player_id_internal,
+    player_name,
+    team,
+    opponent_team,
+    position,
+    targets,
+    carries,
+    source_receptions AS receptions,
+    source_air_yards AS air_yards,
+    source_rushing_yards AS rushing_yards,
+    source_receiving_yards AS receiving_yards,
+    source_passing_yards AS passing_yards,
+    CAST(NULL AS FLOAT64) AS pass_attempts,
+    CAST(NULL AS FLOAT64) AS rush_attempts,
+    team_plays,
+    team_pass_attempts,
+    team_rush_attempts,
+    team_targets,
+    team_air_yards,
+    team_epa_per_play,
+    team_neutral_pass_rate,
+    target_share,
+    carry_share,
+    opportunity_share,
+    air_yards_share,
+    weighted_opportunity,
+    wopr,
+    red_zone_targets,
+    red_zone_carries,
+    red_zone_touches,
+    inside_10_carries,
+    inside_5_carries,
+    goal_line_carry_share_calc AS goal_line_carry_share,
+    red_zone_opportunity_share_calc AS red_zone_opportunity_share,
+    high_value_touches,
+    high_value_opportunity_score_calc AS high_value_opportunity_score,
+    receiving_equity_score_calc AS receiving_equity_score,
+    qb_rushing_leverage_index_calc AS qb_rushing_leverage_index,
+    wr_dominance_score_calc AS wr_dominance_score,
+    te_receiving_role_dominance_score_calc AS te_receiving_role_dominance_score,
+    team_environment_score_calc AS team_environment_score,
+    CASE position
+      WHEN 'QB' THEN ppr_points >= 25
+      WHEN 'RB' THEN ppr_points >= 20
+      WHEN 'WR' THEN ppr_points >= 20
+      WHEN 'TE' THEN ppr_points >= 16
+      ELSE NULL
+    END AS spike_week_flag,
+    CASE position
+      WHEN 'QB' THEN ppr_points <= 10
+      WHEN 'RB' THEN ppr_points <= 7
+      WHEN 'WR' THEN ppr_points <= 7
+      WHEN 'TE' THEN ppr_points <= 5
+      ELSE NULL
+    END AS bust_week_flag,
+    CASE position
+      WHEN 'QB' THEN ppr_points >= 30
+      WHEN 'RB' THEN ppr_points >= 25
+      WHEN 'WR' THEN ppr_points >= 25
+      WHEN 'TE' THEN ppr_points >= 20
+      ELSE NULL
+    END AS elite_week_flag,
+    TO_JSON_STRING(STRUCT(
+        'player_week_advanced_metrics' AS opportunity_source_table,
+        'stg_player_week_stats' AS player_week_source_table,
+        'stg_team_week_stats' AS team_source_table,
+        'analytics_player_fantasy_points_by_profile' AS spike_bust_source_table,
+        CURRENT_TIMESTAMP() AS refreshed_at
+    )) AS source_freshness_json,
+    TO_JSON_STRING(STRUCT(
+        target_share IS NULL AS target_share_missing,
+        air_yards_share IS NULL AS air_yards_share_missing,
+        carry_share IS NULL AS carry_share_missing,
+        red_zone_touches IS NULL AS red_zone_touches_missing,
+        inside_5_carries IS NULL AS inside_5_carries_missing,
+        team_epa_per_play IS NULL AS team_environment_missing,
+        ppr_points IS NULL AS fantasy_points_missing,
+        NOT has_true_route_source AS route_share_unavailable,
+        TRUE AS first_read_share_unavailable,
+        TRUE AS yprr_unavailable,
+        TRUE AS end_zone_target_unavailable
+    )) AS missing_flags_json,
+    TO_JSON_STRING(STRUCT(
+        'ranking opportunity metrics v0' AS builder,
+        @season_start AS season_start,
+        @season_end AS season_end,
+        'ppr/redraft/one_qb source profile only' AS scoring_source_policy,
+        'blocked metrics remain missing, never fabricated' AS blocked_metric_policy
+    )) AS provenance_json,
+    CURRENT_TIMESTAMP() AS created_at
+FROM scored
+""".strip()
+
+
+def populate_player_week_opportunity_metrics(
+    *,
+    client: Any,
+    season_start: int,
+    season_end: int,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    opportunity_metric_version: str = "opportunity_metrics_v0",
+) -> dict[str, Any]:
+    if int(season_start) > int(season_end):
+        raise ValueError("season_start must be less than or equal to season_end")
+    opportunity_run_id = f"opportunity_metrics_{int(season_start)}_{int(season_end)}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    params = [
+        _scalar_param("season_start", "INT64", int(season_start)),
+        _scalar_param("season_end", "INT64", int(season_end)),
+        _scalar_param("opportunity_metric_version", "STRING", opportunity_metric_version),
+        _scalar_param("opportunity_run_id", "STRING", opportunity_run_id),
+    ]
+    client.query(
+        build_opportunity_metrics_delete_sql(project_id=project_id, dataset_id=dataset_id),
+        job_config=_query_job_config(params),
+    ).result()
+    client.query(
+        build_opportunity_metrics_insert_sql(project_id=project_id, dataset_id=dataset_id),
+        job_config=_query_job_config(params),
+    ).result()
+    count_sql = f"""
+SELECT
+    COUNT(*) AS row_count,
+    COUNT(DISTINCT season) AS season_count,
+    COUNT(DISTINCT CONCAT(CAST(season AS STRING), '-', CAST(week AS STRING))) AS season_week_count
+FROM `{table_id(project_id, dataset_id, "player_week_opportunity_metrics")}`
+WHERE season BETWEEN @season_start AND @season_end
+""".strip()
+    count_row = list(client.query(count_sql, job_config=_query_job_config(params)).result())[0]
+    return {
+        "target_table": table_id(project_id, dataset_id, "player_week_opportunity_metrics"),
+        "season_start": int(season_start),
+        "season_end": int(season_end),
+        "opportunity_metric_version": opportunity_metric_version,
+        "opportunity_run_id": opportunity_run_id,
+        "row_count": int(count_row["row_count"]),
+        "season_count": int(count_row["season_count"]),
+        "season_week_count": int(count_row["season_week_count"]),
+    }
+
+
 def build_feature_mart_insert_sql(*, project_id: str, dataset_id: str) -> str:
     mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
     metrics_table = table_id(project_id, dataset_id, "player_week_advanced_metrics")
     truth_table = table_id(project_id, dataset_id, "analytics_player_weekly_truth")
     points_table = table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")
     packet_table = table_id(project_id, dataset_id, "pigskin_player_context_packet_current")
+    opportunity_table = table_id(project_id, dataset_id, "player_week_opportunity_metrics")
     return f"""
 CREATE TEMP FUNCTION _slope(points ARRAY<STRUCT<season INT64, value FLOAT64>>)
 RETURNS FLOAT64
@@ -2030,6 +2412,15 @@ INSERT INTO `{mart_table}` (
     snap_share_proxy,
     air_yards,
     team_pass_rate,
+    qb_rushing_leverage_index,
+    rb_high_value_opportunity_score,
+    receiving_role_dominance_score,
+    red_zone_usage_score,
+    goal_line_usage_score,
+    team_environment_score,
+    spike_week_rate_3yr,
+    bust_week_rate_3yr,
+    elite_week_rate_3yr,
     points_per_game_slope_3yr,
     total_points_slope_3yr,
     opportunity_slope_3yr,
@@ -2103,11 +2494,26 @@ season_features AS (
         AVG(metrics.snap_share) AS snap_share_proxy,
         AVG(metrics.air_yards_share) AS air_yards,
         AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
+        AVG(opportunity.qb_rushing_leverage_index) AS qb_rushing_leverage_index,
+        AVG(CASE WHEN metrics.position = 'RB' THEN opportunity.high_value_opportunity_score ELSE NULL END) AS rb_high_value_opportunity_score,
+        AVG(CASE
+            WHEN metrics.position = 'WR' THEN opportunity.wr_dominance_score
+            WHEN metrics.position = 'TE' THEN opportunity.te_receiving_role_dominance_score
+            ELSE NULL
+        END) AS receiving_role_dominance_score,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.red_zone_targets, 0) * 4.0 + COALESCE(opportunity.red_zone_carries, 0) * 4.0 + COALESCE(opportunity.red_zone_touches, 0) * 3.0))) AS red_zone_usage_score,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.inside_5_carries, 0) * 12.0 + COALESCE(opportunity.inside_10_carries, 0) * 6.0))) AS goal_line_usage_score,
+        AVG(opportunity.team_environment_score) AS opportunity_team_environment_score,
+        AVG(IF(opportunity.spike_week_flag, 1.0, 0.0)) AS spike_week_rate,
+        AVG(IF(opportunity.bust_week_flag, 1.0, 0.0)) AS bust_week_rate,
+        AVG(IF(opportunity.elite_week_flag, 1.0, 0.0)) AS elite_week_rate,
         SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) AS availability_rate,
         STDDEV(metrics.opportunities) AS weekly_volatility,
         LEAST(100.0, GREATEST(0.0, SAFE_DIVIDE(COUNT(DISTINCT metrics.week), 17) * 100.0 - COALESCE(STDDEV(metrics.opportunities), 0.0) * 2.0)) AS role_stability_score,
         ANY_VALUE(metrics.source_freshness_json) AS metrics_source_freshness_json,
-        ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags
+        ANY_VALUE(metrics.missing_data_flags) AS metrics_missing_flags,
+        ANY_VALUE(opportunity.source_freshness_json) AS opportunity_source_freshness_json,
+        ANY_VALUE(opportunity.missing_flags_json) AS opportunity_missing_flags
     FROM `{metrics_table}` metrics
     JOIN positions
       ON metrics.position = positions.position
@@ -2123,6 +2529,11 @@ season_features AS (
      AND source_profile.scoring_profile_id = profiles.scoring_profile_id
      AND COALESCE(source_profile.league_type_id, @league_type_id) = @league_type_id
      AND COALESCE(source_profile.roster_format_id, @roster_format_id) = @roster_format_id
+    LEFT JOIN `{opportunity_table}` opportunity
+      ON metrics.season = opportunity.season
+     AND metrics.week = opportunity.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(opportunity.player_id_internal, r'^gsis:', '')
+     AND metrics.position = opportunity.position
     WHERE metrics.season BETWEEN @source_window_start_season AND @source_window_end_season
       AND metrics.season < @target_season
       AND metrics.scoring_profile_id = 'ppr'
@@ -2163,6 +2574,15 @@ source_features AS (
         AVG(snap_share_proxy) AS snap_share_proxy,
         AVG(air_yards) AS air_yards,
         AVG(team_pass_rate) AS team_pass_rate,
+        AVG(qb_rushing_leverage_index) AS qb_rushing_leverage_index,
+        AVG(rb_high_value_opportunity_score) AS rb_high_value_opportunity_score,
+        AVG(receiving_role_dominance_score) AS receiving_role_dominance_score,
+        AVG(red_zone_usage_score) AS red_zone_usage_score,
+        AVG(goal_line_usage_score) AS goal_line_usage_score,
+        AVG(opportunity_team_environment_score) AS opportunity_team_environment_score,
+        AVG(spike_week_rate) AS spike_week_rate_3yr,
+        AVG(bust_week_rate) AS bust_week_rate_3yr,
+        AVG(elite_week_rate) AS elite_week_rate_3yr,
         _slope(ARRAY_AGG(STRUCT(season, points_per_game AS value) ORDER BY season)) AS points_per_game_slope_3yr,
         _slope(ARRAY_AGG(STRUCT(season, total_points AS value) ORDER BY season)) AS total_points_slope_3yr,
         _slope(ARRAY_AGG(STRUCT(season, usage_volume AS value) ORDER BY season)) AS opportunity_slope_3yr,
@@ -2182,7 +2602,9 @@ source_features AS (
         IF(_slope(ARRAY_AGG(STRUCT(season, target_share AS value) ORDER BY season)) > 0
            OR _slope(ARRAY_AGG(STRUCT(season, carry_share AS value) ORDER BY season)) > 0, 1.0, 0.0) AS breakout_trajectory_3yr,
         ANY_VALUE(metrics_source_freshness_json HAVING MAX season) AS metrics_source_freshness_json,
-        ANY_VALUE(metrics_missing_flags HAVING MAX season) AS metrics_missing_flags
+        ANY_VALUE(metrics_missing_flags HAVING MAX season) AS metrics_missing_flags,
+        ANY_VALUE(opportunity_source_freshness_json HAVING MAX season) AS opportunity_source_freshness_json,
+        ANY_VALUE(opportunity_missing_flags HAVING MAX season) AS opportunity_missing_flags
     FROM season_features
     GROUP BY scoring_profile_id, player_key, position
 ),
@@ -2264,6 +2686,15 @@ with_source AS (
         source.snap_share_proxy,
         source.air_yards,
         COALESCE(source.team_pass_rate, packet.packet_team_pass_rate) AS team_pass_rate,
+        source.qb_rushing_leverage_index,
+        source.rb_high_value_opportunity_score,
+        source.receiving_role_dominance_score,
+        source.red_zone_usage_score,
+        source.goal_line_usage_score,
+        source.opportunity_team_environment_score AS team_environment_score,
+        source.spike_week_rate_3yr,
+        source.bust_week_rate_3yr,
+        source.elite_week_rate_3yr,
         source.points_per_game_slope_3yr,
         source.total_points_slope_3yr,
         source.opportunity_slope_3yr,
@@ -2281,6 +2712,8 @@ with_source AS (
         target.target_fantasy_points,
         source.metrics_source_freshness_json,
         source.metrics_missing_flags,
+        source.opportunity_source_freshness_json,
+        source.opportunity_missing_flags,
         packet.packet_source_freshness_json
     FROM target_points target
     JOIN source_features source
@@ -2354,6 +2787,15 @@ SELECT
     snap_share_proxy,
     air_yards,
     team_pass_rate,
+    qb_rushing_leverage_index,
+    rb_high_value_opportunity_score,
+    receiving_role_dominance_score,
+    red_zone_usage_score,
+    goal_line_usage_score,
+    team_environment_score,
+    spike_week_rate_3yr,
+    bust_week_rate_3yr,
+    elite_week_rate_3yr,
     points_per_game_slope_3yr,
     total_points_slope_3yr,
     opportunity_slope_3yr,
@@ -2392,7 +2834,14 @@ SELECT
         efficiency_score_proxy IS NULL AS efficiency_score_proxy_missing,
         analytical_grade_proxy IS NULL AS analytical_grade_proxy_missing,
         role_stability_score IS NULL AS role_stability_score_missing,
-        metrics_missing_flags AS source_missing_flags
+        qb_rushing_leverage_index IS NULL AS qb_rushing_leverage_index_missing,
+        rb_high_value_opportunity_score IS NULL AS rb_high_value_opportunity_score_missing,
+        receiving_role_dominance_score IS NULL AS receiving_role_dominance_score_missing,
+        red_zone_usage_score IS NULL AS red_zone_usage_score_missing,
+        goal_line_usage_score IS NULL AS goal_line_usage_score_missing,
+        team_environment_score IS NULL AS team_environment_score_missing,
+        metrics_missing_flags AS source_missing_flags,
+        opportunity_missing_flags AS opportunity_missing_flags
     )) AS predictor_missing_flags_json,
     TO_JSON_STRING(STRUCT(
         target_fantasy_points IS NULL AS target_fantasy_points_missing,
@@ -2400,6 +2849,7 @@ SELECT
     )) AS outcome_missing_flags_json,
     TO_JSON_STRING(STRUCT(
         metrics_source_freshness_json AS metrics_source_freshness_json,
+        opportunity_source_freshness_json AS opportunity_source_freshness_json,
         packet_source_freshness_json AS packet_source_freshness_json
     )) AS source_freshness_json,
     TO_JSON_STRING(STRUCT(
@@ -2733,6 +3183,15 @@ feature_values AS (
       WHEN 'snap_share_proxy' THEN snap_share_proxy
       WHEN 'air_yards' THEN air_yards
       WHEN 'team_pass_rate' THEN team_pass_rate
+      WHEN 'qb_rushing_leverage_index' THEN qb_rushing_leverage_index
+      WHEN 'rb_high_value_opportunity_score' THEN rb_high_value_opportunity_score
+      WHEN 'receiving_role_dominance_score' THEN receiving_role_dominance_score
+      WHEN 'red_zone_usage_score' THEN red_zone_usage_score
+      WHEN 'goal_line_usage_score' THEN goal_line_usage_score
+      WHEN 'team_environment_score' THEN team_environment_score
+      WHEN 'spike_week_rate_3yr' THEN spike_week_rate_3yr
+      WHEN 'bust_week_rate_3yr' THEN bust_week_rate_3yr
+      WHEN 'elite_week_rate_3yr' THEN elite_week_rate_3yr
       WHEN 'points_per_game_slope_3yr' THEN points_per_game_slope_3yr
       WHEN 'total_points_slope_3yr' THEN total_points_slope_3yr
       WHEN 'opportunity_slope_3yr' THEN opportunity_slope_3yr
@@ -2765,6 +3224,7 @@ scored_features AS (
       WHEN feature_name IN ('improving_3yr', 'breakout_trajectory_3yr') THEN IF(raw_feature_value > 0, 100.0, 0.0)
       WHEN feature_name = 'declining_3yr' THEN IF(raw_feature_value > 0, 0.0, 100.0)
       WHEN feature_name IN ('success_rate', 'cpoe', 'snap_share_proxy') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name IN ('spike_week_rate_3yr', 'bust_week_rate_3yr', 'elite_week_rate_3yr') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
       WHEN feature_name IN ('actual_points', 'fantasy_points_ppr', 'recent_points_avg') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 35.0 * 100.0))
       WHEN feature_name IN ('epa_per_play', 'passing_epa_per_play', 'receiving_epa', 'team_epa_per_play') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 25.0))
       WHEN feature_name = 'air_yards' AND raw_feature_value BETWEEN 0 AND 1 THEN LEAST(100.0, GREATEST(0.0, raw_feature_value * 100.0))
@@ -3049,6 +3509,103 @@ def sql_native_tournament_candidates() -> list[dict[str, Any]]:
         row
         for row in tournament_formula_candidates()
         if any(family in str(row["candidate_id"]) for family in selected_families)
+    ]
+
+
+def opportunity_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
+    specs = [
+        (
+            "ranking_formula_qb_opportunity_diagnostic_v0_2026_001",
+            "QB Opportunity Diagnostic",
+            {
+                "version": "qb_opportunity_diagnostic_v0",
+                "position": "QB",
+                "features": [
+                    "profile_points_score",
+                    "qb_rushing_leverage_index",
+                    "team_environment_score",
+                    "spike_week_rate_3yr",
+                ],
+                "weights": {
+                    "profile_points_score": 0.40,
+                    "qb_rushing_leverage_index": 0.30,
+                    "team_environment_score": 0.20,
+                    "spike_week_rate_3yr": 0.10,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+        (
+            "ranking_formula_rb_opportunity_diagnostic_v0_2026_001",
+            "RB Opportunity Diagnostic",
+            {
+                "version": "rb_opportunity_diagnostic_v0",
+                "position": "RB",
+                "features": [
+                    "profile_points_score",
+                    "rb_high_value_opportunity_score",
+                    "goal_line_usage_score",
+                    "team_environment_score",
+                ],
+                "weights": {
+                    "profile_points_score": 0.35,
+                    "rb_high_value_opportunity_score": 0.35,
+                    "goal_line_usage_score": 0.20,
+                    "team_environment_score": 0.10,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+        (
+            "ranking_formula_wr_opportunity_diagnostic_v0_2026_001",
+            "WR Opportunity Diagnostic",
+            {
+                "version": "wr_opportunity_diagnostic_v0",
+                "position": "WR",
+                "features": [
+                    "profile_points_score",
+                    "receiving_role_dominance_score",
+                    "red_zone_usage_score",
+                    "team_environment_score",
+                ],
+                "weights": {
+                    "profile_points_score": 0.35,
+                    "receiving_role_dominance_score": 0.35,
+                    "red_zone_usage_score": 0.15,
+                    "team_environment_score": 0.15,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+        (
+            "ranking_formula_te_opportunity_diagnostic_v0_2026_001",
+            "TE Opportunity Diagnostic",
+            {
+                "version": "te_opportunity_diagnostic_v0",
+                "position": "TE",
+                "features": [
+                    "profile_points_score",
+                    "receiving_role_dominance_score",
+                    "red_zone_usage_score",
+                    "spike_week_rate_3yr",
+                ],
+                "weights": {
+                    "profile_points_score": 0.35,
+                    "receiving_role_dominance_score": 0.35,
+                    "red_zone_usage_score": 0.20,
+                    "spike_week_rate_3yr": 0.10,
+                },
+                "score_expression": "weighted_linear",
+                "normalization": {"method": "position_percentile"},
+            },
+        ),
+    ]
+    return [
+        build_candidate_row(formula, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, formula in specs
     ]
 
 

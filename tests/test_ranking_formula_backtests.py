@@ -1102,6 +1102,45 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertNotIn("analytics_pigskin_rankings", lowered)
         self.assertNotIn("ranking_formula_champions", lowered)
 
+    def test_opportunity_metrics_migration_is_additive(self):
+        migration = Path("bigquery/migrations/0031__ranking_opportunity_metrics.sql").read_text(encoding="utf-8")
+        lowered = migration.lower()
+
+        self.assertIn("CREATE TABLE IF NOT EXISTS", migration)
+        self.assertIn("player_week_opportunity_metrics", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS qb_rushing_leverage_index", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS rb_high_value_opportunity_score", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS receiving_role_dominance_score", migration)
+        self.assertNotIn("drop ", lowered)
+        self.assertNotIn("truncate", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+
+    def test_opportunity_metrics_delete_sql_is_bounded(self):
+        sql = rfb.build_opportunity_metrics_delete_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("player_week_opportunity_metrics", sql)
+        self.assertIn("season BETWEEN @season_start AND @season_end", sql)
+        self.assertNotIn("truncate", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+
+    def test_opportunity_metrics_insert_sql_uses_safe_sources_and_flags_blocked_metrics(self):
+        sql = rfb.build_opportunity_metrics_insert_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("player_week_advanced_metrics", sql)
+        self.assertIn("stg_team_week_stats", sql)
+        self.assertIn("analytics_player_fantasy_points_by_profile", sql)
+        self.assertIn("profile_points.scoring_profile_id = 'ppr'", sql)
+        self.assertIn("first_read_share_unavailable", sql)
+        self.assertIn("yprr_unavailable", sql)
+        self.assertIn("blocked metrics remain missing, never fabricated", sql)
+        self.assertNotIn("trade_player_scores", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn(" as rows", lowered)
+
     def test_feature_mart_grain_fields_are_present(self):
         sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
         for field in (
@@ -1116,6 +1155,25 @@ class RankingFormulaBacktestTests(unittest.TestCase):
             "player_id_internal",
         ):
             self.assertIn(field, sql)
+
+    def test_feature_mart_insert_sql_consumes_opportunity_metrics(self):
+        sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
+
+        for field in (
+            "qb_rushing_leverage_index",
+            "rb_high_value_opportunity_score",
+            "receiving_role_dominance_score",
+            "red_zone_usage_score",
+            "goal_line_usage_score",
+            "team_environment_score",
+            "spike_week_rate_3yr",
+            "bust_week_rate_3yr",
+            "elite_week_rate_3yr",
+            "opportunity_missing_flags",
+        ):
+            self.assertIn(field, sql)
+        self.assertIn("player_week_opportunity_metrics", sql)
+        self.assertIn("opportunity_source_freshness_json", sql)
 
     def test_sql_native_scoring_keeps_missing_features_missing(self):
         sql = rfb.build_sql_native_scoring_prototype_sql(project_id="p", dataset_id="d")
@@ -1248,6 +1306,23 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertNotIn("analytics_pigskin_rankings", lowered)
         self.assertNotIn("ranking_formula_champions", lowered)
         self.assertNotIn(" as rows", lowered)
+
+    def test_sql_native_tournament_supports_opportunity_diagnostic_candidates(self):
+        candidates = rfb.opportunity_diagnostic_tournament_candidates()
+        sql = rfb.build_sql_native_tournament_summary_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2025,),
+            scoring_profile_ids=("ppr",),
+            candidate_rows=candidates,
+        )
+
+        self.assertEqual(len(candidates), 4)
+        self.assertIn("qb_rushing_leverage_index", sql)
+        self.assertIn("rb_high_value_opportunity_score", sql)
+        self.assertIn("receiving_role_dominance_score", sql)
+        self.assertIn("team_environment_score", sql)
+        self.assertNotIn("insert ", sql.lower())
 
     def test_sql_native_tournament_missing_features_are_not_zero_filled(self):
         sql = rfb.build_sql_native_tournament_summary_sql(project_id="p", dataset_id="d")
