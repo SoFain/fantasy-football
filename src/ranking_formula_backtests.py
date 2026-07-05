@@ -3100,6 +3100,13 @@ feature_values AS (
 scored_features AS (
   SELECT
     *,
+    CASE scoring_profile_id
+      WHEN 'ppr' THEN ppr_weight
+      WHEN 'half_ppr' THEN half_ppr_weight
+      WHEN 'standard' THEN standard_weight
+      WHEN 'gng_keeper' THEN gng_keeper_weight
+      ELSE weight
+    END AS effective_weight,
     CASE
       WHEN raw_feature_value IS NULL THEN NULL
       WHEN feature_name IN ('points_per_game_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 10.0))
@@ -3262,6 +3269,11 @@ feature_values AS (
     weights.formula_version,
     weights.feature_name,
     weights.weight,
+    weights.ppr_weight,
+    weights.half_ppr_weight,
+    weights.standard_weight,
+    weights.gng_keeper_weight,
+    weights.availability_multiplier,
     CASE weights.feature_name
       WHEN 'actual_points' THEN target_fantasy_points
       WHEN 'fantasy_points_ppr' THEN target_fantasy_points
@@ -3334,6 +3346,13 @@ feature_values AS (
 scored_features AS (
   SELECT
     *,
+    CASE scoring_profile_id
+      WHEN 'ppr' THEN ppr_weight
+      WHEN 'half_ppr' THEN half_ppr_weight
+      WHEN 'standard' THEN standard_weight
+      WHEN 'gng_keeper' THEN gng_keeper_weight
+      ELSE weight
+    END AS effective_weight,
     CASE
       WHEN raw_feature_value IS NULL THEN NULL
       WHEN feature_name IN ('points_per_game_slope_3yr', 'total_points_slope_3yr', 'opportunity_slope_3yr', 'receiving_usage_slope_3yr', 'epa_slope_3yr', 'efficiency_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 10.0))
@@ -3356,7 +3375,7 @@ scored_features AS (
     END AS feature_score
   FROM feature_values
 ),
-candidate_scores AS (
+base_candidate_scores AS (
   SELECT
     candidate_id,
     formula_version,
@@ -3373,10 +3392,39 @@ candidate_scores AS (
     ANY_VALUE(actual_position_rank) AS actual_rank_position,
     ANY_VALUE(actual_overall_rank) AS actual_overall_rank,
     ANY_VALUE(value_over_replacement) AS value_over_replacement,
-    SAFE_DIVIDE(SUM(feature_score * weight), SUM(IF(feature_score IS NULL, 0, weight))) AS predicted_score,
-    SAFE_DIVIDE(SUM(IF(feature_score IS NULL, weight, 0)), SUM(weight)) AS missing_input_rate
+    SAFE_DIVIDE(SUM(feature_score * effective_weight), SUM(IF(feature_score IS NULL, 0, effective_weight))) AS base_predicted_score,
+    SAFE_DIVIDE(SUM(IF(feature_score IS NULL, effective_weight, 0)), SUM(effective_weight)) AS missing_input_rate,
+    MAX(IF(feature_name = 'snap_role_stability_3yr', feature_score, NULL)) AS snap_role_feature_score,
+    MAX(IF(feature_name = 'offensive_snap_share_3yr', feature_score, NULL)) AS offensive_snap_feature_score,
+    LOGICAL_OR(availability_multiplier) AS availability_multiplier
   FROM scored_features
   GROUP BY candidate_id, formula_version, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position, player_id_internal
+),
+candidate_scores AS (
+  SELECT
+    candidate_id,
+    formula_version,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    player_name,
+    team,
+    actual_points,
+    actual_rank_position,
+    actual_overall_rank,
+    value_over_replacement,
+    CASE
+      WHEN availability_multiplier THEN LEAST(100.0, GREATEST(0.0, base_predicted_score * (
+        0.70 + 0.30 * COALESCE(SAFE_DIVIDE(snap_role_feature_score + offensive_snap_feature_score, 200.0), 0.75)
+      )))
+      ELSE base_predicted_score
+    END AS predicted_score,
+    missing_input_rate
+  FROM base_candidate_scores
 ),
 ranked AS (
   SELECT
@@ -3806,6 +3854,207 @@ def ideal_stats_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
         build_candidate_row(formula, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
         for candidate_id, name, formula in specs
     ]
+
+
+def stats02_ideal_tournament_candidates() -> list[dict[str, Any]]:
+    def formula(
+        *,
+        position: str,
+        version: str,
+        features: list[str],
+        weights: dict[str, float],
+        profile_weights: dict[str, dict[str, float]] | None = None,
+        availability_multiplier: bool = False,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "version": version,
+            "position": position,
+            "features": features,
+            "weights": weights,
+            "score_expression": "weighted_linear",
+            "normalization": {"method": "bounded_0_100_sql"},
+            "source_flags": {
+                "uses_phase_32_13_ideal_stats": True,
+                "availability_multiplier": availability_multiplier,
+                "injury_depth_scores_deferred": True,
+                "pbp_ffopportunity_deferred": True,
+                "no_2025_holdout_weight_tuning": True,
+            },
+        }
+        if profile_weights:
+            payload["scoring_profile_weights"] = profile_weights
+        return payload
+
+    qb_features = [
+        "qb_rushing_leverage_index",
+        "xfp_score_3yr",
+        "xfp_share_3yr",
+        "qb_ngs_efficiency_score_3yr",
+        "team_environment_score",
+        "snap_role_stability_3yr",
+        "offensive_snap_share_3yr",
+    ]
+    rb_features = [
+        "high_value_xfp_score_3yr",
+        "xfp_score_3yr",
+        "xfp_share_3yr",
+        "rb_high_value_opportunity_score",
+        "red_zone_usage_score",
+        "goal_line_usage_score",
+        "offensive_snap_share_3yr",
+        "snap_role_stability_3yr",
+        "team_environment_score",
+    ]
+    wr_features = [
+        "receiving_role_dominance_xfp_3yr",
+        "receiving_role_dominance_score",
+        "xfp_score_3yr",
+        "xfp_share_3yr",
+        "fantasy_points_over_expectation_3yr",
+        "red_zone_usage_score",
+        "offensive_snap_share_3yr",
+        "snap_role_stability_3yr",
+        "team_environment_score",
+    ]
+    te_features = [
+        "receiving_role_dominance_xfp_3yr",
+        "receiving_role_dominance_score",
+        "xfp_score_3yr",
+        "xfp_share_3yr",
+        "red_zone_usage_score",
+        "offensive_snap_share_3yr",
+        "snap_role_stability_3yr",
+        "team_environment_score",
+    ]
+    specs = [
+        (
+            "stats02_qb_ideal_rushing_xfp_v0",
+            "Stats02 QB Ideal Rushing XFP",
+            formula(
+                position="QB",
+                version="stats02_ideal_v0",
+                features=qb_features,
+                weights={
+                    "qb_rushing_leverage_index": 0.20,
+                    "xfp_score_3yr": 0.22,
+                    "xfp_share_3yr": 0.14,
+                    "qb_ngs_efficiency_score_3yr": 0.16,
+                    "team_environment_score": 0.10,
+                    "snap_role_stability_3yr": 0.10,
+                    "offensive_snap_share_3yr": 0.08,
+                },
+            ),
+        ),
+        (
+            "stats02_rb_ideal_high_value_xfp_v0",
+            "Stats02 RB Ideal High Value XFP",
+            formula(
+                position="RB",
+                version="stats02_ideal_v0",
+                features=rb_features,
+                weights={
+                    "high_value_xfp_score_3yr": 0.24,
+                    "xfp_score_3yr": 0.18,
+                    "xfp_share_3yr": 0.14,
+                    "rb_high_value_opportunity_score": 0.12,
+                    "red_zone_usage_score": 0.08,
+                    "goal_line_usage_score": 0.08,
+                    "offensive_snap_share_3yr": 0.07,
+                    "snap_role_stability_3yr": 0.05,
+                    "team_environment_score": 0.04,
+                },
+                profile_weights={
+                    "standard": {"goal_line_usage_score": 0.13, "red_zone_usage_score": 0.12, "team_environment_score": 0.08, "xfp_share_3yr": 0.08},
+                    "half_ppr": {"high_value_xfp_score_3yr": 0.25, "xfp_share_3yr": 0.14},
+                    "ppr": {"xfp_share_3yr": 0.18, "high_value_xfp_score_3yr": 0.26, "goal_line_usage_score": 0.05},
+                    "gng_keeper": {"xfp_share_3yr": 0.18, "high_value_xfp_score_3yr": 0.24, "snap_role_stability_3yr": 0.08},
+                },
+            ),
+        ),
+        (
+            "stats02_wr_ideal_receiving_dominance_v0",
+            "Stats02 WR Ideal Receiving Dominance",
+            formula(
+                position="WR",
+                version="stats02_ideal_v0",
+                features=wr_features,
+                weights={
+                    "receiving_role_dominance_xfp_3yr": 0.22,
+                    "receiving_role_dominance_score": 0.14,
+                    "xfp_score_3yr": 0.16,
+                    "xfp_share_3yr": 0.16,
+                    "fantasy_points_over_expectation_3yr": 0.08,
+                    "red_zone_usage_score": 0.08,
+                    "offensive_snap_share_3yr": 0.06,
+                    "snap_role_stability_3yr": 0.05,
+                    "team_environment_score": 0.05,
+                },
+                profile_weights={
+                    "standard": {"red_zone_usage_score": 0.12, "team_environment_score": 0.08, "fantasy_points_over_expectation_3yr": 0.10, "xfp_share_3yr": 0.10},
+                    "half_ppr": {"receiving_role_dominance_xfp_3yr": 0.23, "xfp_share_3yr": 0.15},
+                    "ppr": {"receiving_role_dominance_xfp_3yr": 0.25, "xfp_share_3yr": 0.19, "red_zone_usage_score": 0.05},
+                    "gng_keeper": {"receiving_role_dominance_xfp_3yr": 0.24, "xfp_share_3yr": 0.18, "snap_role_stability_3yr": 0.08},
+                },
+            ),
+        ),
+        (
+            "stats02_te_ideal_receiving_role_v0",
+            "Stats02 TE Ideal Receiving Role",
+            formula(
+                position="TE",
+                version="stats02_ideal_v0",
+                features=te_features,
+                weights={
+                    "receiving_role_dominance_xfp_3yr": 0.25,
+                    "receiving_role_dominance_score": 0.16,
+                    "xfp_score_3yr": 0.15,
+                    "xfp_share_3yr": 0.15,
+                    "red_zone_usage_score": 0.08,
+                    "offensive_snap_share_3yr": 0.08,
+                    "snap_role_stability_3yr": 0.08,
+                    "team_environment_score": 0.05,
+                },
+                profile_weights={
+                    "standard": {"red_zone_usage_score": 0.13, "team_environment_score": 0.08, "xfp_share_3yr": 0.11},
+                    "half_ppr": {"receiving_role_dominance_xfp_3yr": 0.25, "xfp_share_3yr": 0.15},
+                    "ppr": {"receiving_role_dominance_xfp_3yr": 0.28, "xfp_share_3yr": 0.18, "red_zone_usage_score": 0.05},
+                    "gng_keeper": {"receiving_role_dominance_xfp_3yr": 0.27, "xfp_share_3yr": 0.17, "snap_role_stability_3yr": 0.10},
+                },
+            ),
+        ),
+    ]
+
+    position_specific = {
+        "QB": specs[0][2],
+        "RB": specs[1][2],
+        "WR": specs[2][2],
+        "TE": specs[3][2],
+    }
+    rows = [
+        build_candidate_row(payload, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, payload in specs
+    ]
+    for position, payload in position_specific.items():
+        rows.append(
+            build_candidate_row(
+                payload,
+                formula_name=f"Stats02 {position} Position Specific Ideal",
+                candidate_id="stats02_position_specific_ideal_v0",
+                target_name="position_default_top_n",
+            )
+        )
+        multiplier_payload = dict(payload)
+        multiplier_payload["source_flags"] = dict(multiplier_payload.get("source_flags", {}), availability_multiplier=True)
+        multiplier_payload["version"] = "stats02_ideal_availability_multiplier_v0"
+        rows.append(
+            build_candidate_row(
+                multiplier_payload,
+                formula_name=f"Stats02 {position} Position Specific Ideal Availability Multiplier",
+                candidate_id="stats02_position_specific_ideal_availability_multiplier_v0",
+                target_name="position_default_top_n",
+            )
+        )
+    return rows
 
 
 def estimate_sql_native_tournament(
@@ -5247,14 +5496,30 @@ def _formula_weight_rows_sql(candidate_rows: list[Mapping[str, Any]]) -> str:
     selected_rows: list[str] = []
     for candidate in candidate_rows:
         formula = validate_formula(json.loads(str(candidate["formula_json"])))
+        profile_weights = formula.get("scoring_profile_weights") or {}
+        if profile_weights and not isinstance(profile_weights, Mapping):
+            raise FormulaValidationError("formula.scoring_profile_weights must be an object when provided")
+        availability_multiplier = bool((formula.get("source_flags") or {}).get("availability_multiplier"))
         for feature_name in formula["features"]:
+            base_weight = float(formula["weights"][feature_name])
+            def profile_weight(profile_id: str) -> float:
+                profile_payload = profile_weights.get(profile_id, {}) if isinstance(profile_weights, Mapping) else {}
+                if not isinstance(profile_payload, Mapping):
+                    raise FormulaValidationError(f"formula.scoring_profile_weights.{profile_id} must be an object")
+                return float(profile_payload.get(feature_name, base_weight))
+
             selected_rows.append(
                 "SELECT "
                 f"{_sql_string(str(candidate['candidate_id']))} AS candidate_id, "
                 f"{_sql_string(str(candidate['formula_version']))} AS formula_version, "
                 f"{_sql_string(str(candidate['position']))} AS position, "
                 f"{_sql_string(feature_name)} AS feature_name, "
-                f"{float(formula['weights'][feature_name]):.12g} AS weight, "
+                f"{base_weight:.12g} AS weight, "
+                f"{profile_weight('ppr'):.12g} AS ppr_weight, "
+                f"{profile_weight('half_ppr'):.12g} AS half_ppr_weight, "
+                f"{profile_weight('standard'):.12g} AS standard_weight, "
+                f"{profile_weight('gng_keeper'):.12g} AS gng_keeper_weight, "
+                f"{'TRUE' if availability_multiplier else 'FALSE'} AS availability_multiplier, "
                 f"{_sql_string(str(candidate['formula_json']))} AS formula_json"
             )
     if not selected_rows:

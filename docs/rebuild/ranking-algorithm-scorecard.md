@@ -470,6 +470,57 @@ Controlled summary-only write:
 
 Warning: direct injury and depth-chart scores remain null with explicit missing flags. The current useful signal is xFP plus snap/role context, not a complete health/depth model.
 
+## Phase 32.14 Stats02 Ideal Formulas
+
+Phase 32.14 tested position-specific Stats02 formulas that use the Phase 32.13 ideal-stat columns through the SQL-native summary evaluator. No live rankings, champions, Pigskin tools, or detail backtest rows were changed.
+
+Stats02 candidates tested:
+
+| Candidate | Position scope | Main idea |
+|---|---|---|
+| `stats02_qb_ideal_rushing_xfp_v0` | QB | Rushing leverage, xFP, QB efficiency proxy, team environment, snap role |
+| `stats02_rb_ideal_high_value_xfp_v0` | RB | High-value xFP plus profile-aware receiving and goal-line weight shifts |
+| `stats02_wr_ideal_receiving_dominance_v0` | WR | Receiving-role xFP, xFP share, efficiency over expectation, team context |
+| `stats02_te_ideal_receiving_role_v0` | TE | Receiving-role xFP and snap stability for tier separation |
+| `stats02_position_specific_ideal_v0` | QB/RB/WR/TE | Position-specific formula dispatch |
+| `stats02_position_specific_ideal_availability_multiplier_v0` | QB/RB/WR/TE | Same formulas with snap/role stability as a bounded multiplier |
+
+SQL-native run:
+
+| Version | Candidate rows | Run rows | Summary rows | Detail rows | Estimated bytes |
+|---|---:|---:|---:|---:|---:|
+| `ranking_backtest_sql_native_stats02_ideal_v0` | 12 | 4 | 48 | 0 | 71,838,149 |
+
+Persisted profile summary:
+
+| Profile | Summary rows | Sample total | Avg top-N | Avg captured points | Avg missing |
+|---|---:|---:|---:|---:|---:|
+| GNG Keeper | 12 | 117,183 | 0.5192 | 0.6588 | 0.0115 |
+| Half PPR | 12 | 117,183 | 0.5402 | 0.7219 | 0.0113 |
+| PPR | 12 | 117,183 | 0.5481 | 0.7332 | 0.0118 |
+| Standard | 12 | 117,183 | 0.5300 | 0.7006 | 0.0101 |
+
+Key validation and holdout read:
+
+| Slice | Signal |
+|---|---|
+| 2024 QB validation | Stats02 QB beat current Pigskin on top-N in PPR, Half PPR, and Standard by about 0.46 points, and improved captured points and VOR. |
+| 2024 RB validation | Current Pigskin remained better than Stats02 in PPR, Half PPR, and Standard. GNG Keeper was roughly tied on top-N, with Stats02 slightly better on VOR. |
+| 2024 WR validation | Stats02 WR beat current Pigskin across all four profiles on top-N, captured points, VOR, NDCG, and bust rate, while rank correlation was slightly weaker. |
+| 2024 TE validation | Stats02 TE improved top-N in all four profiles, especially PPR and Half PPR, but rank correlation was weaker than current Pigskin. |
+| 2025 holdout | Stats02 WR and TE improved top-N, captured points, VOR, rank correlation, and bust rate in most profiles. QB top-N improved slightly without improving captured points. RB was mostly tied on top-N but weaker on rank correlation. |
+
+Decision: Stats02 ideal stats show signal, especially WR and TE, but `stats02_position_specific_ideal_v0` does not beat the current Pigskin family broadly enough for champion activation. Aggregate context remains below the existing current baseline on top-N and captured points. The availability multiplier variant helped some TE validation and holdout rows, but it did not improve the aggregate enough to justify activation.
+
+Owner-review status: not ready as a champion. Keep Stats02 as a challenger lane and use the gaps to guide the next source sprint.
+
+Next highest-ROI gaps:
+
+- Direct injury and depth scoring.
+- PBP-level ffopportunity pass/rush splits.
+- Better TE route or participation source.
+- Direct receiving and rushing NGS features where source coverage is real.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:

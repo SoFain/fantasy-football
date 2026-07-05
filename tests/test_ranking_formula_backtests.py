@@ -1328,9 +1328,68 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         sql = rfb.build_sql_native_tournament_summary_sql(project_id="p", dataset_id="d")
 
         self.assertIn("WHEN raw_feature_value IS NULL THEN NULL", sql)
-        self.assertIn("SUM(IF(feature_score IS NULL, 0, weight))", sql)
+        self.assertIn("SUM(IF(feature_score IS NULL, 0, effective_weight))", sql)
         self.assertIn("missing features remain null", sql)
         self.assertNotIn("COALESCE(raw_feature_value, 0)", sql)
+
+    def test_stats02_ideal_candidates_validate_and_use_expected_features(self):
+        candidates = rfb.stats02_ideal_tournament_candidates()
+        ids = {row["candidate_id"] for row in candidates}
+
+        self.assertEqual(len(candidates), 12)
+        self.assertIn("stats02_qb_ideal_rushing_xfp_v0", ids)
+        self.assertIn("stats02_rb_ideal_high_value_xfp_v0", ids)
+        self.assertIn("stats02_wr_ideal_receiving_dominance_v0", ids)
+        self.assertIn("stats02_te_ideal_receiving_role_v0", ids)
+        self.assertIn("stats02_position_specific_ideal_v0", ids)
+        self.assertIn("stats02_position_specific_ideal_availability_multiplier_v0", ids)
+        for row in candidates:
+            formula = rfb.validate_formula(json.loads(row["formula_json"]))
+            self.assertEqual(formula["source_flags"]["uses_phase_32_13_ideal_stats"], True)
+            self.assertEqual(formula["source_flags"]["no_2025_holdout_weight_tuning"], True)
+            self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
+
+    def test_stats02_profile_weights_and_availability_multiplier_are_sql_native(self):
+        candidates = rfb.stats02_ideal_tournament_candidates()
+        sql = rfb.build_sql_native_tournament_summary_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2024, 2025),
+            scoring_profile_ids=("ppr", "half_ppr", "standard", "gng_keeper"),
+            candidate_rows=candidates,
+        )
+        lowered = sql.lower()
+
+        self.assertIn("ppr_weight", sql)
+        self.assertIn("half_ppr_weight", sql)
+        self.assertIn("standard_weight", sql)
+        self.assertIn("gng_keeper_weight", sql)
+        self.assertIn("availability_multiplier", sql)
+        self.assertIn("base_candidate_scores AS", sql)
+        self.assertIn("0.70 + 0.30", sql)
+        self.assertIn("CASE scoring_profile_id", sql)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+
+    def test_stats02_sql_native_write_does_not_call_python_result_builder(self):
+        with patch.object(rfb, "build_result_rows_for_candidates", side_effect=AssertionError("old path called")):
+            sql = rfb.build_sql_native_tournament_summary_write_sql(
+                project_id="p",
+                dataset_id="d",
+                target_seasons=(2025,),
+                scoring_profile_ids=("ppr",),
+                positions=("QB",),
+                candidate_rows=rfb.stats02_ideal_tournament_candidates(),
+                backtest_run_id_prefix="stats02-test",
+                formula_version="ranking_backtest_sql_native_stats02_ideal_v0",
+            )
+
+        lowered = sql.lower()
+        self.assertIn("create temp table sql_native_summary", lowered)
+        self.assertIn("ranking_backtest_candidate_summaries", lowered)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
 
     def test_sql_native_formula_rows_match_python_fixture_formula(self):
         sql = rfb.build_sql_native_tournament_summary_sql(

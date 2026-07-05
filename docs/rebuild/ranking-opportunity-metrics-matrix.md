@@ -1,6 +1,6 @@
 # Ranking Opportunity Metrics Matrix
 
-Phase 32.12 added an explicit opportunity and role metrics lane for ranking research. Phase 32.13 adds a bounded ffopportunity/xFP lane. Both lanes are additive and do not change live Pigskin rankings, ranking champions, or formula/backtest tables.
+Phase 32.12 added an explicit opportunity and role metrics lane for ranking research. Phase 32.13 adds a bounded ffopportunity/xFP lane. Phase 32.14 uses those ideal-stat fields in Stats02 formula candidates. These lanes are additive and do not change live Pigskin rankings, ranking champions, or Pigskin tools.
 
 ## Source Availability
 
@@ -70,3 +70,34 @@ The feature mart can now carry these leakage-safe historical predictors:
 - Diagnostic tournament smoke is read-only and summary-only.
 - No Python full result-row tournament path was used.
 - Phase 32.13 xFP predictors come only from source seasons before the target season.
+- Phase 32.14 formula weights are profile-aware in the SQL-native evaluator. PPR, Half PPR, Standard, and GNG Keeper can differ without falling back to a single board.
+- Phase 32.14 writes summary-only backtest evidence. It does not write `ranking_backtest_results`, `ranking_formula_champions`, `analytics_pigskin_rankings`, or `analytics_pigskin_rankings_candidates`.
+
+## Phase 32.14 Formula Usage
+
+| Feature | Used in Stats02 formulas | Coverage read |
+|---|---|---|
+| `xfp_score_3yr` | QB, RB, WR, TE | Strong 2024 and 2025 coverage. RB/WR/TE missing rate stayed below 1 percent in the validation and holdout slices. |
+| `xfp_share_3yr` | QB, RB, WR, TE | Strong coverage and useful for scoring-profile differences. PPR weights lean higher than Standard for RB/WR/TE. |
+| `fantasy_points_over_expectation_3yr` | WR | Available with low missing rate, but not enough by itself to create a champion signal. |
+| `offensive_snap_share_3yr` | QB, RB, WR, TE | Strong coverage. Used as an additive role feature and in the bounded availability multiplier. |
+| `snap_role_stability_3yr` | QB, RB, WR, TE | Strong coverage. Helped TE and WR stability reads, but multiplier results were mixed. |
+| `receiving_role_dominance_xfp_3yr` | WR, TE | Strong coverage. Best visible signal was WR and TE validation or holdout improvement. |
+| `high_value_xfp_score_3yr` | RB | Strong coverage. It did not beat the current RB baseline broadly enough in validation. |
+| `qb_ngs_efficiency_score_3yr` | QB | Strong QB-only coverage as the current CPOE proxy. Direct NGS remains deferred. |
+| `injury_risk_score_3yr` | Not used | Deferred because current values are null or not model-ready. |
+| `depth_chart_role_score_3yr` | Not used | Deferred because current values are null or not model-ready. |
+
+Stats02 result read:
+
+- WR and TE showed the cleanest improvement signal from xFP and role fields.
+- RB remains better served by the current Pigskin and opportunity diagnostic baselines in validation.
+- QB improved selected top-N slices, but not enough on captured points or aggregate utility.
+- Red-zone and goal-line score derivations are weak in the current feature mart because validation and holdout min/max often sit at zero. Treat them as placeholders until the PBP ffopportunity pass/rush lane is complete.
+
+Next source priorities:
+
+1. Add PBP-level ffopportunity pass/rush splits.
+2. Derive direct injury and depth role scoring.
+3. Improve TE role context with route or participation coverage if it can be sourced without fabrication.
+4. Replace QB NGS proxy with direct passing/rushing NGS features only after coverage is proven.
