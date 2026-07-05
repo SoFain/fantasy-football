@@ -4318,6 +4318,223 @@ def pbp_xfp_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
     ]
 
 
+def stats02_pbp_refined_tournament_candidates() -> list[dict[str, Any]]:
+    def formula(
+        *,
+        position: str,
+        features: list[str],
+        weights: dict[str, float],
+        profile_weights: dict[str, dict[str, float]] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "version": "stats02_pbp_refined_v0",
+            "position": position,
+            "features": features,
+            "weights": weights,
+            "score_expression": "weighted_linear",
+            "normalization": {"method": "bounded_0_100_sql"},
+            "source_flags": {
+                "uses_phase_32_13_ideal_stats": True,
+                "uses_phase_32_15_pbp_ffopportunity": True,
+                "pbp_xfp_is_component_proxy": True,
+                "injury_depth_scores_deferred": True,
+                "no_2025_holdout_weight_tuning": True,
+                "no_champion_activation": True,
+            },
+        }
+        if profile_weights:
+            payload["scoring_profile_weights"] = profile_weights
+        return payload
+
+    specs = [
+        (
+            "stats02_rb_pbp_high_value_blend_v0",
+            "Stats02 RB PBP High Value Blend",
+            formula(
+                position="RB",
+                features=[
+                    "xfp_score_3yr",
+                    "high_value_xfp_score_3yr",
+                    "rushing_xfp_pbp_3yr",
+                    "receiving_xfp_pbp_3yr",
+                    "high_value_rush_xfp_score_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "red_zone_xfp_score_3yr",
+                    "goal_line_xfp_score_3yr",
+                    "offensive_snap_share_3yr",
+                    "snap_role_stability_3yr",
+                    "team_environment_score",
+                    "rb_high_value_opportunity_score",
+                ],
+                weights={
+                    "xfp_score_3yr": 0.13,
+                    "high_value_xfp_score_3yr": 0.15,
+                    "rushing_xfp_pbp_3yr": 0.13,
+                    "receiving_xfp_pbp_3yr": 0.08,
+                    "high_value_rush_xfp_score_3yr": 0.11,
+                    "high_value_target_xfp_score_3yr": 0.05,
+                    "red_zone_xfp_score_3yr": 0.08,
+                    "goal_line_xfp_score_3yr": 0.10,
+                    "offensive_snap_share_3yr": 0.06,
+                    "snap_role_stability_3yr": 0.04,
+                    "team_environment_score": 0.03,
+                    "rb_high_value_opportunity_score": 0.04,
+                },
+                profile_weights={
+                    "standard": {
+                        "rushing_xfp_pbp_3yr": 0.15,
+                        "goal_line_xfp_score_3yr": 0.14,
+                        "red_zone_xfp_score_3yr": 0.10,
+                        "receiving_xfp_pbp_3yr": 0.04,
+                    },
+                    "half_ppr": {"receiving_xfp_pbp_3yr": 0.09, "high_value_target_xfp_score_3yr": 0.06},
+                    "ppr": {"receiving_xfp_pbp_3yr": 0.11, "high_value_target_xfp_score_3yr": 0.08},
+                    "gng_keeper": {"receiving_xfp_pbp_3yr": 0.10, "snap_role_stability_3yr": 0.06},
+                },
+            ),
+        ),
+        (
+            "stats02_rb_pbp_receiving_weighted_v0",
+            "Stats02 RB PBP Receiving Weighted",
+            formula(
+                position="RB",
+                features=[
+                    "xfp_share_3yr",
+                    "high_value_xfp_score_3yr",
+                    "receiving_xfp_pbp_3yr",
+                    "receiving_xfp_share_pbp_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "rushing_xfp_pbp_3yr",
+                    "high_value_rush_xfp_score_3yr",
+                    "goal_line_xfp_score_3yr",
+                    "offensive_snap_share_3yr",
+                    "team_environment_score",
+                ],
+                weights={
+                    "xfp_share_3yr": 0.14,
+                    "high_value_xfp_score_3yr": 0.14,
+                    "receiving_xfp_pbp_3yr": 0.14,
+                    "receiving_xfp_share_pbp_3yr": 0.10,
+                    "high_value_target_xfp_score_3yr": 0.10,
+                    "rushing_xfp_pbp_3yr": 0.12,
+                    "high_value_rush_xfp_score_3yr": 0.08,
+                    "goal_line_xfp_score_3yr": 0.08,
+                    "offensive_snap_share_3yr": 0.06,
+                    "team_environment_score": 0.04,
+                },
+                profile_weights={
+                    "standard": {
+                        "receiving_xfp_pbp_3yr": 0.08,
+                        "receiving_xfp_share_pbp_3yr": 0.06,
+                        "rushing_xfp_pbp_3yr": 0.15,
+                        "goal_line_xfp_score_3yr": 0.12,
+                    },
+                    "half_ppr": {"receiving_xfp_pbp_3yr": 0.15, "receiving_xfp_share_pbp_3yr": 0.11},
+                    "ppr": {"receiving_xfp_pbp_3yr": 0.18, "receiving_xfp_share_pbp_3yr": 0.14, "high_value_target_xfp_score_3yr": 0.12},
+                    "gng_keeper": {"receiving_xfp_pbp_3yr": 0.17, "receiving_xfp_share_pbp_3yr": 0.13, "offensive_snap_share_3yr": 0.08},
+                },
+            ),
+        ),
+        (
+            "stats02_wr_pbp_receiving_dominance_blend_v0",
+            "Stats02 WR PBP Receiving Dominance Blend",
+            formula(
+                position="WR",
+                features=[
+                    "receiving_role_dominance_xfp_3yr",
+                    "receiving_role_dominance_score",
+                    "xfp_score_3yr",
+                    "xfp_share_3yr",
+                    "receiving_xfp_pbp_3yr",
+                    "receiving_xfp_share_pbp_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "red_zone_xfp_score_3yr",
+                    "offensive_snap_share_3yr",
+                    "snap_role_stability_3yr",
+                    "team_environment_score",
+                ],
+                weights={
+                    "receiving_role_dominance_xfp_3yr": 0.16,
+                    "receiving_role_dominance_score": 0.09,
+                    "xfp_score_3yr": 0.10,
+                    "xfp_share_3yr": 0.12,
+                    "receiving_xfp_pbp_3yr": 0.14,
+                    "receiving_xfp_share_pbp_3yr": 0.14,
+                    "high_value_target_xfp_score_3yr": 0.10,
+                    "red_zone_xfp_score_3yr": 0.05,
+                    "offensive_snap_share_3yr": 0.04,
+                    "snap_role_stability_3yr": 0.03,
+                    "team_environment_score": 0.03,
+                },
+                profile_weights={
+                    "standard": {
+                        "red_zone_xfp_score_3yr": 0.08,
+                        "team_environment_score": 0.05,
+                        "receiving_xfp_share_pbp_3yr": 0.10,
+                    },
+                    "half_ppr": {"receiving_xfp_pbp_3yr": 0.15, "receiving_xfp_share_pbp_3yr": 0.14},
+                    "ppr": {"receiving_xfp_pbp_3yr": 0.16, "receiving_xfp_share_pbp_3yr": 0.16, "high_value_target_xfp_score_3yr": 0.11},
+                    "gng_keeper": {"receiving_xfp_share_pbp_3yr": 0.16, "snap_role_stability_3yr": 0.05},
+                },
+            ),
+        ),
+        (
+            "stats02_wr_pbp_scoring_profile_blend_v0",
+            "Stats02 WR PBP Scoring Profile Blend",
+            formula(
+                position="WR",
+                features=[
+                    "receiving_role_dominance_xfp_3yr",
+                    "receiving_role_dominance_score",
+                    "xfp_share_3yr",
+                    "fantasy_points_over_expectation_3yr",
+                    "receiving_xfp_pbp_3yr",
+                    "receiving_xfp_share_pbp_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "red_zone_xfp_score_3yr",
+                    "goal_line_xfp_score_3yr",
+                    "team_environment_score",
+                    "snap_role_stability_3yr",
+                ],
+                weights={
+                    "receiving_role_dominance_xfp_3yr": 0.15,
+                    "receiving_role_dominance_score": 0.08,
+                    "xfp_share_3yr": 0.13,
+                    "fantasy_points_over_expectation_3yr": 0.07,
+                    "receiving_xfp_pbp_3yr": 0.14,
+                    "receiving_xfp_share_pbp_3yr": 0.13,
+                    "high_value_target_xfp_score_3yr": 0.11,
+                    "red_zone_xfp_score_3yr": 0.07,
+                    "goal_line_xfp_score_3yr": 0.04,
+                    "team_environment_score": 0.04,
+                    "snap_role_stability_3yr": 0.04,
+                },
+                profile_weights={
+                    "standard": {
+                        "fantasy_points_over_expectation_3yr": 0.10,
+                        "red_zone_xfp_score_3yr": 0.10,
+                        "goal_line_xfp_score_3yr": 0.07,
+                        "team_environment_score": 0.06,
+                        "receiving_xfp_share_pbp_3yr": 0.09,
+                    },
+                    "half_ppr": {"receiving_xfp_pbp_3yr": 0.15, "receiving_xfp_share_pbp_3yr": 0.13},
+                    "ppr": {
+                        "receiving_role_dominance_xfp_3yr": 0.17,
+                        "xfp_share_3yr": 0.15,
+                        "receiving_xfp_share_pbp_3yr": 0.16,
+                        "high_value_target_xfp_score_3yr": 0.12,
+                    },
+                    "gng_keeper": {"receiving_role_dominance_xfp_3yr": 0.16, "xfp_share_3yr": 0.15, "snap_role_stability_3yr": 0.06},
+                },
+            ),
+        ),
+    ]
+    return [
+        build_candidate_row(payload, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, payload in specs
+    ]
+
+
 def estimate_sql_native_tournament(
     *,
     client: Any,

@@ -162,3 +162,41 @@ Decision read:
 - WR PBP split xFP is useful as a component, especially when compared with simple projection and scarcity baselines, but current Pigskin still wins pairwise.
 - TE PBP split xFP is not enough by itself. Stats02 weekly ideal TE remains the stronger TE challenger.
 - No champion formula was activated.
+
+## Phase 32.17 RB/WR PBP Refinement Read
+
+Phase 32.17 used these PBP and Stats02 fields in the refined RB/WR formulas:
+
+| Field | Used for | Coverage read | Result |
+|---|---|---|---|
+| `xfp_score_3yr` | RB, WR | Near complete in 2024 and 2025 for RB/WR | Useful base opportunity stabilizer |
+| `high_value_xfp_score_3yr` | RB | Near complete in 2024 and 2025 | Still useful, but not enough to beat aggregate current Pigskin |
+| `xfp_share_3yr` | RB, WR | Near complete in 2024 and 2025 | Useful profile-sensitive share input |
+| `receiving_role_dominance_xfp_3yr` | WR | Near complete in 2024 and 2025 | Stronger WR component than PBP fields alone |
+| `receiving_role_dominance_score` | WR | Complete in 2024 and 2025 WR rows | Helps preserve role signal. Not used for RB because RB coverage is zero |
+| `receiving_xfp_pbp_3yr` | RB, WR | RB 98.67 percent non-null in 2024 and 100 percent in 2025. WR 99.50 percent in 2024 and 99.69 percent in 2025 | Helps RB pairwise on short windows. Helps WR captured points but hurts pairwise |
+| `rushing_xfp_pbp_3yr` | RB | RB 98.75 percent non-null in 2024 and 99.45 percent in 2025 | Useful RB signal. WR rush coverage is about 76 percent, so WR formulas do not use it |
+| `red_zone_xfp_score_3yr` | RB, WR | Near complete in 2024 and 2025 | Helpful as a profile-sensitive secondary input |
+| `goal_line_xfp_score_3yr` | RB, WR | Near complete in 2024 and 2025 | Useful for Standard and RB scoring context |
+| `high_value_target_xfp_score_3yr` | RB, WR | RB near complete, WR near complete | RB receiving-weighted and WR PPR/GNG component |
+| `high_value_rush_xfp_score_3yr` | RB | RB 98.75 percent non-null in 2024 and 99.45 percent in 2025 | Useful RB component |
+| `receiving_xfp_share_pbp_3yr` | RB, WR | RB 98.67 percent non-null in 2024 and 100 percent in 2025. WR 99.50 percent in 2024 and 99.69 percent in 2025 | Profile-aware share signal |
+| `rushing_xfp_share_pbp_3yr` | not used in Phase 32.17 formulas | RB coverage is high, WR coverage is sparse | Candidate formulas used rush xFP level instead of rush share |
+| `opportunity_quality_score_3yr` | not used in final refined formulas | Near complete | Useful diagnostic field, but excluded to keep weights tight |
+| `offensive_snap_share_3yr` | RB, WR | Near complete in 2024 and 2025 | Role stabilizer |
+| `snap_role_stability_3yr` | RB, WR | Near complete in 2024 and 2025 | Role stabilizer |
+| `team_environment_score` | RB, WR | Complete in 2024 and 2025 | Context stabilizer |
+| `rb_high_value_opportunity_score` | RB | Complete for RB. Zero coverage for WR | RB-only legacy opportunity input |
+
+Phase 32.17 result:
+
+- RB PBP split xFP improved short-window pairwise signal in validation and holdout, but did not beat current Pigskin on the 2017-2025 aggregate.
+- WR PBP split xFP improved captured points in 2024 and 2025 slices, but pairwise remained weaker than current Pigskin.
+- Missing PBP metrics remain null and are reflected through missing-input rates. No zero-fill policy was introduced.
+- No champion activation is supported by this evidence.
+
+Next missing source recommendation:
+
+1. Injury and depth role scoring for RB/WR.
+2. Direct NGS receiving and rushing ingest if source coverage is real.
+3. A narrower WR refinement that preserves current Pigskin pairwise strength before adding PBP captured-points boosters.

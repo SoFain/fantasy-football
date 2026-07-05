@@ -1437,6 +1437,78 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertNotIn("analytics_pigskin_rankings", lowered)
         self.assertNotIn("ranking_formula_champions", lowered)
 
+    def test_stats02_pbp_refined_candidates_validate_profile_weights(self):
+        candidates = rfb.stats02_pbp_refined_tournament_candidates()
+        ids = {row["candidate_id"] for row in candidates}
+
+        self.assertEqual(len(candidates), 4)
+        self.assertIn("stats02_rb_pbp_high_value_blend_v0", ids)
+        self.assertIn("stats02_rb_pbp_receiving_weighted_v0", ids)
+        self.assertIn("stats02_wr_pbp_receiving_dominance_blend_v0", ids)
+        self.assertIn("stats02_wr_pbp_scoring_profile_blend_v0", ids)
+        self.assertNotIn("QB", {row["position"] for row in candidates})
+        self.assertNotIn("TE", {row["position"] for row in candidates})
+
+        for row in candidates:
+            formula = rfb.validate_formula(json.loads(row["formula_json"]))
+            self.assertEqual(formula["source_flags"]["uses_phase_32_13_ideal_stats"], True)
+            self.assertEqual(formula["source_flags"]["uses_phase_32_15_pbp_ffopportunity"], True)
+            self.assertEqual(formula["source_flags"]["pbp_xfp_is_component_proxy"], True)
+            self.assertEqual(formula["source_flags"]["no_2025_holdout_weight_tuning"], True)
+            self.assertEqual(formula["source_flags"]["no_champion_activation"], True)
+            self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
+            self.assertGreater(sum(formula["weights"].values()), 0.0)
+            self.assertIn("scoring_profile_weights", formula)
+
+        rb_receiving = next(
+            rfb.validate_formula(json.loads(row["formula_json"]))
+            for row in candidates
+            if row["candidate_id"] == "stats02_rb_pbp_receiving_weighted_v0"
+        )
+        self.assertGreater(
+            rb_receiving["scoring_profile_weights"]["ppr"]["receiving_xfp_pbp_3yr"],
+            rb_receiving["scoring_profile_weights"]["standard"]["receiving_xfp_pbp_3yr"],
+        )
+
+        wr_profile = next(
+            rfb.validate_formula(json.loads(row["formula_json"]))
+            for row in candidates
+            if row["candidate_id"] == "stats02_wr_pbp_scoring_profile_blend_v0"
+        )
+        self.assertGreater(
+            wr_profile["scoring_profile_weights"]["standard"]["red_zone_xfp_score_3yr"],
+            wr_profile["weights"]["red_zone_xfp_score_3yr"],
+        )
+        self.assertGreater(
+            wr_profile["scoring_profile_weights"]["ppr"]["receiving_xfp_share_pbp_3yr"],
+            wr_profile["scoring_profile_weights"]["standard"]["receiving_xfp_share_pbp_3yr"],
+        )
+
+    def test_stats02_pbp_refined_sql_is_summary_only_and_missing_safe(self):
+        candidates = rfb.stats02_pbp_refined_tournament_candidates()
+        with patch.object(rfb, "build_result_rows_for_candidates", side_effect=AssertionError("old path called")):
+            sql = rfb.build_sql_native_tournament_summary_write_sql(
+                project_id="p",
+                dataset_id="d",
+                target_seasons=(2024, 2025),
+                scoring_profile_ids=("ppr", "half_ppr", "standard", "gng_keeper"),
+                positions=("RB", "WR"),
+                candidate_rows=candidates,
+                backtest_run_id_prefix="ranking_backtest_sql_native_stats02_pbp_refined_v0",
+                formula_version="ranking_backtest_sql_native_stats02_pbp_refined_v0",
+            )
+        lowered = sql.lower()
+
+        self.assertIn("receiving_xfp_pbp_3yr", sql)
+        self.assertIn("rushing_xfp_pbp_3yr", sql)
+        self.assertIn("high_value_target_xfp_score_3yr", sql)
+        self.assertIn("WHEN raw_feature_value IS NULL THEN NULL", sql)
+        self.assertIn("ranking_backtest_candidate_summaries", sql)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn(" as rows", lowered)
+
     def test_sql_native_formula_rows_match_python_fixture_formula(self):
         sql = rfb.build_sql_native_tournament_summary_sql(
             project_id="p",

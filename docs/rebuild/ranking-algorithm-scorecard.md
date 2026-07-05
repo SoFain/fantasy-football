@@ -585,6 +585,88 @@ Decision:
 
 Next highest-ROI action: a small RB/WR refinement that blends PBP split xFP with the existing Stats02 ideal fields, plus a separate injury/depth role scoring lane.
 
+## Phase 32.17 RB/WR PBP Refined Formulas
+
+Phase 32.17 tested a small second-pass RB/WR family that blends Phase 32.13 Stats02 ideal fields with Phase 32.15 PBP split xFP proxy fields. This was SQL-native summary-only evidence. No live rankings, champions, detail rows, Pigskin tools, or LLM-backed ranking generation changed.
+
+Candidate family:
+
+- `stats02_pbp_refined_v0`
+
+Candidates:
+
+| Candidate | Position | Main idea |
+|---|---|---|
+| `stats02_rb_pbp_high_value_blend_v0` | RB | Weekly xFP, PBP rush/receiving xFP, high-value opportunity, red-zone/goal-line xFP, snap role, team environment |
+| `stats02_rb_pbp_receiving_weighted_v0` | RB | PPR-sensitive receiving xFP and high-value target xFP, with Standard shifted toward rush and goal-line xFP |
+| `stats02_wr_pbp_receiving_dominance_blend_v0` | WR | Stats02 receiving dominance plus PBP receiving xFP, xFP share, high-value targets, snap role, team environment |
+| `stats02_wr_pbp_scoring_profile_blend_v0` | WR | Standard favors red-zone, goal-line, team environment, and efficiency. PPR/Half/GNG favor xFP share and high-value target xFP |
+
+SQL-native dry-run:
+
+| Version | Candidate rows | Run rows | Summary rows | Detail rows | Estimated bytes |
+|---|---:|---:|---:|---:|---:|
+| `ranking_backtest_sql_native_stats02_pbp_refined_v0` | 4 | 4 | 16 | 0 | 81,842,565 |
+
+Controlled summary write:
+
+| Item | Result |
+|---|---:|
+| BigQuery job ID | `9e3c08e6-c0b9-42df-9977-8ef83b2809ec` |
+| `ranking_backtest_runs` rows | 4 |
+| `ranking_backtest_candidate_summaries` rows | 16 |
+| `ranking_backtest_results` rows | 0 |
+| `ranking_formula_champions` rows | 0 |
+| live ranking candidate rows | 0 |
+
+2024 validation, best refined candidate versus current:
+
+| Position | Profile | Current overall pairwise | Refined overall pairwise | Current captured | Refined captured | Read |
+|---|---|---:|---:|---:|---:|---|
+| RB | PPR | 0.7891 | 0.8040 | 0.7641 | 0.7654 | RB pairwise improved, captured roughly flat |
+| RB | Half PPR | 0.7862 | 0.7954 | 0.7572 | 0.7571 | RB pairwise improved, captured flat |
+| RB | Standard | 0.7820 | 0.7776 | 0.7460 | 0.7503 | Standard captured improved, pairwise slipped |
+| RB | GNG Keeper | 0.7714 | 0.7782 | 0.6864 | 0.7008 | RB improved on both pairwise and captured |
+| WR | PPR | 0.7791 | 0.7558 | 0.6825 | 0.6880 | WR captured improved, pairwise weaker |
+| WR | Half PPR | 0.7746 | 0.7462 | 0.6594 | 0.6672 | WR captured improved, pairwise weaker |
+| WR | Standard | 0.7614 | 0.7171 | 0.6206 | 0.6295 | WR captured improved, pairwise much weaker |
+| WR | GNG Keeper | 0.7597 | 0.7287 | 0.5870 | 0.5997 | WR captured improved, pairwise weaker |
+
+2025 holdout, best refined candidate versus current:
+
+| Position | Profile | Current overall pairwise | Refined overall pairwise | Current captured | Refined captured | Read |
+|---|---|---:|---:|---:|---:|---|
+| RB | PPR | 0.8225 | 0.8426 | 1.0000 | 1.0000 | RB pairwise improved |
+| RB | Half PPR | 0.8252 | 0.8446 | 1.0000 | 1.0000 | RB pairwise improved |
+| RB | Standard | 0.8264 | 0.8374 | 1.0000 | 1.0000 | RB pairwise improved |
+| RB | GNG Keeper | 0.8181 | 0.8302 | 1.0000 | 1.0000 | RB pairwise improved |
+| WR | PPR | 0.8336 | 0.7889 | 0.8796 | 0.8922 | WR captured improved, pairwise weaker |
+| WR | Half PPR | 0.8334 | 0.7861 | 0.8748 | 0.8932 | WR captured improved, pairwise weaker |
+| WR | Standard | 0.8284 | 0.7764 | 0.8690 | 0.8876 | WR captured improved, pairwise weaker |
+| WR | GNG Keeper | 0.8362 | 0.7818 | 0.8712 | 0.8852 | WR captured improved, pairwise weaker |
+
+2017-2025 aggregate context:
+
+| Position | Profile | Current overall pairwise | Best refined overall pairwise | Current captured | Best refined captured | Read |
+|---|---|---:|---:|---:|---:|---|
+| RB | PPR | 0.7544 | 0.7369 | 0.7611 | 0.7496 | refined under current |
+| RB | Half PPR | 0.7558 | 0.7341 | 0.7573 | 0.7438 | refined under current |
+| RB | Standard | 0.7558 | 0.7293 | 0.7483 | 0.7361 | refined under current |
+| RB | GNG Keeper | 0.7465 | 0.7224 | 0.7095 | 0.6975 | refined under current |
+| WR | PPR | 0.7736 | 0.7419 | 0.7367 | 0.7137 | refined under current |
+| WR | Half PPR | 0.7684 | 0.7352 | 0.7165 | 0.6951 | refined under current |
+| WR | Standard | 0.7571 | 0.7189 | 0.6835 | 0.6620 | refined under current |
+| WR | GNG Keeper | 0.7559 | 0.7226 | 0.6546 | 0.6336 | refined under current |
+
+Decision:
+
+- RB PBP xFP shows a real short-window pairwise signal. It improves 2024 validation in PPR, Half PPR, and GNG Keeper, and it improves all four 2025 holdout profiles.
+- WR PBP xFP helps captured points on 2024 and 2025 slices, but it does not beat current Pigskin on pairwise and weakens aggregate performance.
+- The refined family does not beat current Pigskin on the 2017-2025 aggregate. It is not ready for champion activation.
+- Current Pigskin remains the live baseline. No champion is active.
+
+Owner-review status: RB can be reviewed as a challenger concept, not as a replacement. WR needs either injury/depth role context, direct NGS receiving/rushing ingest, or a narrower blend that preserves current Pigskin pairwise strength.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
