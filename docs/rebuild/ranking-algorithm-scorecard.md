@@ -322,6 +322,89 @@ Decision: BQML is now a useful challenger lane, not an active champion. Logistic
 
 Next research direction: test a constrained ensemble that blends current Pigskin, simple projection, and BQML signals through the same SQL-native evaluator. Do not activate a champion without owner review.
 
+## Phase 32.11 Constrained Ensemble Prototype
+
+Phase 32.11 tested five constrained convex ensembles with SQL-native evaluation. The ensembles blended current Pigskin, simple projection, scarcity-adjusted draft value, BQML logistic elite, and BQML linear points. No Python player-week result rows were built.
+
+Split policy:
+
+- reference seasons: 2017 through 2023
+- validation and tuning season: 2024
+- holdout season: 2025
+- 2025 was not used to choose weights
+
+Ensemble weights:
+
+| Ensemble | Current | Simple | Scarcity | BQML logistic | BQML linear points |
+|---|---:|---:|---:|---:|---:|
+| conservative Pigskin-plus | 0.60 | 0.20 | 0.10 | 0.10 | 0.00 |
+| elite-probability blend | 0.40 | 0.20 | 0.10 | 0.30 | 0.00 |
+| pairwise-strength blend | 0.40 | 0.20 | 0.10 | 0.00 | 0.30 |
+| balanced research blend | 0.35 | 0.20 | 0.15 | 0.15 | 0.15 |
+
+Position-aware first draft:
+
+| Position | Current | Simple | Scarcity | BQML logistic | BQML linear points |
+|---|---:|---:|---:|---:|---:|
+| QB | 0.45 | 0.15 | 0.10 | 0.10 | 0.20 |
+| RB | 0.30 | 0.25 | 0.20 | 0.20 | 0.05 |
+| WR | 0.35 | 0.25 | 0.10 | 0.20 | 0.10 |
+| TE | 0.55 | 0.20 | 0.10 | 0.10 | 0.05 |
+
+Validation season 2024:
+
+| Candidate | Top-N | Captured points | VOR captured | Rank corr | High-confidence | Overall pairwise | NDCG@K | Tier accuracy | Bust rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| scarcity adjusted draft value | 0.5218 | 0.7100 | 0.5951 | 0.5215 | 0.7368 | 0.7467 | 0.6392 | 0.3991 | 0.1681 |
+| BQML logistic elite | 0.5165 | 0.7073 | 0.5888 | 0.5332 | 0.7445 | 0.5096 | 0.6501 | 0.3998 | 0.1641 |
+| BQML linear points | 0.5120 | 0.7035 | 0.5839 | 0.5399 | 0.9245 | 0.6914 | 0.6471 | 0.4098 | 0.1671 |
+| balanced research blend | 0.5084 | 0.7002 | 0.5782 | 0.5359 | 0.7200 | 0.4910 | 0.6454 | 0.4062 | 0.1659 |
+| elite-probability blend | 0.5069 | 0.6983 | 0.5740 | 0.5339 | 0.7189 | 0.4906 | 0.6450 | 0.4048 | 0.1651 |
+| pairwise-strength blend | 0.5056 | 0.6977 | 0.5751 | 0.5386 | 0.7201 | 0.4878 | 0.6443 | 0.4060 | 0.1688 |
+| position-aware first draft | 0.5048 | 0.6942 | 0.5690 | 0.5341 | 0.7186 | 0.4860 | 0.6423 | 0.4017 | 0.1719 |
+| conservative Pigskin-plus | 0.5016 | 0.6912 | 0.5638 | 0.5288 | 0.7148 | 0.4748 | 0.6401 | 0.4008 | 0.1743 |
+| simple projection points | 0.4996 | 0.6902 | 0.5701 | 0.5230 | 0.7415 | 0.7436 | 0.6411 | 0.4015 | 0.1762 |
+| current Pigskin baseline | 0.4941 | 0.6845 | 0.5566 | 0.5167 | 0.7518 | 0.7581 | 0.6340 | 0.4002 | 0.1771 |
+
+Holdout season 2025:
+
+| Candidate | Top-N | Captured points | VOR captured | Rank corr | High-confidence | Overall pairwise | NDCG@K | Tier accuracy | Bust rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| simple projection points | 0.8611 | 0.9036 | 0.8567 | 0.5645 | 0.7451 | 0.7572 | 0.7916 | 0.7141 | 0.0012 |
+| conservative Pigskin-plus | 0.8598 | 0.9031 | 0.8548 | 0.5699 | 0.7184 | 0.6814 | 0.7842 | 0.7086 | 0.0012 |
+| position-aware first draft | 0.8581 | 0.9013 | 0.8525 | 0.5690 | 0.7182 | 0.6941 | 0.7829 | 0.7108 | 0.0012 |
+| elite-probability blend | 0.8578 | 0.9007 | 0.8515 | 0.5712 | 0.7189 | 0.6933 | 0.7830 | 0.7085 | 0.0012 |
+| current Pigskin baseline | 0.8569 | 0.9013 | 0.8536 | 0.5620 | 0.7741 | 0.7946 | 0.7832 | 0.7054 | 0.0012 |
+| pairwise-strength blend | 0.8563 | 0.9027 | 0.8554 | 0.5677 | 0.7170 | 0.6938 | 0.7828 | 0.7088 | 0.0012 |
+| balanced research blend | 0.8560 | 0.9028 | 0.8556 | 0.5667 | 0.7180 | 0.6950 | 0.7834 | 0.7087 | 0.0012 |
+| BQML logistic elite | 0.8558 | 0.9030 | 0.8555 | 0.5619 | 0.7492 | 0.7715 | 0.7814 | 0.7060 | 0.0012 |
+| BQML linear points | 0.8510 | 0.8973 | 0.8461 | 0.5451 | 0.8927 | 0.9441 | 0.7709 | 0.6990 | 0.0012 |
+| scarcity adjusted draft value | 0.8403 | 0.8834 | 0.8171 | 0.5084 | 0.7548 | 0.7742 | 0.7401 | 0.6779 | 0.0012 |
+
+Aggregate 2024-2025 ensemble results:
+
+| Ensemble | Top-N | Captured points | VOR captured | Rank corr | High-confidence | Overall pairwise | NDCG@K | Tier accuracy | Bust rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| elite-probability blend | 0.6824 | 0.7995 | 0.6939 | 0.6352 | 0.7180 | 0.5593 | 0.7140 | 0.5566 | 0.0831 |
+| balanced research blend | 0.6822 | 0.8015 | 0.6978 | 0.6364 | 0.7188 | 0.5611 | 0.7144 | 0.5575 | 0.0836 |
+| position-aware first draft | 0.6814 | 0.7978 | 0.6923 | 0.6353 | 0.7176 | 0.5572 | 0.7126 | 0.5562 | 0.0865 |
+| pairwise-strength blend | 0.6810 | 0.8002 | 0.6959 | 0.6385 | 0.7188 | 0.5589 | 0.7135 | 0.5574 | 0.0850 |
+| conservative Pigskin-plus | 0.6807 | 0.7972 | 0.6895 | 0.6314 | 0.7143 | 0.5456 | 0.7121 | 0.5547 | 0.0877 |
+
+Controlled summary-only write:
+
+- version: `ranking_backtest_sql_native_ensemble_v0_2024_2025`
+- write job ID: `a1d726ed-892b-455e-8709-250b528634c0`
+- run rows written: 4
+- summary rows written: 80
+- detail rows written: 0
+- bytes processed: 9,387,829
+- slot millis: 397,153
+
+Decision: no ensemble beats the current baseline strongly enough for owner-review challenger status. The best validation ensemble is only about 1.43 percentage points above current Pigskin on top-N and trails current Pigskin on high-confidence and overall pairwise. The 2025 holdout does not rescue the case because simple projection and current Pigskin remain at least as useful as the ensembles on the most practical metrics.
+
+Next research direction: improve the feature warehouse before another blend pass. Better opportunity and route-level metrics are more likely to help than reweighting the same ingredients.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:

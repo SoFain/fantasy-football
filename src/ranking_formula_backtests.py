@@ -56,6 +56,7 @@ DRAFT_UTILITY_METRIC_CONTRACT = {
 BQML_TRAIN_SEASONS = (2017, 2023)
 BQML_VALIDATION_SEASON = 2024
 BQML_HOLDOUT_SEASON = 2025
+BQML_COMPONENT_SPECS = ("bqml_logistic_elite", "bqml_linear_points")
 BQML_NUMERIC_PREDICTORS = (
     "profile_points_score",
     "opportunity_score_proxy",
@@ -100,6 +101,19 @@ BQML_NUMERIC_PREDICTORS = (
     "breakout_trajectory_3yr",
 )
 BQML_CATEGORICAL_PREDICTORS = ("scoring_profile_id", "position")
+ENSEMBLE_REFERENCE_SEASONS = tuple(range(2017, 2024))
+ENSEMBLE_TUNING_SEASON = 2024
+ENSEMBLE_HOLDOUT_SEASON = 2025
+ENSEMBLE_VERSION = "ranking_backtest_sql_native_ensemble_v0_2024_2025"
+ENSEMBLE_FORMULA_COMPONENTS = {
+    "current_pigskin": "current_pigskin_candidate_score_v1",
+    "simple_projection": "simple_projection_points_baseline_v0",
+    "scarcity_adjusted": "scarcity_adjusted_draft_value_v0",
+}
+ENSEMBLE_BQML_COMPONENTS = {
+    "bqml_logistic_elite": "bqml_logistic_elite",
+    "bqml_linear_points": "bqml_linear_points",
+}
 
 POSITIONS = ("QB", "RB", "WR", "TE")
 TARGET_DEFINITIONS = {
@@ -3643,6 +3657,826 @@ LEFT JOIN pairwise USING (candidate_id, target_season, position, scoring_profile
 LEFT JOIN overall_pairwise USING (candidate_id, target_season, scoring_profile_id, league_type_id, roster_format_id)
 ORDER BY target_season, scoring_profile_id, position, candidate_id
 """.strip()
+
+
+def ensemble_candidate_specs() -> list[dict[str, Any]]:
+    return [
+        {
+            "ensemble_id": "ensemble_conservative_pigskin_plus_v0",
+            "ensemble_family": "ensemble_conservative_pigskin_plus",
+            "tuned_on_season": ENSEMBLE_TUNING_SEASON,
+            "holdout_season": ENSEMBLE_HOLDOUT_SEASON,
+            "weights": {
+                "current_pigskin": 0.60,
+                "simple_projection": 0.20,
+                "scarcity_adjusted": 0.10,
+                "bqml_logistic_elite": 0.10,
+            },
+        },
+        {
+            "ensemble_id": "ensemble_elite_probability_blend_v0",
+            "ensemble_family": "ensemble_elite_probability_blend",
+            "tuned_on_season": ENSEMBLE_TUNING_SEASON,
+            "holdout_season": ENSEMBLE_HOLDOUT_SEASON,
+            "weights": {
+                "current_pigskin": 0.40,
+                "simple_projection": 0.20,
+                "scarcity_adjusted": 0.10,
+                "bqml_logistic_elite": 0.30,
+            },
+        },
+        {
+            "ensemble_id": "ensemble_pairwise_strength_blend_v0",
+            "ensemble_family": "ensemble_pairwise_strength_blend",
+            "tuned_on_season": ENSEMBLE_TUNING_SEASON,
+            "holdout_season": ENSEMBLE_HOLDOUT_SEASON,
+            "weights": {
+                "current_pigskin": 0.40,
+                "simple_projection": 0.20,
+                "scarcity_adjusted": 0.10,
+                "bqml_linear_points": 0.30,
+            },
+        },
+        {
+            "ensemble_id": "ensemble_balanced_research_blend_v0",
+            "ensemble_family": "ensemble_balanced_research_blend",
+            "tuned_on_season": ENSEMBLE_TUNING_SEASON,
+            "holdout_season": ENSEMBLE_HOLDOUT_SEASON,
+            "weights": {
+                "current_pigskin": 0.35,
+                "simple_projection": 0.20,
+                "scarcity_adjusted": 0.15,
+                "bqml_logistic_elite": 0.15,
+                "bqml_linear_points": 0.15,
+            },
+        },
+        {
+            "ensemble_id": "ensemble_position_aware_first_draft_v0",
+            "ensemble_family": "ensemble_position_aware_first_draft",
+            "tuned_on_season": ENSEMBLE_TUNING_SEASON,
+            "holdout_season": ENSEMBLE_HOLDOUT_SEASON,
+            "position_weights": {
+                "QB": {
+                    "current_pigskin": 0.45,
+                    "simple_projection": 0.15,
+                    "scarcity_adjusted": 0.10,
+                    "bqml_logistic_elite": 0.10,
+                    "bqml_linear_points": 0.20,
+                },
+                "RB": {
+                    "current_pigskin": 0.30,
+                    "simple_projection": 0.25,
+                    "scarcity_adjusted": 0.20,
+                    "bqml_logistic_elite": 0.20,
+                    "bqml_linear_points": 0.05,
+                },
+                "WR": {
+                    "current_pigskin": 0.35,
+                    "simple_projection": 0.25,
+                    "scarcity_adjusted": 0.10,
+                    "bqml_logistic_elite": 0.20,
+                    "bqml_linear_points": 0.10,
+                },
+                "TE": {
+                    "current_pigskin": 0.55,
+                    "simple_projection": 0.20,
+                    "scarcity_adjusted": 0.10,
+                    "bqml_logistic_elite": 0.10,
+                    "bqml_linear_points": 0.05,
+                },
+            },
+        },
+    ]
+
+
+def validate_ensemble_specs(specs: list[Mapping[str, Any]]) -> None:
+    valid_components = set(ENSEMBLE_FORMULA_COMPONENTS) | set(ENSEMBLE_BQML_COMPONENTS)
+    for spec in specs:
+        if int(spec.get("holdout_season", 0)) != ENSEMBLE_HOLDOUT_SEASON:
+            raise FormulaValidationError("Ensemble holdout season must be 2025")
+        if int(spec.get("tuned_on_season", 0)) >= ENSEMBLE_HOLDOUT_SEASON:
+            raise FormulaValidationError("Ensemble weights must not be tuned on the 2025 holdout")
+        weight_groups: list[tuple[str | None, Mapping[str, Any]]] = []
+        if "weights" in spec:
+            weight_groups.append((None, spec["weights"]))
+        for position, weights in dict(spec.get("position_weights", {})).items():
+            weight_groups.append((_normalize_position(str(position)), weights))
+        if not weight_groups:
+            raise FormulaValidationError(f"Ensemble {spec.get('ensemble_id')} has no weights")
+        for position, weights in weight_groups:
+            total = sum(float(weight) for weight in weights.values())
+            if abs(total - 1.0) > 0.000001:
+                label = f"{spec.get('ensemble_id')} {position or 'all'}"
+                raise FormulaValidationError(f"Ensemble weights must sum to 1.0 for {label}")
+            for component_id, weight in weights.items():
+                if component_id not in valid_components:
+                    raise FormulaValidationError(f"Unknown ensemble component: {component_id}")
+                if float(weight) < 0:
+                    raise FormulaValidationError(f"Ensemble component weight must be non-negative: {component_id}")
+                if component_id in ENSEMBLE_BQML_COMPONENTS and float(weight) > 0.50:
+                    raise FormulaValidationError(f"BQML component weight exceeds first-prototype limit: {component_id}")
+
+
+def _ensemble_weight_rows_sql(specs: list[Mapping[str, Any]]) -> str:
+    validate_ensemble_specs(specs)
+    rows: list[str] = []
+    for spec in specs:
+        common = {
+            "ensemble_id": str(spec["ensemble_id"]),
+            "ensemble_family": str(spec["ensemble_family"]),
+        }
+        if "weights" in spec:
+            for component_id, weight in dict(spec["weights"]).items():
+                rows.append(
+                    "SELECT "
+                    f"{_sql_string(common['ensemble_id'])} AS ensemble_id, "
+                    f"{_sql_string(common['ensemble_family'])} AS ensemble_family, "
+                    "CAST(NULL AS STRING) AS position, "
+                    f"{_sql_string(str(component_id))} AS component_id, "
+                    f"{float(weight):.12g} AS weight"
+                )
+        for position, weights in dict(spec.get("position_weights", {})).items():
+            normalized_position = _normalize_position(str(position))
+            for component_id, weight in dict(weights).items():
+                rows.append(
+                    "SELECT "
+                    f"{_sql_string(common['ensemble_id'])} AS ensemble_id, "
+                    f"{_sql_string(common['ensemble_family'])} AS ensemble_family, "
+                    f"{_sql_string(normalized_position)} AS position, "
+                    f"{_sql_string(str(component_id))} AS component_id, "
+                    f"{float(weight):.12g} AS weight"
+                )
+    if not rows:
+        raise FormulaValidationError("At least one ensemble weight row is required")
+    return "\n  UNION ALL\n  ".join(rows)
+
+
+def _ensemble_formula_candidate_rows() -> list[Mapping[str, Any]]:
+    component_versions = set(ENSEMBLE_FORMULA_COMPONENTS.values())
+    return [
+        candidate
+        for candidate in sql_native_tournament_candidates()
+        if str(candidate.get("formula_version")) in component_versions
+    ]
+
+
+def build_ensemble_formula_component_prediction_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_seasons: list[int] | tuple[int, ...] = (ENSEMBLE_TUNING_SEASON, ENSEMBLE_HOLDOUT_SEASON),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
+    selected_candidates = _ensemble_formula_candidate_rows()
+    formula_weight_sql = _formula_weight_rows_sql(selected_candidates)
+    target_season_sql = ", ".join(str(int(season)) for season in sorted({int(season) for season in target_seasons}))
+    profile_sql = ", ".join(_sql_string(profile) for profile in scoring_profile_ids)
+    position_sql = ", ".join(_sql_string(_normalize_position(position)) for position in positions)
+    component_case = " ".join(
+        f"WHEN formula_version = {_sql_string(version)} THEN {_sql_string(component_id)}"
+        for component_id, version in ENSEMBLE_FORMULA_COMPONENTS.items()
+    )
+    return f"""
+WITH formula_weights AS (
+  {formula_weight_sql}
+),
+mart AS (
+  SELECT *
+  FROM `{mart_table}`
+  WHERE target_season IN ({target_season_sql})
+    AND scoring_profile_id IN ({profile_sql})
+    AND position IN ({position_sql})
+    AND league_type_id = {_sql_string(league_type_id)}
+    AND roster_format_id = {_sql_string(roster_format_id)}
+    AND source_window_end_season < target_season
+),
+feature_values AS (
+  SELECT
+    mart.*,
+    weights.candidate_id,
+    weights.formula_version,
+    weights.feature_name,
+    weights.weight,
+    CASE weights.feature_name
+      WHEN 'actual_points' THEN target_fantasy_points
+      WHEN 'fantasy_points_ppr' THEN target_fantasy_points
+      WHEN 'recent_points_avg' THEN recent_points_avg
+      WHEN 'profile_points_score' THEN profile_points_score
+      WHEN 'analytical_grade_proxy' THEN analytical_grade_proxy
+      WHEN 'opportunity_score_proxy' THEN opportunity_score_proxy
+      WHEN 'efficiency_score_proxy' THEN efficiency_score_proxy
+      WHEN 'role_stability_score' THEN role_stability_score
+      WHEN 'targets' THEN targets
+      WHEN 'carries' THEN carries
+      WHEN 'receiving_yards' THEN receiving_yards
+      WHEN 'receiving_epa' THEN receiving_epa
+      WHEN 'red_zone_targets' THEN red_zone_targets
+      WHEN 'success_rate' THEN success_rate
+      WHEN 'passing_success_rate' THEN passing_success_rate
+      WHEN 'cpoe' THEN cpoe
+      WHEN 'dropbacks' THEN dropbacks
+      WHEN 'rushing_attempts' THEN rushing_attempts
+      WHEN 'rush_success_rate' THEN rush_success_rate
+      WHEN 'receiving_usage' THEN receiving_usage
+      WHEN 'usage_volume' THEN usage_volume
+      WHEN 'epa_per_play' THEN epa_per_play
+      WHEN 'passing_epa_per_play' THEN passing_epa_per_play
+      WHEN 'team_epa_per_play' THEN team_epa_per_play
+      WHEN 'red_zone_opportunities' THEN red_zone_opportunities
+      WHEN 'goal_line_opportunities' THEN goal_line_opportunities
+      WHEN 'snap_share_proxy' THEN snap_share_proxy
+      WHEN 'air_yards' THEN air_yards
+      WHEN 'team_pass_rate' THEN team_pass_rate
+      WHEN 'points_per_game_slope_3yr' THEN points_per_game_slope_3yr
+      WHEN 'total_points_slope_3yr' THEN total_points_slope_3yr
+      WHEN 'opportunity_slope_3yr' THEN opportunity_slope_3yr
+      WHEN 'target_share_slope_3yr' THEN target_share_slope_3yr
+      WHEN 'carry_share_slope_3yr' THEN carry_share_slope_3yr
+      WHEN 'receiving_usage_slope_3yr' THEN receiving_usage_slope_3yr
+      WHEN 'wopr_slope_3yr' THEN wopr_slope_3yr
+      WHEN 'epa_slope_3yr' THEN epa_slope_3yr
+      WHEN 'efficiency_slope_3yr' THEN efficiency_slope_3yr
+      WHEN 'availability_rate_3yr' THEN availability_rate_3yr
+      WHEN 'weekly_volatility_3yr' THEN weekly_volatility_3yr
+      WHEN 'improving_3yr' THEN improving_3yr
+      WHEN 'declining_3yr' THEN declining_3yr
+      WHEN 'breakout_trajectory_3yr' THEN breakout_trajectory_3yr
+      ELSE NULL
+    END AS raw_feature_value
+  FROM mart
+  JOIN formula_weights weights
+    ON mart.position = weights.position
+),
+scored_features AS (
+  SELECT
+    *,
+    CASE
+      WHEN raw_feature_value IS NULL THEN NULL
+      WHEN feature_name IN ('points_per_game_slope_3yr', 'total_points_slope_3yr', 'opportunity_slope_3yr', 'receiving_usage_slope_3yr', 'epa_slope_3yr', 'efficiency_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 10.0))
+      WHEN feature_name IN ('target_share_slope_3yr', 'carry_share_slope_3yr', 'wopr_slope_3yr') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 250.0))
+      WHEN feature_name = 'availability_rate_3yr' THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name = 'weekly_volatility_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value * 10.0))
+      WHEN feature_name IN ('improving_3yr', 'breakout_trajectory_3yr') THEN IF(raw_feature_value > 0, 100.0, 0.0)
+      WHEN feature_name = 'declining_3yr' THEN IF(raw_feature_value > 0, 0.0, 100.0)
+      WHEN feature_name IN ('success_rate', 'cpoe', 'snap_share_proxy') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
+      WHEN feature_name IN ('actual_points', 'fantasy_points_ppr', 'recent_points_avg') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 35.0 * 100.0))
+      WHEN feature_name IN ('epa_per_play', 'passing_epa_per_play', 'receiving_epa', 'team_epa_per_play') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 25.0))
+      WHEN feature_name = 'air_yards' AND raw_feature_value BETWEEN 0 AND 1 THEN LEAST(100.0, GREATEST(0.0, raw_feature_value * 100.0))
+      WHEN feature_name IN ('air_yards', 'receiving_yards') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 150.0 * 100.0))
+      WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
+      ELSE LEAST(100.0, GREATEST(0.0, raw_feature_value))
+    END AS feature_score
+  FROM feature_values
+),
+candidate_scores AS (
+  SELECT
+    CASE {component_case} ELSE NULL END AS component_id,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    ANY_VALUE(player_name) AS player_name,
+    ANY_VALUE(team) AS team,
+    ANY_VALUE(target_fantasy_points) AS actual_points,
+    ANY_VALUE(actual_position_rank) AS actual_position_rank,
+    ANY_VALUE(actual_overall_rank) AS actual_overall_rank,
+    ANY_VALUE(value_over_replacement) AS value_over_replacement,
+    SAFE_DIVIDE(SUM(feature_score * weight), SUM(IF(feature_score IS NULL, 0, weight))) AS predicted_score,
+    SAFE_DIVIDE(SUM(IF(feature_score IS NULL, weight, 0)), SUM(weight)) AS missing_input_rate
+  FROM scored_features
+  GROUP BY component_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position, player_id_internal
+)
+SELECT *
+FROM candidate_scores
+WHERE component_id IS NOT NULL
+  AND predicted_score IS NOT NULL
+""".strip()
+
+
+def build_ensemble_component_prediction_union_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_seasons: list[int] | tuple[int, ...] = (ENSEMBLE_TUNING_SEASON, ENSEMBLE_HOLDOUT_SEASON),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    formula_sql = build_ensemble_formula_component_prediction_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+        league_type_id=league_type_id,
+        roster_format_id=roster_format_id,
+    )
+    bqml_specs = [
+        spec
+        for spec in bqml_model_specs(include_boosted_tree=False, include_random_forest=False)
+        if str(spec["candidate_family"]) in BQML_COMPONENT_SPECS
+    ]
+    bqml_sql = build_bqml_prediction_union_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        specs=bqml_specs,
+        target_seasons=target_seasons,
+    )
+    bqml_component_case = " ".join(
+        f"WHEN candidate_family = {_sql_string(family)} THEN {_sql_string(component_id)}"
+        for component_id, family in ENSEMBLE_BQML_COMPONENTS.items()
+    )
+    return f"""
+SELECT
+  component_id,
+  target_season,
+  target_week,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  position,
+  player_id_internal,
+  player_name,
+  team,
+  actual_points,
+  actual_position_rank,
+  actual_overall_rank,
+  value_over_replacement,
+  predicted_score,
+  missing_input_rate
+FROM ({formula_sql})
+UNION ALL
+SELECT
+  CASE {bqml_component_case} ELSE NULL END AS component_id,
+  target_season,
+  target_week,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  position,
+  player_id_internal,
+  player_name,
+  team,
+  actual_points,
+  actual_position_rank,
+  actual_overall_rank,
+  value_over_replacement,
+  predicted_score,
+  0.0 AS missing_input_rate
+FROM ({bqml_sql})
+WHERE candidate_family IN ({", ".join(_sql_string(family) for family in BQML_COMPONENT_SPECS)})
+""".strip()
+
+
+def build_ensemble_prediction_summary_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    specs: list[Mapping[str, Any]] | None = None,
+    target_seasons: list[int] | tuple[int, ...] = (ENSEMBLE_TUNING_SEASON, ENSEMBLE_HOLDOUT_SEASON),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    selected_specs = specs or ensemble_candidate_specs()
+    validate_ensemble_specs(selected_specs)
+    component_sql = build_ensemble_component_prediction_union_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+        league_type_id=league_type_id,
+        roster_format_id=roster_format_id,
+    )
+    weight_sql = _ensemble_weight_rows_sql(selected_specs)
+    season_start = min(int(season) for season in target_seasons)
+    season_end = max(int(season) for season in target_seasons)
+    return f"""
+WITH component_predictions AS (
+{component_sql}
+),
+ensemble_weights AS (
+  {weight_sql}
+),
+normalized_components AS (
+  SELECT
+    component_predictions.*,
+    CASE
+      WHEN MAX(predicted_score) OVER component_window = MIN(predicted_score) OVER component_window THEN 50.0
+      ELSE SAFE_DIVIDE(
+        predicted_score - MIN(predicted_score) OVER component_window,
+        NULLIF(MAX(predicted_score) OVER component_window - MIN(predicted_score) OVER component_window, 0)
+      ) * 100.0
+    END AS normalized_score
+  FROM component_predictions
+  WINDOW component_window AS (
+    PARTITION BY component_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+  )
+),
+ensemble_scores AS (
+  SELECT
+    weights.ensemble_id AS candidate_id,
+    weights.ensemble_family AS formula_version,
+    components.target_season,
+    components.target_week,
+    components.scoring_profile_id,
+    components.league_type_id,
+    components.roster_format_id,
+    components.position,
+    components.player_id_internal,
+    ANY_VALUE(components.player_name) AS player_name,
+    ANY_VALUE(components.team) AS team,
+    ANY_VALUE(components.actual_points) AS actual_points,
+    ANY_VALUE(components.actual_position_rank) AS actual_rank_position,
+    ANY_VALUE(components.actual_overall_rank) AS actual_overall_rank,
+    ANY_VALUE(components.value_over_replacement) AS value_over_replacement,
+    SAFE_DIVIDE(SUM(components.normalized_score * weights.weight), SUM(weights.weight)) AS predicted_score,
+    SUM(components.missing_input_rate * weights.weight) AS missing_input_rate,
+    COUNT(DISTINCT components.component_id) AS available_component_count
+  FROM normalized_components components
+  JOIN ensemble_weights weights
+    ON components.component_id = weights.component_id
+   AND (weights.position IS NULL OR components.position = weights.position)
+  GROUP BY weights.ensemble_id, weights.ensemble_family, components.target_season, components.target_week, components.scoring_profile_id, components.league_type_id, components.roster_format_id, components.position, components.player_id_internal
+),
+ranked AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_rank_position,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_overall_rank,
+    CASE position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 24 WHEN 'TE' THEN 12 ELSE 24 END AS default_top_n
+  FROM ensemble_scores
+  WHERE predicted_score IS NOT NULL
+),
+with_rank_metrics AS (
+  SELECT
+    *,
+    CASE
+      WHEN predicted_rank_position BETWEEN 1 AND 12 THEN '1-12'
+      WHEN predicted_rank_position BETWEEN 13 AND 24 THEN '13-24'
+      WHEN predicted_rank_position BETWEEN 25 AND 36 THEN '25-36'
+      WHEN predicted_rank_position BETWEEN 37 AND 60 THEN '37-60'
+      WHEN predicted_rank_position BETWEEN 61 AND 100 THEN '61-100'
+      ELSE '101+'
+    END AS predicted_pick_band,
+    CASE
+      WHEN actual_rank_position BETWEEN 1 AND 12 THEN '1-12'
+      WHEN actual_rank_position BETWEEN 13 AND 24 THEN '13-24'
+      WHEN actual_rank_position BETWEEN 25 AND 36 THEN '25-36'
+      WHEN actual_rank_position BETWEEN 37 AND 60 THEN '37-60'
+      WHEN actual_rank_position BETWEEN 61 AND 100 THEN '61-100'
+      ELSE '101+'
+    END AS actual_position_pick_band
+  FROM ranked
+),
+weekly_ideal AS (
+  SELECT
+    candidate_id,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+      ORDER BY actual_points DESC, player_id_internal
+    ) AS ideal_rank
+  FROM with_rank_metrics
+),
+weekly_metrics AS (
+  SELECT
+    scored.candidate_id,
+    scored.formula_version,
+    scored.target_season,
+    scored.target_week,
+    scored.scoring_profile_id,
+    scored.league_type_id,
+    scored.roster_format_id,
+    scored.position,
+    scored.default_top_n,
+    COUNT(*) AS source_row_count,
+    AVG(scored.missing_input_rate) AS missing_input_rate,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_rank_position <= scored.default_top_n), NULLIF(COUNTIF(scored.actual_rank_position <= scored.default_top_n), 0)) AS top_n_hit_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.actual_points, 0)), SUM(IF(scored.actual_rank_position <= scored.default_top_n, scored.actual_points, 0))) AS actual_points_captured_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)), SUM(IF(scored.actual_rank_position <= scored.default_top_n, scored.value_over_replacement, 0))) AS value_over_replacement_captured_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, GREATEST(scored.actual_points, 0) / (LN(scored.predicted_rank_position + 1) / LN(2)), 0)), SUM(IF(ideal.ideal_rank <= scored.default_top_n, GREATEST(scored.actual_points, 0) / (LN(ideal.ideal_rank + 1) / LN(2)), 0))) AS ndcg_at_k,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_rank_position <= scored.default_top_n), NULLIF(COUNTIF(scored.actual_rank_position <= scored.default_top_n), 0)) AS elite_recall_at_k,
+    AVG(IF(scored.predicted_pick_band = scored.actual_position_pick_band, 1.0, 0.0)) AS tier_accuracy,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_rank_position > scored.default_top_n * 2), NULLIF(COUNTIF(scored.predicted_rank_position <= scored.default_top_n), 0)) AS bust_rate,
+    SUM(IF(scored.actual_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)) - SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)) AS pick_band_regret
+  FROM with_rank_metrics scored
+  JOIN weekly_ideal ideal
+    ON scored.candidate_id = ideal.candidate_id
+   AND scored.target_season = ideal.target_season
+   AND scored.target_week = ideal.target_week
+   AND scored.scoring_profile_id = ideal.scoring_profile_id
+   AND scored.league_type_id = ideal.league_type_id
+   AND scored.roster_format_id = ideal.roster_format_id
+   AND scored.position = ideal.position
+   AND scored.player_id_internal = ideal.player_id_internal
+  GROUP BY scored.candidate_id, scored.formula_version, scored.target_season, scored.target_week, scored.scoring_profile_id, scored.league_type_id, scored.roster_format_id, scored.position, scored.default_top_n
+),
+pairwise AS (
+  SELECT
+    left_side.candidate_id,
+    left_side.scoring_profile_id,
+    left_side.league_type_id,
+    left_side.roster_format_id,
+    left_side.position,
+    SAFE_DIVIDE(COUNTIF(left_side.actual_points > right_side.actual_points), COUNT(*)) AS high_confidence_pairwise_win_rate
+  FROM with_rank_metrics left_side
+  JOIN with_rank_metrics right_side
+    ON left_side.candidate_id = right_side.candidate_id
+   AND left_side.target_season = right_side.target_season
+   AND left_side.target_week = right_side.target_week
+   AND left_side.scoring_profile_id = right_side.scoring_profile_id
+   AND left_side.league_type_id = right_side.league_type_id
+   AND left_side.roster_format_id = right_side.roster_format_id
+   AND left_side.position = right_side.position
+   AND left_side.predicted_rank_position < right_side.predicted_rank_position
+   AND ABS(left_side.predicted_score - right_side.predicted_score) >= 10
+  GROUP BY left_side.candidate_id, left_side.scoring_profile_id, left_side.league_type_id, left_side.roster_format_id, left_side.position
+),
+overall_pairwise AS (
+  SELECT
+    left_side.candidate_id,
+    left_side.scoring_profile_id,
+    left_side.league_type_id,
+    left_side.roster_format_id,
+    SAFE_DIVIDE(COUNTIF(left_side.actual_overall_rank < right_side.actual_overall_rank), COUNT(*)) AS overall_pairwise_draft_win_rate
+  FROM with_rank_metrics left_side
+  JOIN with_rank_metrics right_side
+    ON left_side.candidate_id = right_side.candidate_id
+   AND left_side.target_season = right_side.target_season
+   AND left_side.target_week = right_side.target_week
+   AND left_side.scoring_profile_id = right_side.scoring_profile_id
+   AND left_side.league_type_id = right_side.league_type_id
+   AND left_side.roster_format_id = right_side.roster_format_id
+   AND left_side.predicted_overall_rank < right_side.predicted_overall_rank
+   AND ABS(left_side.predicted_score - right_side.predicted_score) >= 10
+  WHERE (left_side.predicted_overall_rank <= 100 OR left_side.actual_overall_rank <= 100)
+    AND (right_side.predicted_overall_rank <= 100 OR right_side.actual_overall_rank <= 100)
+  GROUP BY left_side.candidate_id, left_side.scoring_profile_id, left_side.league_type_id, left_side.roster_format_id
+),
+summary AS (
+  SELECT
+    candidate_id,
+    ANY_VALUE(formula_version) AS formula_version,
+    position,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    SUM(source_row_count) AS sample_size,
+    AVG(top_n_hit_rate) AS top_n_hit_rate,
+    AVG(missing_input_rate) AS missing_input_rate,
+    AVG(actual_points_captured_rate) AS actual_points_captured_rate,
+    AVG(value_over_replacement_captured_rate) AS value_over_replacement_captured_rate,
+    AVG(ndcg_at_k) AS ndcg_at_k,
+    AVG(actual_points_captured_rate) AS value_captured_at_k,
+    AVG(elite_recall_at_k) AS elite_recall_at_k,
+    AVG(tier_accuracy) AS tier_accuracy,
+    AVG(bust_rate) AS bust_rate,
+    SUM(GREATEST(pick_band_regret, 0)) AS pick_band_regret
+  FROM weekly_metrics
+  GROUP BY candidate_id, position, scoring_profile_id, league_type_id, roster_format_id
+),
+rank_corr AS (
+  SELECT
+    candidate_id,
+    position,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    CORR(CAST(predicted_rank_position AS FLOAT64), CAST(actual_rank_position AS FLOAT64)) AS rank_correlation
+  FROM with_rank_metrics
+  GROUP BY candidate_id, position, scoring_profile_id, league_type_id, roster_format_id
+)
+SELECT
+  summary.candidate_id,
+  summary.formula_version,
+  summary.position,
+  summary.scoring_profile_id,
+  summary.league_type_id,
+  summary.roster_format_id,
+  'position_default_top_n' AS target_name,
+  summary.sample_size,
+  pairwise.high_confidence_pairwise_win_rate AS pairwise_win_rate,
+  summary.top_n_hit_rate,
+  rank_corr.rank_correlation,
+  CAST(NULL AS FLOAT64) AS mean_absolute_error,
+  summary.pick_band_regret AS regret_score,
+  summary.actual_points_captured_rate,
+  summary.missing_input_rate,
+  TO_JSON_STRING(STRUCT(
+    summary.ndcg_at_k AS ndcg_at_k,
+    summary.value_captured_at_k AS value_captured_at_k,
+    summary.elite_recall_at_k AS elite_recall_at_k,
+    summary.tier_accuracy AS tier_accuracy,
+    summary.bust_rate AS bust_rate,
+    summary.pick_band_regret AS pick_band_regret,
+    overall_pairwise.overall_pairwise_draft_win_rate AS overall_pairwise_draft_win_rate,
+    pairwise.high_confidence_pairwise_win_rate AS high_confidence_pairwise_win_rate,
+    summary.value_over_replacement_captured_rate AS value_over_replacement_captured_rate,
+    {season_start} AS season_start,
+    {season_end} AS season_end,
+    'ranking_backtest_candidate_summaries.metric_json' AS persistence_target
+  )) AS metric_json,
+  TO_JSON_STRING(STRUCT(
+    summary.missing_input_rate AS missing_input_rate,
+    'component scores are min-max normalized per component/week/profile/position before blending' AS missing_policy
+  )) AS missing_flags_json,
+  TO_JSON_STRING(STRUCT(
+    'ranking_backtest_feature_mart' AS feature_source_table,
+    'ML.PREDICT BQML prototype models' AS bqml_source,
+    'source_window_end_season < target_season' AS leakage_policy,
+    '2025 holdout not used for weight tuning' AS holdout_policy
+  )) AS source_freshness_json
+FROM summary
+LEFT JOIN rank_corr USING (candidate_id, position, scoring_profile_id, league_type_id, roster_format_id)
+LEFT JOIN pairwise USING (candidate_id, position, scoring_profile_id, league_type_id, roster_format_id)
+LEFT JOIN overall_pairwise USING (candidate_id, scoring_profile_id, league_type_id, roster_format_id)
+ORDER BY scoring_profile_id, position, candidate_id
+""".strip()
+
+
+def build_ensemble_prediction_summary_write_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_seasons: list[int] | tuple[int, ...] = (ENSEMBLE_TUNING_SEASON, ENSEMBLE_HOLDOUT_SEASON),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    backtest_run_id_prefix: str = ENSEMBLE_VERSION,
+    formula_version: str = ENSEMBLE_VERSION,
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    summary_sql = build_ensemble_prediction_summary_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+        league_type_id=league_type_id,
+        roster_format_id=roster_format_id,
+    )
+    run_table = table_id(project_id, dataset_id, "ranking_backtest_runs")
+    summary_table = table_id(project_id, dataset_id, "ranking_backtest_candidate_summaries")
+    season_start = min(int(season) for season in target_seasons)
+    season_end = max(int(season) for season in target_seasons)
+    return f"""
+CREATE TEMP TABLE ensemble_summary AS
+{summary_sql};
+
+DELETE FROM `{summary_table}`
+WHERE backtest_run_id IN (
+  SELECT CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id)
+  FROM (SELECT DISTINCT scoring_profile_id FROM ensemble_summary)
+);
+
+DELETE FROM `{run_table}`
+WHERE backtest_run_id IN (
+  SELECT CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id)
+  FROM (SELECT DISTINCT scoring_profile_id FROM ensemble_summary)
+);
+
+INSERT INTO `{run_table}` (
+  backtest_run_id,
+  formula_set_id,
+  formula_version,
+  candidate_count,
+  season_start,
+  season_end,
+  week_start,
+  week_end,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_definition_json,
+  input_tables_json,
+  dry_run,
+  status,
+  created_by,
+  created_at,
+  completed_at,
+  error_message,
+  notes
+)
+SELECT
+  CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id) AS backtest_run_id,
+  CAST(NULL AS STRING) AS formula_set_id,
+  {_sql_string(formula_version)} AS formula_version,
+  COUNT(DISTINCT candidate_id) AS candidate_count,
+  {season_start} AS season_start,
+  {season_end} AS season_end,
+  CAST(NULL AS INT64) AS week_start,
+  CAST(NULL AS INT64) AS week_end,
+  scoring_profile_id,
+  {_sql_string(league_type_id)} AS league_type_id,
+  {_sql_string(roster_format_id)} AS roster_format_id,
+  TO_JSON_STRING(STRUCT('position_default_top_n' AS target_name, 'ensemble draft utility metrics in metric_json' AS metric_contract)) AS target_definition_json,
+  TO_JSON_STRING(['ranking_backtest_feature_mart', 'BQML prototype models']) AS input_tables_json,
+  FALSE AS dry_run,
+  'complete' AS status,
+  {_sql_string(CREATED_BY)} AS created_by,
+  CURRENT_TIMESTAMP() AS created_at,
+  CURRENT_TIMESTAMP() AS completed_at,
+  CAST(NULL AS STRING) AS error_message,
+  'SQL-native ensemble summary-only tournament. No detail rows, no champions, no live rankings.' AS notes
+FROM ensemble_summary
+GROUP BY scoring_profile_id;
+
+INSERT INTO `{summary_table}` (
+  backtest_run_id,
+  candidate_id,
+  formula_version,
+  position,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_name,
+  sample_size,
+  pairwise_win_rate,
+  top_n_hit_rate,
+  rank_correlation,
+  mean_absolute_error,
+  regret_score,
+  actual_points_captured_rate,
+  missing_input_rate,
+  metric_json,
+  missing_flags_json,
+  source_freshness_json,
+  created_at
+)
+SELECT
+  CONCAT({_sql_string(backtest_run_id_prefix)}, '_', scoring_profile_id) AS backtest_run_id,
+  candidate_id,
+  formula_version,
+  position,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_name,
+  sample_size,
+  pairwise_win_rate,
+  top_n_hit_rate,
+  rank_correlation,
+  mean_absolute_error,
+  regret_score,
+  actual_points_captured_rate,
+  missing_input_rate,
+  metric_json,
+  missing_flags_json,
+  source_freshness_json,
+  CURRENT_TIMESTAMP() AS created_at
+FROM ensemble_summary;
+""".strip()
+
+
+def write_ensemble_prediction_summaries(
+    *,
+    client: Any,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    target_seasons: list[int] | tuple[int, ...] = (ENSEMBLE_TUNING_SEASON, ENSEMBLE_HOLDOUT_SEASON),
+    scoring_profile_ids: list[str] | tuple[str, ...] = DEFAULT_SCORING_PROFILES,
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    require_write_authorization(env)
+    sql = build_ensemble_prediction_summary_write_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_seasons=target_seasons,
+        scoring_profile_ids=scoring_profile_ids,
+        positions=positions,
+    )
+    job = client.query(sql)
+    job.result()
+    return {
+        "write": True,
+        "summary_only": True,
+        "detail_rows_written": 0,
+        "job_id": getattr(job, "job_id", None),
+    }
 
 
 def _formula_weight_rows_sql(candidate_rows: list[Mapping[str, Any]]) -> str:

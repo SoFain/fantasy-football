@@ -1446,6 +1446,74 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertIn("ranking_bqml_boosted_tree_vor_v0", model_names)
         self.assertNotIn("ranking_bqml_random_forest_vor_v0", model_names)
 
+    def test_ensemble_specs_are_convex_and_keep_bqml_bounded(self):
+        specs = rfb.ensemble_candidate_specs()
+        rfb.validate_ensemble_specs(specs)
+
+        for spec in specs:
+            weight_groups = []
+            if "weights" in spec:
+                weight_groups.append(spec["weights"])
+            weight_groups.extend(dict(spec.get("position_weights", {})).values())
+            for weights in weight_groups:
+                self.assertAlmostEqual(sum(weights.values()), 1.0)
+                for component_id, weight in weights.items():
+                    self.assertGreaterEqual(weight, 0.0)
+                    if component_id.startswith("bqml_"):
+                        self.assertLessEqual(weight, 0.50)
+
+    def test_ensemble_specs_do_not_tune_on_holdout(self):
+        for spec in rfb.ensemble_candidate_specs():
+            self.assertEqual(spec["holdout_season"], 2025)
+            self.assertLess(spec["tuned_on_season"], spec["holdout_season"])
+
+    def test_ensemble_validation_rejects_invalid_weights(self):
+        bad_specs = [
+            {
+                "ensemble_id": "bad",
+                "ensemble_family": "bad",
+                "tuned_on_season": 2024,
+                "holdout_season": 2025,
+                "weights": {"current_pigskin": 0.25, "bqml_logistic_elite": 0.80},
+            }
+        ]
+
+        with self.assertRaises(rfb.FormulaValidationError):
+            rfb.validate_ensemble_specs(bad_specs)
+
+    def test_ensemble_summary_sql_is_sql_native_and_safe(self):
+        sql = rfb.build_ensemble_prediction_summary_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("ML.PREDICT", sql)
+        self.assertIn("normalized_score", sql)
+        self.assertIn("2025 holdout not used for weight tuning", sql)
+        self.assertIn("ranking_backtest_feature_mart", sql)
+        self.assertNotIn("insert ", lowered)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+
+    def test_ensemble_summary_write_is_summary_only_and_gated(self):
+        fake = _FakeClient()
+
+        with self.assertRaisesRegex(PermissionError, rfb.WRITE_GATE):
+            rfb.write_ensemble_prediction_summaries(client=fake, project_id="p", dataset_id="d", env={})
+
+        rfb.write_ensemble_prediction_summaries(
+            client=fake,
+            project_id="p",
+            dataset_id="d",
+            env={rfb.WRITE_GATE: "true"},
+        )
+
+        queried_sql = fake.queries[0][0].lower()
+        self.assertIn("insert into `p.d.ranking_backtest_runs`", queried_sql)
+        self.assertIn("insert into `p.d.ranking_backtest_candidate_summaries`", queried_sql)
+        self.assertNotIn("ranking_backtest_results", queried_sql)
+        self.assertNotIn("ranking_formula_champions", queried_sql)
+        self.assertNotIn("analytics_pigskin_rankings", queried_sql)
+
     def _formula_set(self):
         return {
             "formula_set_id": "set-1",

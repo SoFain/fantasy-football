@@ -30,6 +30,14 @@ The likely winner is an ensemble, not one magic formula.
 
 Current Pigskin remains the live baseline. Simple projection and BigQuery ML baselines are useful challengers, but neither should replace the baseline without owner review and a clear holdout win. Future research should compare constrained ensembles through the SQL-native evaluator and keep champion activation separate from experimentation.
 
+## Phase 32.11 Ensemble Finding
+
+The first constrained ensemble prototype did not produce a replacement signal.
+
+It proved the SQL-native evaluator can blend normalized current Pigskin, simple projection, scarcity-adjusted draft value, BQML logistic elite, and BQML linear points without reviving the old Python tournament path. It also showed the current ingredients are too correlated. Reweighting them helped some top-N slices, but it weakened high-confidence and overall pairwise behavior.
+
+Next useful work is feature work, not more tiny weight-grid tuning. The warehouse needs better opportunity and route-level signals before another ensemble pass is likely to matter.
+
 ## Safety Rules
 
 - No live ranking regeneration during research phases.
