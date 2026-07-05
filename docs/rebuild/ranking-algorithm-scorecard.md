@@ -667,6 +667,90 @@ Decision:
 
 Owner-review status: RB can be reviewed as a challenger concept, not as a replacement. WR needs either injury/depth role context, direct NGS receiving/rushing ingest, or a narrower blend that preserves current Pigskin pairwise strength.
 
+## Phase 32.18 Role Context, First-Down Proxy, and VOR Sensitivity
+
+Phase 32.18 added first-down PBP proxy fields and tested a capped five-candidate diagnostic family:
+
+- `injury_depth_role_diagnostic_v0`
+- `first_down_pbp_proxy_diagnostic_v0`
+- `gemini31_vor_baseline_sensitivity_v0`
+- `rb_role_pbp_context_blend_v0`
+- `wr_chain_mover_context_blend_v0`
+
+Injury/depth source audit:
+
+| Source | Rows | Decision |
+|---|---:|---|
+| `raw_nflverse_injuries` | 0 | Insufficient for role scoring. Do not fabricate injury burden. |
+| `raw_nflverse_depth_charts` | 0 | Insufficient for depth role scoring. Do not fabricate starter or depth rank. |
+
+First-down proxy implementation:
+
+| Layer | Result |
+|---|---|
+| Migration | `0034__first_down_pbp_proxy_features.sql` applied |
+| Derived PBP rows | 65,358 |
+| Receiving first-down rows | 53,018 |
+| Rushing first-down rows | 27,023 |
+| Passing first-down rows | 7,961 |
+| Feature mart refresh | 156,244 rows rebuilt across 2017-2025, four profiles, QB/RB/WR/TE |
+| Summary write | one PPR run, five candidate summaries, zero detail rows |
+
+2024 validation, PPR:
+
+| Candidate | Position | Pairwise | Top-N | Captured points | Missing |
+|---|---|---:|---:|---:|---:|
+| `gemini31_vor_baseline_sensitivity_v0` | QB | 0.6924 | 0.5278 | 0.7649 | 0.0000 |
+| `injury_depth_role_diagnostic_v0` | RB | 0.7680 | 0.6389 | 0.7857 | 0.5000 |
+| `rb_role_pbp_context_blend_v0` | RB | 0.7705 | 0.6343 | 0.7819 | 0.1263 |
+| `first_down_pbp_proxy_diagnostic_v0` | WR | 0.7400 | 0.4444 | 0.6755 | 0.0020 |
+| `wr_chain_mover_context_blend_v0` | WR | 0.7354 | 0.4468 | 0.6802 | 0.0626 |
+
+2025 holdout, PPR:
+
+| Candidate | Position | Pairwise | Top-N | Captured points | Missing |
+|---|---|---:|---:|---:|---:|
+| `gemini31_vor_baseline_sensitivity_v0` | QB | 0.6951 | 0.8380 | 0.8862 | 0.0000 |
+| `injury_depth_role_diagnostic_v0` | RB | 0.7943 | 1.0000 | 1.0000 | 0.5000 |
+| `rb_role_pbp_context_blend_v0` | RB | 0.8146 | 1.0000 | 1.0000 | 0.1226 |
+| `first_down_pbp_proxy_diagnostic_v0` | WR | 0.7489 | 0.8333 | 0.8891 | 0.0018 |
+| `wr_chain_mover_context_blend_v0` | WR | 0.7441 | 0.8403 | 0.8984 | 0.0621 |
+
+2017-2025 aggregate, PPR:
+
+| Candidate | Position | Pairwise | Top-N | Captured points | Missing |
+|---|---|---:|---:|---:|---:|
+| `gemini31_vor_baseline_sensitivity_v0` | QB | 0.6923 | 0.5781 | 0.7909 | 0.0022 |
+| `injury_depth_role_diagnostic_v0` | RB | 0.7333 | 0.6321 | 0.7704 | 0.5000 |
+| `rb_role_pbp_context_blend_v0` | RB | 0.7342 | 0.6210 | 0.7598 | 0.1366 |
+| `first_down_pbp_proxy_diagnostic_v0` | WR | 0.7456 | 0.5181 | 0.7259 | 0.0098 |
+| `wr_chain_mover_context_blend_v0` | WR | 0.7395 | 0.5133 | 0.7212 | 0.0716 |
+
+Baseline comparison, 2024-2025 PPR:
+
+| Position | Current Pigskin captured | Best Phase 32.18 captured | Current Pigskin pairwise | Best Phase 32.18 pairwise | Read |
+|---|---:|---:|---:|---:|---|
+| QB | 0.8256 | 0.7909 | 0.6929 | 0.6923 | VOR diagnostic does not beat current |
+| RB | 0.8820 | 1.0000 on 2025 only, 0.7598 aggregate | 0.7859 | 0.7342 aggregate | Role/PBP blend does not beat current aggregate |
+| WR | 0.7811 | 0.8984 on 2025 only, 0.7259 aggregate | 0.7834 | 0.7456 aggregate | First-down proxy helps short-window captured points, not pairwise or aggregate |
+
+VOR baseline sensitivity, 2024-2025 PPR:
+
+| Policy | VOR captured | Top-24 hit | Top-50 hit | Top-100 hit | Pick-band regret |
+|---|---:|---:|---:|---:|---:|
+| `current_sql_native_qb12_rb24_wr24_te12` | 0.8403 | 0.3461 | 0.5539 | 0.7937 | 2402.58 |
+| `middle_qb12_rb30_wr42_te12` | 0.7896 | 0.3461 | 0.5539 | 0.7937 | 3516.88 |
+| `gemini_style_qb15_rb36_wr55_te12` | 0.7805 | 0.3461 | 0.5539 | 0.7937 | 4319.56 |
+
+Decision:
+
+- Injury/depth role scoring is blocked by empty raw source tables.
+- First-down PBP proxies are real enough to keep in the feature mart and use as WR/RB components.
+- The first-down proxy family does not beat current Pigskin on aggregate or pairwise.
+- Gemini-style VOR baselines changed VOR captured and regret materially, but in the wrong direction for this slice.
+- No owner-review challenger is strong enough for champion consideration.
+- No champion formula was activated. Live rankings remain unchanged.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:

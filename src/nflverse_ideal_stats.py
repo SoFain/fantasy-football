@@ -464,6 +464,12 @@ INSERT INTO `{target_table}` (
   high_value_rush_xfp,
   rushing_touchdown_xfp,
   rushing_xfp_share,
+  receiving_first_down_exp_pbp,
+  rushing_first_down_exp_pbp,
+  passing_first_down_exp_pbp,
+  high_value_first_down_opportunity_score,
+  receiving_chain_mover_score,
+  rushing_chain_mover_score,
   high_value_xfp_score,
   red_zone_xfp_score,
   goal_line_xfp_score,
@@ -506,6 +512,7 @@ WITH pass_receiver AS (
       0.0
     )) AS high_value_target_xfp,
     SUM(COALESCE(pass_touchdown_exp, 0.0) * 6.0) AS receiving_touchdown_xfp,
+    SUM(COALESCE(pass_first_down_exp, 0.0)) AS receiving_first_down_exp_pbp,
     MAX(loaded_at) AS source_updated_at
   FROM `{pass_table}`
   WHERE season BETWEEN @season_start AND @season_end
@@ -528,6 +535,7 @@ pass_passer AS (
       - COALESCE(pass_interception_exp, 0.0) * 2.0
       + COALESCE(pass_first_down_exp, 0.0) * 0.5
     ) AS passing_xfp_pbp,
+    SUM(COALESCE(pass_first_down_exp, 0.0)) AS passing_first_down_exp_pbp,
     MAX(loaded_at) AS source_updated_at
   FROM `{pass_table}`
   WHERE season BETWEEN @season_start AND @season_end
@@ -568,6 +576,7 @@ rush_player AS (
       0.0
     )) AS high_value_rush_xfp,
     SUM(COALESCE(rushing_td_exp, rush_touchdown_exp, 0.0) * 6.0) AS rushing_touchdown_xfp,
+    SUM(COALESCE(rushing_fd_exp, rush_first_down_exp, 0.0)) AS rushing_first_down_exp_pbp,
     MAX(loaded_at) AS source_updated_at
   FROM `{rush_table}`
   WHERE season BETWEEN @season_start AND @season_end
@@ -591,8 +600,11 @@ combined AS (
     goal_line_target_xfp,
     high_value_target_xfp,
     receiving_touchdown_xfp,
+    receiving_first_down_exp_pbp,
     CAST(NULL AS FLOAT64) AS passing_xfp_pbp,
+    CAST(NULL AS FLOAT64) AS passing_first_down_exp_pbp,
     CAST(NULL AS FLOAT64) AS rushing_xfp_pbp,
+    CAST(NULL AS FLOAT64) AS rushing_first_down_exp_pbp,
     CAST(NULL AS FLOAT64) AS red_zone_rush_xfp,
     CAST(NULL AS FLOAT64) AS goal_line_rush_xfp,
     CAST(NULL AS FLOAT64) AS high_value_rush_xfp,
@@ -615,7 +627,10 @@ combined AS (
     CAST(NULL AS FLOAT64),
     CAST(NULL AS FLOAT64),
     CAST(NULL AS FLOAT64),
+    CAST(NULL AS FLOAT64),
     passing_xfp_pbp,
+    passing_first_down_exp_pbp,
+    CAST(NULL AS FLOAT64),
     CAST(NULL AS FLOAT64),
     CAST(NULL AS FLOAT64),
     CAST(NULL AS FLOAT64),
@@ -640,7 +655,10 @@ combined AS (
     CAST(NULL AS FLOAT64),
     CAST(NULL AS FLOAT64),
     CAST(NULL AS FLOAT64),
+    CAST(NULL AS FLOAT64),
+    CAST(NULL AS FLOAT64),
     rushing_xfp_pbp,
+    rushing_first_down_exp_pbp,
     red_zone_rush_xfp,
     goal_line_rush_xfp,
     high_value_rush_xfp,
@@ -664,8 +682,11 @@ weekly AS (
     SUM(goal_line_target_xfp) AS goal_line_target_xfp,
     SUM(high_value_target_xfp) AS high_value_target_xfp,
     SUM(receiving_touchdown_xfp) AS receiving_touchdown_xfp,
+    SUM(receiving_first_down_exp_pbp) AS receiving_first_down_exp_pbp,
     SUM(passing_xfp_pbp) AS passing_xfp_pbp,
+    SUM(passing_first_down_exp_pbp) AS passing_first_down_exp_pbp,
     SUM(rushing_xfp_pbp) AS rushing_xfp_pbp,
+    SUM(rushing_first_down_exp_pbp) AS rushing_first_down_exp_pbp,
     SUM(red_zone_rush_xfp) AS red_zone_rush_xfp,
     SUM(goal_line_rush_xfp) AS goal_line_rush_xfp,
     SUM(high_value_rush_xfp) AS high_value_rush_xfp,
@@ -709,6 +730,16 @@ SELECT
   weekly.high_value_rush_xfp,
   weekly.rushing_touchdown_xfp,
   SAFE_DIVIDE(weekly.rushing_xfp_pbp, NULLIF(team_week_totals.team_rushing_xfp_pbp, 0)) AS rushing_xfp_share,
+  weekly.receiving_first_down_exp_pbp,
+  weekly.rushing_first_down_exp_pbp,
+  weekly.passing_first_down_exp_pbp,
+  LEAST(100.0, GREATEST(0.0, (
+    COALESCE(weekly.receiving_first_down_exp_pbp, 0.0)
+    + COALESCE(weekly.rushing_first_down_exp_pbp, 0.0)
+    + COALESCE(weekly.passing_first_down_exp_pbp, 0.0)
+  ) * 10.0)) AS high_value_first_down_opportunity_score,
+  LEAST(100.0, GREATEST(0.0, COALESCE(weekly.receiving_first_down_exp_pbp, 0.0) * 12.0)) AS receiving_chain_mover_score,
+  LEAST(100.0, GREATEST(0.0, COALESCE(weekly.rushing_first_down_exp_pbp, 0.0) * 12.0)) AS rushing_chain_mover_score,
   LEAST(100.0, GREATEST(0.0, (COALESCE(weekly.high_value_target_xfp, 0.0) + COALESCE(weekly.high_value_rush_xfp, 0.0)) * 8.0)) AS high_value_xfp_score,
   LEAST(100.0, GREATEST(0.0, (COALESCE(weekly.red_zone_target_xfp, 0.0) + COALESCE(weekly.red_zone_rush_xfp, 0.0)) * 8.0)) AS red_zone_xfp_score,
   LEAST(100.0, GREATEST(0.0, (COALESCE(weekly.goal_line_target_xfp, 0.0) + COALESCE(weekly.goal_line_rush_xfp, 0.0)) * 12.0)) AS goal_line_xfp_score,
@@ -722,6 +753,9 @@ SELECT
     weekly.receiving_xfp_pbp IS NULL AS receiving_pbp_missing,
     weekly.rushing_xfp_pbp IS NULL AS rushing_pbp_missing,
     weekly.passing_xfp_pbp IS NULL AS passing_pbp_missing,
+    weekly.receiving_first_down_exp_pbp IS NULL AS receiving_first_down_proxy_missing,
+    weekly.rushing_first_down_exp_pbp IS NULL AS rushing_first_down_proxy_missing,
+    weekly.passing_first_down_exp_pbp IS NULL AS passing_first_down_proxy_missing,
     FALSE AS yardline_context_unavailable,
     TRUE AS exact_ffopportunity_fantasy_points_exp_unavailable,
     'derived from source expected component columns, not official fantasy xFP' AS xfp_proxy_policy

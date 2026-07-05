@@ -53,6 +53,11 @@ DRAFT_UTILITY_METRIC_CONTRACT = {
     "high_confidence_pairwise_win_rate": "Pairwise win rate when predicted scores differ by at least ten points.",
     "value_over_replacement_captured_rate": "Positive VOR captured by predicted top K divided by ideal actual top K VOR.",
 }
+VOR_BASELINE_POLICIES = {
+    "current_sql_native_qb12_rb24_wr24_te12": {"QB": 12, "RB": 24, "WR": 24, "TE": 12},
+    "gemini_style_qb15_rb36_wr55_te12": {"QB": 15, "RB": 36, "WR": 55, "TE": 12},
+    "middle_qb12_rb30_wr42_te12": {"QB": 12, "RB": 30, "WR": 42, "TE": 12},
+}
 BQML_TRAIN_SEASONS = (2017, 2023)
 BQML_VALIDATION_SEASON = 2024
 BQML_HOLDOUT_SEASON = 2025
@@ -128,6 +133,12 @@ BQML_NUMERIC_PREDICTORS = (
     "receiving_xfp_share_pbp_3yr",
     "rushing_xfp_share_pbp_3yr",
     "opportunity_quality_score_3yr",
+    "receiving_first_down_exp_pbp_3yr",
+    "rushing_first_down_exp_pbp_3yr",
+    "passing_first_down_exp_pbp_3yr",
+    "high_value_first_down_opportunity_score_3yr",
+    "receiving_chain_mover_score_3yr",
+    "rushing_chain_mover_score_3yr",
 )
 BQML_CATEGORICAL_PREDICTORS = ("scoring_profile_id", "position")
 ENSEMBLE_REFERENCE_SEASONS = tuple(range(2017, 2024))
@@ -231,11 +242,20 @@ PBP_XFP_FEATURES = {
     "rushing_xfp_share_pbp_3yr",
     "opportunity_quality_score_3yr",
 }
+FIRST_DOWN_PBP_PROXY_FEATURES = {
+    "receiving_first_down_exp_pbp_3yr",
+    "rushing_first_down_exp_pbp_3yr",
+    "passing_first_down_exp_pbp_3yr",
+    "high_value_first_down_opportunity_score_3yr",
+    "receiving_chain_mover_score_3yr",
+    "rushing_chain_mover_score_3yr",
+}
 POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "QB": COMMON_FEATURES
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
     | PBP_XFP_FEATURES
+    | FIRST_DOWN_PBP_PROXY_FEATURES
     | {
         "passing_epa_per_play",
         "passing_success_rate",
@@ -249,6 +269,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
     | PBP_XFP_FEATURES
+    | FIRST_DOWN_PBP_PROXY_FEATURES
     | {
         "carries",
         "targets",
@@ -261,6 +282,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
     | PBP_XFP_FEATURES
+    | FIRST_DOWN_PBP_PROXY_FEATURES
     | {
         "targets",
         "air_yards",
@@ -273,6 +295,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | TREND_FEATURES
     | IDEAL_STAT_FEATURES
     | PBP_XFP_FEATURES
+    | FIRST_DOWN_PBP_PROXY_FEATURES
     | {
         "targets",
         "air_yards",
@@ -376,6 +399,12 @@ FEATURE_SOURCE_MAP = {
     "receiving_xfp_share_pbp_3yr": "receiving_xfp_share_pbp_3yr",
     "rushing_xfp_share_pbp_3yr": "rushing_xfp_share_pbp_3yr",
     "opportunity_quality_score_3yr": "opportunity_quality_score_3yr",
+    "receiving_first_down_exp_pbp_3yr": "receiving_first_down_exp_pbp_3yr",
+    "rushing_first_down_exp_pbp_3yr": "rushing_first_down_exp_pbp_3yr",
+    "passing_first_down_exp_pbp_3yr": "passing_first_down_exp_pbp_3yr",
+    "high_value_first_down_opportunity_score_3yr": "high_value_first_down_opportunity_score_3yr",
+    "receiving_chain_mover_score_3yr": "receiving_chain_mover_score_3yr",
+    "rushing_chain_mover_score_3yr": "rushing_chain_mover_score_3yr",
 }
 FORBIDDEN_TABLE_REFERENCES = {
     "weekly_metrics",
@@ -2531,6 +2560,12 @@ INSERT INTO `{mart_table}` (
     receiving_xfp_share_pbp_3yr,
     rushing_xfp_share_pbp_3yr,
     opportunity_quality_score_3yr,
+    receiving_first_down_exp_pbp_3yr,
+    rushing_first_down_exp_pbp_3yr,
+    passing_first_down_exp_pbp_3yr,
+    high_value_first_down_opportunity_score_3yr,
+    receiving_chain_mover_score_3yr,
+    rushing_chain_mover_score_3yr,
     pbp_xfp_missing_flags_json,
     target_fantasy_points,
     actual_position_rank,
@@ -2621,6 +2656,12 @@ season_features AS (
         AVG(pbp_ideal.receiving_xfp_share) AS receiving_xfp_share_pbp,
         AVG(pbp_ideal.rushing_xfp_share) AS rushing_xfp_share_pbp,
         AVG(pbp_ideal.opportunity_quality_score) AS pbp_opportunity_quality_score,
+        AVG(pbp_ideal.receiving_first_down_exp_pbp) AS receiving_first_down_exp_pbp,
+        AVG(pbp_ideal.rushing_first_down_exp_pbp) AS rushing_first_down_exp_pbp,
+        AVG(pbp_ideal.passing_first_down_exp_pbp) AS passing_first_down_exp_pbp,
+        AVG(pbp_ideal.high_value_first_down_opportunity_score) AS high_value_first_down_opportunity_score,
+        AVG(pbp_ideal.receiving_chain_mover_score) AS receiving_chain_mover_score,
+        AVG(pbp_ideal.rushing_chain_mover_score) AS rushing_chain_mover_score,
         AVG(IF(opportunity.spike_week_flag, 1.0, 0.0)) AS spike_week_rate,
         AVG(IF(opportunity.bust_week_flag, 1.0, 0.0)) AS bust_week_rate,
         AVG(IF(opportunity.elite_week_flag, 1.0, 0.0)) AS elite_week_rate,
@@ -2733,6 +2774,12 @@ source_features AS (
         AVG(receiving_xfp_share_pbp) AS receiving_xfp_share_pbp_3yr,
         AVG(rushing_xfp_share_pbp) AS rushing_xfp_share_pbp_3yr,
         AVG(pbp_opportunity_quality_score) AS opportunity_quality_score_3yr,
+        AVG(receiving_first_down_exp_pbp) AS receiving_first_down_exp_pbp_3yr,
+        AVG(rushing_first_down_exp_pbp) AS rushing_first_down_exp_pbp_3yr,
+        AVG(passing_first_down_exp_pbp) AS passing_first_down_exp_pbp_3yr,
+        AVG(high_value_first_down_opportunity_score) AS high_value_first_down_opportunity_score_3yr,
+        AVG(receiving_chain_mover_score) AS receiving_chain_mover_score_3yr,
+        AVG(rushing_chain_mover_score) AS rushing_chain_mover_score_3yr,
         AVG(spike_week_rate) AS spike_week_rate_3yr,
         AVG(bust_week_rate) AS bust_week_rate_3yr,
         AVG(elite_week_rate) AS elite_week_rate_3yr,
@@ -2886,6 +2933,12 @@ with_source AS (
         source.receiving_xfp_share_pbp_3yr,
         source.rushing_xfp_share_pbp_3yr,
         source.opportunity_quality_score_3yr,
+        source.receiving_first_down_exp_pbp_3yr,
+        source.rushing_first_down_exp_pbp_3yr,
+        source.passing_first_down_exp_pbp_3yr,
+        source.high_value_first_down_opportunity_score_3yr,
+        source.receiving_chain_mover_score_3yr,
+        source.rushing_chain_mover_score_3yr,
         target.target_fantasy_points,
         source.metrics_source_freshness_json,
         source.metrics_missing_flags,
@@ -3011,6 +3064,12 @@ SELECT
     receiving_xfp_share_pbp_3yr,
     rushing_xfp_share_pbp_3yr,
     opportunity_quality_score_3yr,
+    receiving_first_down_exp_pbp_3yr,
+    rushing_first_down_exp_pbp_3yr,
+    passing_first_down_exp_pbp_3yr,
+    high_value_first_down_opportunity_score_3yr,
+    receiving_chain_mover_score_3yr,
+    rushing_chain_mover_score_3yr,
     pbp_missing_flags AS pbp_xfp_missing_flags_json,
     target_fantasy_points,
     actual_position_rank,
@@ -3055,6 +3114,12 @@ SELECT
         red_zone_xfp_score_3yr IS NULL AS red_zone_xfp_score_3yr_missing,
         goal_line_xfp_score_3yr IS NULL AS goal_line_xfp_score_3yr_missing,
         opportunity_quality_score_3yr IS NULL AS opportunity_quality_score_3yr_missing,
+        receiving_first_down_exp_pbp_3yr IS NULL AS receiving_first_down_exp_pbp_3yr_missing,
+        rushing_first_down_exp_pbp_3yr IS NULL AS rushing_first_down_exp_pbp_3yr_missing,
+        passing_first_down_exp_pbp_3yr IS NULL AS passing_first_down_exp_pbp_3yr_missing,
+        high_value_first_down_opportunity_score_3yr IS NULL AS high_value_first_down_opportunity_score_3yr_missing,
+        receiving_chain_mover_score_3yr IS NULL AS receiving_chain_mover_score_3yr_missing,
+        rushing_chain_mover_score_3yr IS NULL AS rushing_chain_mover_score_3yr_missing,
         metrics_missing_flags AS source_missing_flags,
         opportunity_missing_flags AS opportunity_missing_flags,
         ideal_missing_flags AS ideal_missing_flags,
@@ -3457,6 +3522,12 @@ feature_values AS (
       WHEN 'receiving_xfp_share_pbp_3yr' THEN receiving_xfp_share_pbp_3yr
       WHEN 'rushing_xfp_share_pbp_3yr' THEN rushing_xfp_share_pbp_3yr
       WHEN 'opportunity_quality_score_3yr' THEN opportunity_quality_score_3yr
+      WHEN 'receiving_first_down_exp_pbp_3yr' THEN receiving_first_down_exp_pbp_3yr
+      WHEN 'rushing_first_down_exp_pbp_3yr' THEN rushing_first_down_exp_pbp_3yr
+      WHEN 'passing_first_down_exp_pbp_3yr' THEN passing_first_down_exp_pbp_3yr
+      WHEN 'high_value_first_down_opportunity_score_3yr' THEN high_value_first_down_opportunity_score_3yr
+      WHEN 'receiving_chain_mover_score_3yr' THEN receiving_chain_mover_score_3yr
+      WHEN 'rushing_chain_mover_score_3yr' THEN rushing_chain_mover_score_3yr
       ELSE NULL
     END AS raw_feature_value
   FROM mart
@@ -3492,6 +3563,7 @@ scored_features AS (
       WHEN feature_name IN ('air_yards', 'receiving_yards') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 150.0 * 100.0))
       WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
       WHEN feature_name IN ('receiving_xfp_pbp_3yr', 'rushing_xfp_pbp_3yr', 'passing_xfp_pbp_3yr', 'high_value_target_xfp_score_3yr', 'high_value_rush_xfp_score_3yr') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 18.0 * 100.0))
+      WHEN feature_name IN ('receiving_first_down_exp_pbp_3yr', 'rushing_first_down_exp_pbp_3yr', 'passing_first_down_exp_pbp_3yr') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 8.0 * 100.0))
       ELSE LEAST(100.0, GREATEST(0.0, raw_feature_value))
     END AS feature_score
   FROM feature_values
@@ -3783,6 +3855,155 @@ GROUP BY
   summary.bust_rate,
   summary.value_over_replacement_captured_rate
 ORDER BY scoring_profile_id, position, candidate_id
+""".strip()
+
+
+def _vor_policy_rows_sql(policies: Mapping[str, Mapping[str, int]]) -> str:
+    rows: list[str] = []
+    for policy_name, thresholds in policies.items():
+        for position in POSITIONS:
+            rows.append(
+                "SELECT "
+                f"{_sql_string(policy_name)} AS policy_name, "
+                f"{_sql_string(position)} AS position, "
+                f"{int(thresholds[position])} AS replacement_rank"
+            )
+    return "\nUNION ALL\n".join(rows)
+
+
+def build_vor_baseline_sensitivity_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_seasons: list[int] | tuple[int, ...] = (2024, 2025),
+    scoring_profile_ids: list[str] | tuple[str, ...] = ("ppr",),
+    positions: list[str] | tuple[str, ...] = POSITIONS,
+    policies: Mapping[str, Mapping[str, int]] | None = None,
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
+    selected_policies = policies or VOR_BASELINE_POLICIES
+    target_season_sql = ", ".join(str(int(season)) for season in sorted({int(season) for season in target_seasons}))
+    profile_sql = ", ".join(_sql_string(profile) for profile in scoring_profile_ids)
+    position_sql = ", ".join(_sql_string(_normalize_position(position)) for position in positions)
+    return f"""
+WITH policies AS (
+  {_vor_policy_rows_sql(selected_policies)}
+),
+mart AS (
+  SELECT *
+  FROM `{mart_table}`
+  WHERE target_season IN ({target_season_sql})
+    AND scoring_profile_id IN ({profile_sql})
+    AND position IN ({position_sql})
+    AND league_type_id = {_sql_string(league_type_id)}
+    AND roster_format_id = {_sql_string(roster_format_id)}
+    AND source_window_end_season < target_season
+),
+scored AS (
+  SELECT
+    *,
+    SAFE_DIVIDE(
+      COALESCE(analytical_grade_proxy, 0.0) * 0.55
+      + COALESCE(opportunity_score_proxy, 0.0) * 0.15
+      + COALESCE(efficiency_score_proxy, 0.0) * 0.10
+      + COALESCE(role_stability_score, 0.0) * 0.10
+      + COALESCE(profile_points_score, 0.0) * 0.10,
+      (IF(analytical_grade_proxy IS NULL, 0.0, 0.55)
+       + IF(opportunity_score_proxy IS NULL, 0.0, 0.15)
+       + IF(efficiency_score_proxy IS NULL, 0.0, 0.10)
+       + IF(role_stability_score IS NULL, 0.0, 0.10)
+       + IF(profile_points_score IS NULL, 0.0, 0.10))
+    ) AS current_pigskin_proxy_score
+  FROM mart
+),
+ranked AS (
+  SELECT
+    policies.policy_name,
+    policies.replacement_rank,
+    scored.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY policies.policy_name, scored.target_season, scored.target_week, scored.scoring_profile_id, scored.league_type_id, scored.roster_format_id, scored.position
+      ORDER BY scored.target_fantasy_points DESC, scored.player_id_internal
+    ) AS policy_actual_position_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY policies.policy_name, scored.target_season, scored.target_week, scored.scoring_profile_id, scored.league_type_id, scored.roster_format_id
+      ORDER BY scored.current_pigskin_proxy_score DESC, scored.player_id_internal
+    ) AS predicted_overall_rank
+  FROM scored
+  JOIN policies
+    ON scored.position = policies.position
+  WHERE scored.current_pigskin_proxy_score IS NOT NULL
+),
+with_replacement AS (
+  SELECT
+    *,
+    MAX(IF(policy_actual_position_rank = replacement_rank, target_fantasy_points, NULL)) OVER (
+      PARTITION BY policy_name, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+    ) AS policy_replacement_points
+  FROM ranked
+),
+with_vor AS (
+  SELECT
+    *,
+    GREATEST(target_fantasy_points - COALESCE(policy_replacement_points, target_fantasy_points), 0) AS policy_value_over_replacement
+  FROM with_replacement
+),
+overall_pairwise AS (
+  SELECT
+    left_side.policy_name,
+    left_side.scoring_profile_id,
+    COUNT(*) AS overall_pairwise_comparison_count,
+    SAFE_DIVIDE(COUNTIF(left_side.actual_overall_rank < right_side.actual_overall_rank), COUNT(*)) AS overall_pairwise_draft_win_rate
+  FROM with_vor left_side
+  JOIN with_vor right_side
+    ON left_side.policy_name = right_side.policy_name
+   AND left_side.target_season = right_side.target_season
+   AND left_side.target_week = right_side.target_week
+   AND left_side.scoring_profile_id = right_side.scoring_profile_id
+   AND left_side.league_type_id = right_side.league_type_id
+   AND left_side.roster_format_id = right_side.roster_format_id
+   AND left_side.predicted_overall_rank < right_side.predicted_overall_rank
+   AND ABS(left_side.current_pigskin_proxy_score - right_side.current_pigskin_proxy_score) >= 10
+  WHERE (left_side.predicted_overall_rank <= 100 OR left_side.actual_overall_rank <= 100)
+    AND (right_side.predicted_overall_rank <= 100 OR right_side.actual_overall_rank <= 100)
+  GROUP BY left_side.policy_name, left_side.scoring_profile_id
+),
+summary AS (
+  SELECT
+    policy_name,
+    scoring_profile_id,
+    COUNT(*) AS source_row_count,
+    SAFE_DIVIDE(
+      SUM(IF(predicted_overall_rank <= 100, policy_value_over_replacement, 0)),
+      NULLIF(SUM(IF(actual_overall_rank <= 100, policy_value_over_replacement, 0)), 0)
+    ) AS value_over_replacement_captured_rate,
+    SAFE_DIVIDE(COUNTIF(predicted_overall_rank <= 24 AND actual_overall_rank <= 24), NULLIF(COUNTIF(actual_overall_rank <= 24), 0)) AS top_24_overall_hit_rate,
+    SAFE_DIVIDE(COUNTIF(predicted_overall_rank <= 50 AND actual_overall_rank <= 50), NULLIF(COUNTIF(actual_overall_rank <= 50), 0)) AS top_50_overall_hit_rate,
+    SAFE_DIVIDE(COUNTIF(predicted_overall_rank <= 100 AND actual_overall_rank <= 100), NULLIF(COUNTIF(actual_overall_rank <= 100), 0)) AS top_100_overall_hit_rate,
+    SUM(IF(actual_overall_rank <= 100, policy_value_over_replacement, 0)) - SUM(IF(predicted_overall_rank <= 100, policy_value_over_replacement, 0)) AS pick_band_regret,
+    MIN(target_season) AS min_target_season,
+    MAX(target_season) AS max_target_season
+  FROM with_vor
+  GROUP BY policy_name, scoring_profile_id
+)
+SELECT
+  summary.policy_name,
+  summary.scoring_profile_id,
+  summary.source_row_count,
+  summary.value_over_replacement_captured_rate,
+  summary.top_24_overall_hit_rate,
+  summary.top_50_overall_hit_rate,
+  summary.top_100_overall_hit_rate,
+  summary.pick_band_regret,
+  overall_pairwise.overall_pairwise_draft_win_rate,
+  overall_pairwise.overall_pairwise_comparison_count,
+  summary.min_target_season,
+  summary.max_target_season
+FROM summary
+LEFT JOIN overall_pairwise USING (policy_name, scoring_profile_id)
+ORDER BY scoring_profile_id, policy_name
 """.strip()
 
 
@@ -4315,6 +4536,164 @@ def pbp_xfp_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
     return [
         build_candidate_row(payload, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
         for candidate_id, name, payload in specs
+    ]
+
+
+def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, Any]]:
+    def formula(
+        *,
+        position: str,
+        version: str,
+        features: list[str],
+        weights: dict[str, float],
+        source_flags: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "version": version,
+            "position": position,
+            "features": features,
+            "weights": weights,
+            "score_expression": "weighted_linear",
+            "normalization": {"method": "bounded_0_100_sql"},
+            "source_flags": {
+                "uses_phase_32_18_role_context_vor_sensitivity": True,
+                "no_2025_holdout_weight_tuning": True,
+                "no_champion_activation": True,
+                **source_flags,
+            },
+        }
+
+    specs = [
+        (
+            "injury_depth_role_diagnostic_v0",
+            "Injury Depth Role Diagnostic",
+            formula(
+                position="RB",
+                version="role_context_and_vor_sensitivity_v0",
+                features=["profile_points_score", "injury_risk_score_3yr", "depth_chart_role_score_3yr"],
+                weights={"profile_points_score": 0.50, "injury_risk_score_3yr": 0.25, "depth_chart_role_score_3yr": 0.25},
+                source_flags={
+                    "injury_depth_sources_empty": True,
+                    "diagnostic_expected_missing_inputs": True,
+                    "missing_role_context_must_reduce_available_weight": True,
+                },
+            ),
+        ),
+        (
+            "first_down_pbp_proxy_diagnostic_v0",
+            "First Down PBP Proxy Diagnostic",
+            formula(
+                position="WR",
+                version="role_context_and_vor_sensitivity_v0",
+                features=[
+                    "profile_points_score",
+                    "receiving_first_down_exp_pbp_3yr",
+                    "receiving_chain_mover_score_3yr",
+                    "high_value_first_down_opportunity_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.42,
+                    "receiving_first_down_exp_pbp_3yr": 0.22,
+                    "receiving_chain_mover_score_3yr": 0.20,
+                    "high_value_first_down_opportunity_score_3yr": 0.16,
+                },
+                source_flags={
+                    "first_down_fields_are_pbp_proxies": True,
+                    "not_route_based": True,
+                },
+            ),
+        ),
+        (
+            "rb_role_pbp_context_blend_v0",
+            "RB Role PBP Context Blend",
+            formula(
+                position="RB",
+                version="role_context_and_vor_sensitivity_v0",
+                features=[
+                    "profile_points_score",
+                    "rushing_xfp_pbp_3yr",
+                    "rushing_first_down_exp_pbp_3yr",
+                    "rushing_chain_mover_score_3yr",
+                    "high_value_rush_xfp_score_3yr",
+                    "injury_risk_score_3yr",
+                    "depth_chart_role_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.28,
+                    "rushing_xfp_pbp_3yr": 0.20,
+                    "rushing_first_down_exp_pbp_3yr": 0.16,
+                    "rushing_chain_mover_score_3yr": 0.12,
+                    "high_value_rush_xfp_score_3yr": 0.12,
+                    "injury_risk_score_3yr": 0.06,
+                    "depth_chart_role_score_3yr": 0.06,
+                },
+                source_flags={
+                    "first_down_fields_are_pbp_proxies": True,
+                    "role_context_optional_until_sources_populate": True,
+                },
+            ),
+        ),
+        (
+            "wr_chain_mover_context_blend_v0",
+            "WR Chain Mover Context Blend",
+            formula(
+                position="WR",
+                version="role_context_and_vor_sensitivity_v0",
+                features=[
+                    "profile_points_score",
+                    "receiving_role_dominance_xfp_3yr",
+                    "receiving_xfp_pbp_3yr",
+                    "receiving_first_down_exp_pbp_3yr",
+                    "receiving_chain_mover_score_3yr",
+                    "high_value_target_xfp_score_3yr",
+                    "depth_chart_role_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.26,
+                    "receiving_role_dominance_xfp_3yr": 0.18,
+                    "receiving_xfp_pbp_3yr": 0.16,
+                    "receiving_first_down_exp_pbp_3yr": 0.14,
+                    "receiving_chain_mover_score_3yr": 0.12,
+                    "high_value_target_xfp_score_3yr": 0.08,
+                    "depth_chart_role_score_3yr": 0.06,
+                },
+                source_flags={
+                    "first_down_fields_are_pbp_proxies": True,
+                    "role_context_optional_until_sources_populate": True,
+                },
+            ),
+        ),
+        (
+            "gemini31_vor_baseline_sensitivity_v0",
+            "Gemini 3.1 VOR Baseline Sensitivity",
+            formula(
+                position="QB",
+                version="role_context_and_vor_sensitivity_v0",
+                features=[
+                    "profile_points_score",
+                    "analytical_grade_proxy",
+                    "opportunity_score_proxy",
+                    "efficiency_score_proxy",
+                    "role_stability_score",
+                ],
+                weights={
+                    "profile_points_score": 0.10,
+                    "analytical_grade_proxy": 0.55,
+                    "opportunity_score_proxy": 0.15,
+                    "efficiency_score_proxy": 0.10,
+                    "role_stability_score": 0.10,
+                },
+                source_flags={
+                    "evaluated_by_vor_baseline_sensitivity_sql": True,
+                    "gemini_style_baseline_policy": "QB15/RB36/WR55/TE12",
+                    "does_not_change_stored_vor_semantics": True,
+                },
+            ),
+        ),
+    ]
+    return [
+        build_candidate_row(formula_payload, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, formula_payload in specs
     ]
 
 

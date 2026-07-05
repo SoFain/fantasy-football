@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 
@@ -138,7 +139,14 @@ class NflverseIdealStatsTests(unittest.TestCase):
         self.assertIn("raw_ffopportunity_pbp_rush", sql)
         self.assertIn("yardline_100 <= 20", sql)
         self.assertIn("yardline_100 <= 5", sql)
+        self.assertIn("receiving_first_down_exp_pbp", sql)
+        self.assertIn("rushing_first_down_exp_pbp", sql)
+        self.assertIn("passing_first_down_exp_pbp", sql)
+        self.assertIn("high_value_first_down_opportunity_score", sql)
+        self.assertIn("receiving_chain_mover_score", sql)
+        self.assertIn("rushing_chain_mover_score", sql)
         self.assertIn("exact_ffopportunity_fantasy_points_exp_unavailable", sql)
+        self.assertIn("receiving_first_down_proxy_missing", sql)
         self.assertIn("source seasons only; target season excluded by feature mart", sql)
         self.assertNotIn("analytics_pigskin_rankings", lowered)
         self.assertNotIn("ranking_formula_champions", lowered)
@@ -176,9 +184,28 @@ class NflverseIdealStatsTests(unittest.TestCase):
         self.assertIn("player_week_ideal_opportunity_metrics", rfb.ALLOWED_INPUT_TABLES)
 
     def test_pbp_features_are_allowed_and_mapped(self):
-        for feature in ("receiving_xfp_pbp_3yr", "rushing_xfp_pbp_3yr", "red_zone_xfp_score_3yr"):
+        for feature in (
+            "receiving_xfp_pbp_3yr",
+            "rushing_xfp_pbp_3yr",
+            "red_zone_xfp_score_3yr",
+            "receiving_first_down_exp_pbp_3yr",
+            "rushing_first_down_exp_pbp_3yr",
+            "high_value_first_down_opportunity_score_3yr",
+        ):
             self.assertIn(feature, rfb.FEATURE_SOURCE_MAP)
         self.assertIn("player_week_pbp_opportunity_metrics", rfb.ALLOWED_INPUT_TABLES)
+
+    def test_first_down_proxy_migration_is_additive(self):
+        migration = Path("bigquery/migrations/0034__first_down_pbp_proxy_features.sql").read_text(encoding="utf-8")
+        lowered = migration.lower()
+
+        self.assertIn("ADD COLUMN IF NOT EXISTS receiving_first_down_exp_pbp", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS receiving_first_down_exp_pbp_3yr", migration)
+        self.assertNotIn("drop ", lowered)
+        self.assertNotIn("truncate", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
 
     def test_summary_write_sql_accepts_ideal_candidates_without_detail_rows(self):
         sql = rfb.build_sql_native_tournament_summary_write_sql(

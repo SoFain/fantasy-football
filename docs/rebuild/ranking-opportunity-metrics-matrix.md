@@ -200,3 +200,36 @@ Next missing source recommendation:
 1. Injury and depth role scoring for RB/WR.
 2. Direct NGS receiving and rushing ingest if source coverage is real.
 3. A narrower WR refinement that preserves current Pigskin pairwise strength before adding PBP captured-points boosters.
+
+## Phase 32.18 Role Context and VOR Sensitivity Matrix
+
+Phase 32.18 added first-down PBP proxy fields to the PBP derived table and ranking feature mart. These fields are chain-mover proxies from existing `ffopportunity` PBP fields. They are not route-based metrics and must not be described as `1D/RR`, route share, or first-read share.
+
+| Field | Source | Feature mart field | Coverage/status | Use decision |
+|---|---|---|---|---|
+| `receiving_first_down_exp_pbp` | `raw_ffopportunity_pbp_pass.pass_first_down_exp` | `receiving_first_down_exp_pbp_3yr` | 53,018 derived player-week rows. Strong WR/TE/RB receiving coverage in 2024 and 2025 feature mart slices. | Keep as WR/TE/RB receiving chain-mover proxy. |
+| `rushing_first_down_exp_pbp` | `raw_ffopportunity_pbp_rush.rushing_fd_exp` or `rush_first_down_exp` | `rushing_first_down_exp_pbp_3yr` | 27,023 derived player-week rows. Strong RB/QB rushing coverage, sparse WR/TE by design. | Keep as RB/QB rushing chain-mover proxy. |
+| `passing_first_down_exp_pbp` | `raw_ffopportunity_pbp_pass.pass_first_down_exp` on passer rows | `passing_first_down_exp_pbp_3yr` | 7,961 derived player-week rows. QB-only practical use. | Keep for QB diagnostics only. |
+| `high_value_first_down_opportunity_score` | Derived from passing, rushing, and receiving first-down expected values | `high_value_first_down_opportunity_score_3yr` | Near complete where PBP identity exists. | Useful as secondary high-value opportunity context. |
+| `receiving_chain_mover_score` | Bounded score from receiving first-down proxy | `receiving_chain_mover_score_3yr` | Strong WR/TE/RB receiving coverage. | Useful for WR/TE context. |
+| `rushing_chain_mover_score` | Bounded score from rushing first-down proxy | `rushing_chain_mover_score_3yr` | Strong RB/QB coverage. | Useful for RB/QB context. |
+| `injury_risk_score_3yr` | `raw_nflverse_injuries` lane | existing feature mart field | Blocked. `raw_nflverse_injuries` currently has 0 rows. | Leave missing and flagged. Do not fabricate. |
+| `depth_chart_role_score_3yr` | `raw_nflverse_depth_charts` lane | existing feature mart field | Blocked. `raw_nflverse_depth_charts` currently has 0 rows. | Leave missing and flagged. Do not fabricate. |
+
+Feature refresh and validation:
+
+- Migration `0034__first_down_pbp_proxy_features.sql` applied.
+- `player_week_pbp_opportunity_metrics` refreshed for 2014-2025 with 65,358 rows.
+- `ranking_backtest_feature_mart` refreshed for target seasons 2017-2025 with 156,244 rows.
+- PBP validations 223 through 230 passed after the validation contract was extended to include first-down proxy fields.
+- Broad ranking validation still has an unrelated projection-rank ordering failure in validation 093. Ranking formula and feature mart validations passed.
+
+VOR baseline sensitivity:
+
+| Policy | Replacement ranks | Result |
+|---|---|---|
+| Current SQL-native | QB12/RB24/WR24/TE12 | Best VOR captured on 2024-2025 PPR slice: 0.8403. |
+| Middle | QB12/RB30/WR42/TE12 | Lower VOR captured: 0.7896. |
+| Gemini-style | QB15/RB36/WR55/TE12 | Lowest tested VOR captured: 0.7805, highest pick-band regret. |
+
+Decision: keep first-down proxies as component inputs. Injury/depth needs source remediation before scoring. Do not change the official stored VOR semantics yet.

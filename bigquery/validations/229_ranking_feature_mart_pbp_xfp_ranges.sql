@@ -16,4 +16,13 @@ WHERE receiving_xfp_pbp_3yr < 0
    OR rushing_xfp_share_pbp_3yr < 0
    OR rushing_xfp_share_pbp_3yr > 1
    OR opportunity_quality_score_3yr < 0
-   OR opportunity_quality_score_3yr > 100;
+   OR opportunity_quality_score_3yr > 100
+   OR receiving_first_down_exp_pbp_3yr < 0
+   OR rushing_first_down_exp_pbp_3yr < 0
+   OR passing_first_down_exp_pbp_3yr < 0
+   OR high_value_first_down_opportunity_score_3yr < 0
+   OR high_value_first_down_opportunity_score_3yr > 100
+   OR receiving_chain_mover_score_3yr < 0
+   OR receiving_chain_mover_score_3yr > 100
+   OR rushing_chain_mover_score_3yr < 0
+   OR rushing_chain_mover_score_3yr > 100;

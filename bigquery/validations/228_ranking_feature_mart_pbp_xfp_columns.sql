@@ -12,6 +12,12 @@ WITH expected_columns AS (
   SELECT 'receiving_xfp_share_pbp_3yr' UNION ALL
   SELECT 'rushing_xfp_share_pbp_3yr' UNION ALL
   SELECT 'opportunity_quality_score_3yr' UNION ALL
+  SELECT 'receiving_first_down_exp_pbp_3yr' UNION ALL
+  SELECT 'rushing_first_down_exp_pbp_3yr' UNION ALL
+  SELECT 'passing_first_down_exp_pbp_3yr' UNION ALL
+  SELECT 'high_value_first_down_opportunity_score_3yr' UNION ALL
+  SELECT 'receiving_chain_mover_score_3yr' UNION ALL
+  SELECT 'rushing_chain_mover_score_3yr' UNION ALL
   SELECT 'pbp_xfp_missing_flags_json'
 ),
 actual_columns AS (
