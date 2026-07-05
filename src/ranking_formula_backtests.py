@@ -53,6 +53,53 @@ DRAFT_UTILITY_METRIC_CONTRACT = {
     "high_confidence_pairwise_win_rate": "Pairwise win rate when predicted scores differ by at least ten points.",
     "value_over_replacement_captured_rate": "Positive VOR captured by predicted top K divided by ideal actual top K VOR.",
 }
+BQML_TRAIN_SEASONS = (2017, 2023)
+BQML_VALIDATION_SEASON = 2024
+BQML_HOLDOUT_SEASON = 2025
+BQML_NUMERIC_PREDICTORS = (
+    "profile_points_score",
+    "opportunity_score_proxy",
+    "efficiency_score_proxy",
+    "analytical_grade_proxy",
+    "role_stability_score",
+    "recent_points_avg",
+    "targets",
+    "carries",
+    "receiving_yards",
+    "receiving_epa",
+    "red_zone_targets",
+    "success_rate",
+    "passing_success_rate",
+    "dropbacks",
+    "rushing_attempts",
+    "rush_success_rate",
+    "receiving_usage",
+    "cpoe",
+    "usage_volume",
+    "epa_per_play",
+    "passing_epa_per_play",
+    "team_epa_per_play",
+    "red_zone_opportunities",
+    "goal_line_opportunities",
+    "snap_share_proxy",
+    "air_yards",
+    "team_pass_rate",
+    "points_per_game_slope_3yr",
+    "total_points_slope_3yr",
+    "opportunity_slope_3yr",
+    "target_share_slope_3yr",
+    "carry_share_slope_3yr",
+    "receiving_usage_slope_3yr",
+    "wopr_slope_3yr",
+    "epa_slope_3yr",
+    "efficiency_slope_3yr",
+    "availability_rate_3yr",
+    "weekly_volatility_3yr",
+    "improving_3yr",
+    "declining_3yr",
+    "breakout_trajectory_3yr",
+)
+BQML_CATEGORICAL_PREDICTORS = ("scoring_profile_id", "position")
 
 POSITIONS = ("QB", "RB", "WR", "TE")
 TARGET_DEFINITIONS = {
@@ -3198,6 +3245,404 @@ def write_sql_native_tournament_summaries(
         "detail_rows_written": 0,
         "job_id": getattr(job, "job_id", None),
     }
+
+
+def _bqml_feature_select_sql(*, include_categorical: bool = True) -> str:
+    numeric_columns = []
+    for column in BQML_NUMERIC_PREDICTORS:
+        numeric_columns.append(f"    COALESCE({column}, 0.0) AS {column}")
+        numeric_columns.append(f"    IF({column} IS NULL, 1, 0) AS {column}_missing")
+    categorical_columns = [f"    {column}" for column in BQML_CATEGORICAL_PREDICTORS] if include_categorical else []
+    return ",\n".join(categorical_columns + numeric_columns)
+
+
+def bqml_model_specs(include_boosted_tree: bool = True, include_random_forest: bool = False) -> list[dict[str, Any]]:
+    specs = [
+        {
+            "model_name": "ranking_bqml_linear_vor_v0",
+            "candidate_id": "ranking_bqml_linear_vor_v0",
+            "candidate_family": "bqml_linear_vor",
+            "model_type": "LINEAR_REG",
+            "target": "value_over_replacement",
+            "label_column": "label_value",
+            "prediction_column": "predicted_label_value",
+        },
+        {
+            "model_name": "ranking_bqml_linear_points_v0",
+            "candidate_id": "ranking_bqml_linear_points_v0",
+            "candidate_family": "bqml_linear_points",
+            "model_type": "LINEAR_REG",
+            "target": "target_fantasy_points",
+            "label_column": "label_value",
+            "prediction_column": "predicted_label_value",
+        },
+        {
+            "model_name": "ranking_bqml_logistic_elite_v0",
+            "candidate_id": "ranking_bqml_logistic_elite_v0",
+            "candidate_family": "bqml_logistic_elite",
+            "model_type": "LOGISTIC_REG",
+            "target": "elite_label",
+            "label_column": "elite_label",
+            "prediction_column": "predicted_elite_probability",
+        },
+    ]
+    if include_boosted_tree:
+        specs.append(
+            {
+                "model_name": "ranking_bqml_boosted_tree_vor_v0",
+                "candidate_id": "ranking_bqml_boosted_tree_vor_v0",
+                "candidate_family": "bqml_boosted_tree_vor",
+                "model_type": "BOOSTED_TREE_REGRESSOR",
+                "target": "value_over_replacement",
+                "label_column": "label_value",
+                "prediction_column": "predicted_label_value",
+            }
+        )
+    if include_random_forest:
+        specs.append(
+            {
+                "model_name": "ranking_bqml_random_forest_vor_v0",
+                "candidate_id": "ranking_bqml_random_forest_vor_v0",
+                "candidate_family": "bqml_random_forest_vor",
+                "model_type": "RANDOM_FOREST_REGRESSOR",
+                "target": "value_over_replacement",
+                "label_column": "label_value",
+                "prediction_column": "predicted_label_value",
+            }
+        )
+    return specs
+
+
+def build_bqml_training_select_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    target_name: str,
+    season_start: int = BQML_TRAIN_SEASONS[0],
+    season_end: int = BQML_TRAIN_SEASONS[1],
+    include_identity: bool = False,
+) -> str:
+    if target_name not in {"value_over_replacement", "target_fantasy_points", "elite_label"}:
+        raise FormulaValidationError(f"Unsupported BQML target: {target_name}")
+    mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
+    feature_columns = _bqml_feature_select_sql(include_categorical=not include_identity)
+    identity_columns = """
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    player_name,
+    team,
+    target_fantasy_points,
+    actual_position_rank,
+    actual_overall_rank,
+    value_over_replacement,
+""".rstrip() if include_identity else ""
+    label_sql = {
+        "value_over_replacement": "value_over_replacement AS label_value",
+        "target_fantasy_points": "target_fantasy_points AS label_value",
+        "elite_label": "IF(actual_position_rank <= CASE position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 24 WHEN 'TE' THEN 12 ELSE 24 END, 1, 0) AS elite_label",
+    }[target_name]
+    prefix = f"{identity_columns}\n" if identity_columns else ""
+    return f"""
+SELECT
+{prefix}{feature_columns},
+    {label_sql}
+FROM `{mart_table}`
+WHERE target_season BETWEEN {int(season_start)} AND {int(season_end)}
+  AND source_window_end_season < target_season
+  AND target_fantasy_points IS NOT NULL
+  AND actual_position_rank IS NOT NULL
+  AND value_over_replacement IS NOT NULL
+""".strip()
+
+
+def build_bqml_create_model_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    spec: Mapping[str, Any],
+) -> str:
+    model_type = str(spec["model_type"]).upper()
+    if model_type not in {"LINEAR_REG", "LOGISTIC_REG", "BOOSTED_TREE_REGRESSOR", "RANDOM_FOREST_REGRESSOR"}:
+        raise FormulaValidationError(f"Unsupported BQML model type: {model_type}")
+    model_table = table_id(project_id, dataset_id, str(spec["model_name"]))
+    target_name = str(spec["target"])
+    label_column = str(spec["label_column"])
+    options = [
+        f"model_type='{model_type}'",
+        f"input_label_cols=['{label_column}']",
+        "data_split_method='NO_SPLIT'",
+    ]
+    if model_type in {"LINEAR_REG", "LOGISTIC_REG"}:
+        options.append("max_iterations=20")
+    elif model_type == "BOOSTED_TREE_REGRESSOR":
+        options.extend(("max_iterations=20", "max_tree_depth=4", "learn_rate=0.1"))
+    elif model_type == "RANDOM_FOREST_REGRESSOR":
+        options.extend(("num_parallel_tree=20", "max_tree_depth=6"))
+    training_sql = build_bqml_training_select_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        target_name=target_name,
+        season_start=BQML_TRAIN_SEASONS[0],
+        season_end=BQML_TRAIN_SEASONS[1],
+        include_identity=False,
+    )
+    return f"""
+CREATE OR REPLACE MODEL `{model_table}`
+OPTIONS({", ".join(options)}) AS
+{training_sql}
+""".strip()
+
+
+def build_bqml_prediction_union_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    specs: list[Mapping[str, Any]],
+    target_seasons: list[int] | tuple[int, ...] = (BQML_VALIDATION_SEASON, BQML_HOLDOUT_SEASON),
+) -> str:
+    parts = []
+    season_start = min(int(season) for season in target_seasons)
+    season_end = max(int(season) for season in target_seasons)
+    for spec in specs:
+        model_id = table_id(project_id, dataset_id, str(spec["model_name"]))
+        target_name = str(spec["target"])
+        input_sql = build_bqml_training_select_sql(
+            project_id=project_id,
+            dataset_id=dataset_id,
+            target_name=target_name,
+            season_start=season_start,
+            season_end=season_end,
+            include_identity=True,
+        )
+        if spec["model_type"] == "LOGISTIC_REG":
+            predicted_score = "100.0 * COALESCE((SELECT prob FROM UNNEST(predicted_elite_label_probs) WHERE CAST(label AS STRING) = '1' LIMIT 1), 0.0)"
+        else:
+            predicted_score = "predicted_label_value"
+        parts.append(
+            f"""
+SELECT
+  {_sql_string(str(spec["candidate_id"]))} AS candidate_id,
+  {_sql_string(str(spec["candidate_family"]))} AS candidate_family,
+  {_sql_string(str(spec["model_name"]))} AS model_name,
+  target_season,
+  target_week,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  position,
+  player_id_internal,
+  player_name,
+  team,
+  target_fantasy_points AS actual_points,
+  actual_position_rank,
+  actual_overall_rank,
+  value_over_replacement,
+  {predicted_score} AS predicted_score
+FROM ML.PREDICT(MODEL `{model_id}`, ({input_sql}))
+""".strip()
+        )
+    if not parts:
+        raise FormulaValidationError("At least one BQML model spec is required")
+    return "\nUNION ALL\n".join(parts)
+
+
+def build_bqml_prediction_summary_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    specs: list[Mapping[str, Any]] | None = None,
+    target_seasons: list[int] | tuple[int, ...] = (BQML_VALIDATION_SEASON, BQML_HOLDOUT_SEASON),
+) -> str:
+    selected_specs = specs or bqml_model_specs(include_boosted_tree=True, include_random_forest=False)
+    prediction_sql = build_bqml_prediction_union_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        specs=selected_specs,
+        target_seasons=target_seasons,
+    )
+    return f"""
+WITH predictions AS (
+{prediction_sql}
+),
+ranked AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_rank_position,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id
+      ORDER BY predicted_score DESC, player_id_internal
+    ) AS predicted_overall_rank,
+    CASE position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 24 WHEN 'TE' THEN 12 ELSE 24 END AS default_top_n
+  FROM predictions
+  WHERE predicted_score IS NOT NULL
+),
+with_rank_metrics AS (
+  SELECT
+    *,
+    CASE
+      WHEN predicted_rank_position BETWEEN 1 AND 12 THEN '1-12'
+      WHEN predicted_rank_position BETWEEN 13 AND 24 THEN '13-24'
+      WHEN predicted_rank_position BETWEEN 25 AND 36 THEN '25-36'
+      WHEN predicted_rank_position BETWEEN 37 AND 60 THEN '37-60'
+      WHEN predicted_rank_position BETWEEN 61 AND 100 THEN '61-100'
+      ELSE '101+'
+    END AS predicted_pick_band,
+    CASE
+      WHEN actual_position_rank BETWEEN 1 AND 12 THEN '1-12'
+      WHEN actual_position_rank BETWEEN 13 AND 24 THEN '13-24'
+      WHEN actual_position_rank BETWEEN 25 AND 36 THEN '25-36'
+      WHEN actual_position_rank BETWEEN 37 AND 60 THEN '37-60'
+      WHEN actual_position_rank BETWEEN 61 AND 100 THEN '61-100'
+      ELSE '101+'
+    END AS actual_position_pick_band
+  FROM ranked
+),
+weekly_ideal AS (
+  SELECT
+    candidate_id,
+    target_season,
+    target_week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    ROW_NUMBER() OVER (
+      PARTITION BY candidate_id, target_season, target_week, scoring_profile_id, league_type_id, roster_format_id, position
+      ORDER BY actual_points DESC, player_id_internal
+    ) AS ideal_rank
+  FROM with_rank_metrics
+),
+weekly_metrics AS (
+  SELECT
+    scored.candidate_id,
+    ANY_VALUE(scored.candidate_family) AS candidate_family,
+    ANY_VALUE(scored.model_name) AS model_name,
+    scored.target_season,
+    scored.target_week,
+    scored.scoring_profile_id,
+    scored.league_type_id,
+    scored.roster_format_id,
+    scored.position,
+    scored.default_top_n,
+    COUNT(*) AS source_row_count,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_position_rank <= scored.default_top_n), NULLIF(COUNTIF(scored.actual_position_rank <= scored.default_top_n), 0)) AS top_n_hit_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.actual_points, 0)), SUM(IF(scored.actual_position_rank <= scored.default_top_n, scored.actual_points, 0))) AS actual_points_captured_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)), SUM(IF(scored.actual_position_rank <= scored.default_top_n, scored.value_over_replacement, 0))) AS value_over_replacement_captured_rate,
+    SAFE_DIVIDE(SUM(IF(scored.predicted_rank_position <= scored.default_top_n, GREATEST(scored.actual_points, 0) / (LN(scored.predicted_rank_position + 1) / LN(2)), 0)), SUM(IF(ideal.ideal_rank <= scored.default_top_n, GREATEST(scored.actual_points, 0) / (LN(ideal.ideal_rank + 1) / LN(2)), 0))) AS ndcg_at_k,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_position_rank <= scored.default_top_n), NULLIF(COUNTIF(scored.actual_position_rank <= scored.default_top_n), 0)) AS elite_recall_at_k,
+    AVG(IF(scored.predicted_pick_band = scored.actual_position_pick_band, 1.0, 0.0)) AS tier_accuracy,
+    SAFE_DIVIDE(COUNTIF(scored.predicted_rank_position <= scored.default_top_n AND scored.actual_position_rank > scored.default_top_n * 2), NULLIF(COUNTIF(scored.predicted_rank_position <= scored.default_top_n), 0)) AS bust_rate,
+    SUM(IF(scored.actual_position_rank <= scored.default_top_n, scored.value_over_replacement, 0)) - SUM(IF(scored.predicted_rank_position <= scored.default_top_n, scored.value_over_replacement, 0)) AS pick_band_regret
+  FROM with_rank_metrics scored
+  JOIN weekly_ideal ideal
+    ON scored.candidate_id = ideal.candidate_id
+   AND scored.target_season = ideal.target_season
+   AND scored.target_week = ideal.target_week
+   AND scored.scoring_profile_id = ideal.scoring_profile_id
+   AND scored.league_type_id = ideal.league_type_id
+   AND scored.roster_format_id = ideal.roster_format_id
+   AND scored.position = ideal.position
+   AND scored.player_id_internal = ideal.player_id_internal
+  GROUP BY scored.candidate_id, scored.target_season, scored.target_week, scored.scoring_profile_id, scored.league_type_id, scored.roster_format_id, scored.position, scored.default_top_n
+),
+pairwise AS (
+  SELECT
+    left_side.candidate_id,
+    left_side.target_season,
+    left_side.scoring_profile_id,
+    left_side.league_type_id,
+    left_side.roster_format_id,
+    left_side.position,
+    SAFE_DIVIDE(COUNTIF(left_side.actual_points > right_side.actual_points), COUNT(*)) AS high_confidence_pairwise_win_rate
+  FROM with_rank_metrics left_side
+  JOIN with_rank_metrics right_side
+    ON left_side.candidate_id = right_side.candidate_id
+   AND left_side.target_season = right_side.target_season
+   AND left_side.target_week = right_side.target_week
+   AND left_side.scoring_profile_id = right_side.scoring_profile_id
+   AND left_side.league_type_id = right_side.league_type_id
+   AND left_side.roster_format_id = right_side.roster_format_id
+   AND left_side.position = right_side.position
+   AND left_side.predicted_rank_position < right_side.predicted_rank_position
+   AND ABS(left_side.predicted_score - right_side.predicted_score) >= 10
+  GROUP BY left_side.candidate_id, left_side.target_season, left_side.scoring_profile_id, left_side.league_type_id, left_side.roster_format_id, left_side.position
+),
+overall_pairwise AS (
+  SELECT
+    left_side.candidate_id,
+    left_side.target_season,
+    left_side.scoring_profile_id,
+    left_side.league_type_id,
+    left_side.roster_format_id,
+    SAFE_DIVIDE(COUNTIF(left_side.actual_overall_rank < right_side.actual_overall_rank), COUNT(*)) AS overall_pairwise_draft_win_rate
+  FROM with_rank_metrics left_side
+  JOIN with_rank_metrics right_side
+    ON left_side.candidate_id = right_side.candidate_id
+   AND left_side.target_season = right_side.target_season
+   AND left_side.target_week = right_side.target_week
+   AND left_side.scoring_profile_id = right_side.scoring_profile_id
+   AND left_side.league_type_id = right_side.league_type_id
+   AND left_side.roster_format_id = right_side.roster_format_id
+   AND left_side.predicted_overall_rank < right_side.predicted_overall_rank
+   AND ABS(left_side.predicted_score - right_side.predicted_score) >= 10
+  WHERE (left_side.predicted_overall_rank <= 100 OR left_side.actual_overall_rank <= 100)
+    AND (right_side.predicted_overall_rank <= 100 OR right_side.actual_overall_rank <= 100)
+  GROUP BY left_side.candidate_id, left_side.target_season, left_side.scoring_profile_id, left_side.league_type_id, left_side.roster_format_id
+),
+summary AS (
+  SELECT
+    candidate_id,
+    ANY_VALUE(candidate_family) AS candidate_family,
+    ANY_VALUE(model_name) AS model_name,
+    target_season,
+    position,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    SUM(source_row_count) AS sample_size,
+    AVG(top_n_hit_rate) AS top_n_hit_rate,
+    AVG(actual_points_captured_rate) AS actual_points_captured_rate,
+    AVG(value_over_replacement_captured_rate) AS value_over_replacement_captured_rate,
+    AVG(ndcg_at_k) AS ndcg_at_k,
+    AVG(elite_recall_at_k) AS elite_recall_at_k,
+    AVG(tier_accuracy) AS tier_accuracy,
+    AVG(bust_rate) AS bust_rate,
+    SUM(GREATEST(pick_band_regret, 0)) AS pick_band_regret
+  FROM weekly_metrics
+  GROUP BY candidate_id, target_season, position, scoring_profile_id, league_type_id, roster_format_id
+),
+rank_corr AS (
+  SELECT
+    candidate_id,
+    target_season,
+    position,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    CORR(CAST(predicted_rank_position AS FLOAT64), CAST(actual_position_rank AS FLOAT64)) AS rank_correlation
+  FROM with_rank_metrics
+  GROUP BY candidate_id, target_season, position, scoring_profile_id, league_type_id, roster_format_id
+)
+SELECT
+  summary.*,
+  rank_corr.rank_correlation,
+  pairwise.high_confidence_pairwise_win_rate,
+  overall_pairwise.overall_pairwise_draft_win_rate
+FROM summary
+LEFT JOIN rank_corr USING (candidate_id, target_season, position, scoring_profile_id, league_type_id, roster_format_id)
+LEFT JOIN pairwise USING (candidate_id, target_season, position, scoring_profile_id, league_type_id, roster_format_id)
+LEFT JOIN overall_pairwise USING (candidate_id, target_season, scoring_profile_id, league_type_id, roster_format_id)
+ORDER BY target_season, scoring_profile_id, position, candidate_id
+""".strip()
 
 
 def _formula_weight_rows_sql(candidate_rows: list[Mapping[str, Any]]) -> str:

@@ -1341,6 +1341,111 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertNotIn("ranking_backtest_results", queried_sql)
         self.assertNotIn("ranking_formula_champions", queried_sql)
 
+    def test_bqml_training_sql_uses_chronological_split_and_no_random_split(self):
+        sql = rfb.build_bqml_create_model_sql(
+            project_id="p",
+            dataset_id="d",
+            spec=rfb.bqml_model_specs(include_boosted_tree=False)[0],
+        )
+
+        self.assertIn("data_split_method='NO_SPLIT'", sql)
+        self.assertIn("target_season BETWEEN 2017 AND 2023", sql)
+        self.assertNotIn("AUTO_SPLIT", sql)
+        self.assertNotIn("RANDOM", sql.upper())
+
+    def test_bqml_training_features_exclude_outcome_predictors(self):
+        sql = rfb.build_bqml_training_select_sql(
+            project_id="p",
+            dataset_id="d",
+            target_name="value_over_replacement",
+        )
+        select_list = sql.split("FROM `p.d.ranking_backtest_feature_mart`", 1)[0]
+
+        self.assertIn("value_over_replacement AS label_value", select_list)
+        self.assertIn("profile_points_score", select_list)
+        self.assertIn("profile_points_score_missing", select_list)
+        self.assertNotIn("target_fantasy_points,", select_list)
+        self.assertNotIn("actual_position_rank,", select_list)
+        self.assertNotIn("actual_overall_rank,", select_list)
+        self.assertNotIn("top_24_overall", select_list)
+        self.assertNotIn("actual_pick_band", select_list)
+
+    def test_bqml_prediction_output_maps_to_candidate_style_rows(self):
+        sql = rfb.build_bqml_prediction_union_sql(
+            project_id="p",
+            dataset_id="d",
+            specs=rfb.bqml_model_specs(include_boosted_tree=False)[:1],
+            target_seasons=(2024, 2025),
+        )
+
+        for field in (
+            "candidate_id",
+            "candidate_family",
+            "model_name",
+            "target_season",
+            "scoring_profile_id",
+            "position",
+            "player_id_internal",
+            "predicted_score",
+        ):
+            self.assertIn(field, sql)
+        self.assertIn("ML.PREDICT", sql)
+        self.assertIn("target_season BETWEEN 2024 AND 2025", sql)
+        self.assertNotIn(",,", sql)
+
+    def test_bqml_prediction_identity_columns_are_not_duplicated(self):
+        sql = rfb.build_bqml_prediction_union_sql(
+            project_id="p",
+            dataset_id="d",
+            specs=rfb.bqml_model_specs(include_boosted_tree=False)[:1],
+            target_seasons=(2024,),
+        )
+        input_select = sql.split("FROM `p.d.ranking_backtest_feature_mart`", 1)[0]
+
+        self.assertEqual(input_select.count("    scoring_profile_id,"), 1)
+        self.assertEqual(input_select.count("    position,"), 1)
+
+    def test_bqml_logistic_probability_uses_bigquery_prob_field(self):
+        logistic_spec = [spec for spec in rfb.bqml_model_specs(include_boosted_tree=False) if spec["model_type"] == "LOGISTIC_REG"][0]
+        sql = rfb.build_bqml_prediction_union_sql(
+            project_id="p",
+            dataset_id="d",
+            specs=[logistic_spec],
+            target_seasons=(2024,),
+        )
+
+        self.assertIn("SELECT prob FROM UNNEST(predicted_elite_label_probs)", sql)
+        self.assertNotIn("SELECT probability FROM UNNEST(predicted_elite_label_probs)", sql)
+
+    def test_bqml_summary_sql_is_sql_native_and_does_not_touch_live_tables(self):
+        sql = rfb.build_bqml_prediction_summary_sql(
+            project_id="p",
+            dataset_id="d",
+            specs=rfb.bqml_model_specs(include_boosted_tree=False)[:1],
+        )
+        lowered = sql.lower()
+
+        self.assertIn("ML.PREDICT", sql)
+        self.assertIn("ndcg_at_k", sql)
+        self.assertIn("overall_pairwise_draft_win_rate", sql)
+        self.assertNotIn("insert ", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertIn("LEFT JOIN pairwise USING (candidate_id, target_season, position, scoring_profile_id, league_type_id, roster_format_id)", sql)
+        self.assertIn("LEFT JOIN overall_pairwise USING (candidate_id, target_season, scoring_profile_id, league_type_id, roster_format_id)", sql)
+
+    def test_bqml_model_specs_are_bounded_and_skip_random_forest_by_default(self):
+        specs = rfb.bqml_model_specs()
+        model_names = {spec["model_name"] for spec in specs}
+
+        self.assertIn("ranking_bqml_linear_vor_v0", model_names)
+        self.assertIn("ranking_bqml_linear_points_v0", model_names)
+        self.assertIn("ranking_bqml_logistic_elite_v0", model_names)
+        self.assertIn("ranking_bqml_boosted_tree_vor_v0", model_names)
+        self.assertNotIn("ranking_bqml_random_forest_vor_v0", model_names)
+
     def _formula_set(self):
         return {
             "formula_set_id": "set-1",

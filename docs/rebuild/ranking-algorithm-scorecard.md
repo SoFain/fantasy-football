@@ -71,7 +71,8 @@ Target-season features are excluded.
 | `value_over_replacement_baseline` | challenger | profile points, recent points, availability | Stable but not the best aggregate family. |
 | `scarcity_adjusted_draft_value_baseline` | challenger | profile points, usage, role stability, opportunity trend, availability | Useful in selected RB/QB slices. |
 | `simple_projection_points_baseline` | challenger | profile points score only | Best aggregate pairwise score, but not enough to clearly replace the baseline. |
-| ML baselines | skipped | none | `scikit-learn` was not installed. No packages were installed. |
+| BigQuery ML baselines | owner-review challenger | feature mart predictors only | Phase 32.10 trained bounded BQML linear, logistic, and boosted-tree prototypes. No champion is active. |
+| Python ML baselines | skipped | none | `scikit-learn` was not installed. No packages were installed. |
 
 ## Tournament History
 
@@ -280,6 +281,46 @@ Metric gap closure:
 - All persisted summary rows have populated draft-utility metrics in `metric_json`.
 
 North star: this remains a top-heavy, scarcity-aware draft ranking problem. Raw point projection alone is not enough.
+
+## Phase 32.10 BigQuery ML Baseline Prototype
+
+Phase 32.10 kept the accepted SQL-native tournament path as the evaluation source and trained bounded BigQuery ML prototypes from `ranking_backtest_feature_mart`.
+
+Model policy:
+
+- train seasons: 2017 through 2023
+- validation season: 2024
+- holdout season: 2025
+- primary split: chronological, with `data_split_method='NO_SPLIT'`
+- random forest: skipped by default
+- DNN, AutoML, remote, Gemini-backed models, and hyperparameter tuning: skipped
+- live ranking writes: none
+- champion activation: none
+
+Trained BQML models:
+
+| Model | Type | Target |
+|---|---|---|
+| `ranking_bqml_linear_vor_v0` | linear regression | value over replacement |
+| `ranking_bqml_linear_points_v0` | linear regression | target fantasy points |
+| `ranking_bqml_logistic_elite_v0` | logistic regression | position-specific elite finish |
+| `ranking_bqml_boosted_tree_vor_v0` | boosted tree regression | value over replacement |
+
+2024-2025 SQL-native comparison:
+
+| Family | Top-N | Captured points | VOR captured | Rank corr | High-confidence | Overall pairwise | NDCG@K | Tier accuracy | Bust rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| BQML logistic elite | 0.6861 | 0.8051 | 0.7031 | 0.5476 | 0.7468 | 0.6405 | 0.7157 | 0.5529 | 0.0826 |
+| BQML linear VOR | 0.6824 | 0.8003 | 0.6941 | 0.5313 | n/a | n/a | 0.7082 | 0.5488 | 0.0849 |
+| BQML linear points | 0.6815 | 0.8004 | 0.6963 | 0.5425 | 0.9098 | 0.8178 | 0.7090 | 0.5544 | 0.0841 |
+| BQML boosted tree VOR | 0.6762 | 0.7936 | 0.6890 | 0.5340 | n/a | n/a | 0.6996 | 0.5542 | 0.0905 |
+| scarcity adjusted draft value | 0.6811 | 0.7967 | 0.6965 | 0.6233 | 0.7373 | 0.7484 | 0.6896 | 0.5385 | 0.0846 |
+| simple projection points | 0.6803 | 0.7969 | 0.6932 | 0.6261 | 0.7407 | 0.7441 | 0.7163 | 0.5578 | 0.0887 |
+| current Pigskin baseline | 0.6755 | 0.7929 | 0.6800 | 0.6219 | 0.7540 | 0.7621 | 0.7086 | 0.5528 | 0.0891 |
+
+Decision: BQML is now a useful challenger lane, not an active champion. Logistic elite clears the current baseline on top-N, captured points, VOR captured, NDCG, tier accuracy, and bust rate for the 2024-2025 window, but the top-N edge is about 1.06 percentage points, below the 1.5-point owner-review activation threshold. Its overall pairwise result is also weaker than current Pigskin. Linear points is interesting because its high-confidence and overall pairwise rates are strong, but it does not separate enough on top-N.
+
+Next research direction: test a constrained ensemble that blends current Pigskin, simple projection, and BQML signals through the same SQL-native evaluator. Do not activate a champion without owner review.
 
 ## Current Baseline Score
 
