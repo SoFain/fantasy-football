@@ -1771,16 +1771,20 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         ids = {row["candidate_id"] for row in candidates}
         joined = "\n".join(row["formula_json"] for row in candidates)
 
-        self.assertEqual(len(candidates), 5)
+        self.assertEqual(len(candidates), 6)
         self.assertIn("injury_depth_role_diagnostic_v0", ids)
         self.assertIn("first_down_pbp_proxy_diagnostic_v0", ids)
-        self.assertIn("gemini31_vor_baseline_sensitivity_v0", ids)
+        self.assertIn("deep_vorp_qb15_rb36_wr55_te12_diagnostic_v0", ids)
+        self.assertIn("gemini31_rb_weighted_opportunity_ppr_v0", ids)
         self.assertIn("rb_role_pbp_context_blend_v0", ids)
         self.assertIn("wr_chain_mover_context_blend_v0", ids)
         self.assertIn("diagnostic_expected_missing_inputs", joined)
         self.assertIn("first_down_fields_are_pbp_proxies", joined)
+        self.assertIn("outside_red_zone_target_multiplier", joined)
+        self.assertIn("does_not_apply_to_standard_half_ppr_or_gng_keeper", joined)
         self.assertIn("no_2025_holdout_weight_tuning", joined)
         self.assertNotIn("route_share", joined)
+        self.assertNotIn("gemini" + "_style", joined)
 
     def test_feature_mart_insert_sql_consumes_first_down_pbp_proxies(self):
         sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
@@ -1813,12 +1817,27 @@ class RankingFormulaBacktestTests(unittest.TestCase):
 
         self.assertIn("receiving_first_down_exp_pbp_3yr", sql)
         self.assertIn("rushing_first_down_exp_pbp_3yr", sql)
+        self.assertIn("gemini31_rb_weighted_opportunity_ppr", sql)
+        self.assertIn("outside_red_zone_carries", sql)
+        self.assertIn("outside_red_zone_targets", sql)
         self.assertIn("injury_risk_score_3yr", sql)
         self.assertIn("depth_chart_role_score_3yr", sql)
         self.assertIn("WHEN raw_feature_value IS NULL THEN NULL", sql)
         self.assertNotIn("ranking_backtest_results", lowered)
         self.assertNotIn("ranking_formula_champions", lowered)
         self.assertNotIn("analytics_pigskin_rankings", lowered)
+
+    def test_rb_weighted_opportunity_migration_is_additive(self):
+        migration = Path("bigquery/migrations/0035__ranking_feature_mart_rb_weighted_opportunity.sql").read_text(
+            encoding="utf-8"
+        )
+        lowered = migration.lower()
+
+        self.assertIn("add column if not exists red_zone_carries", lowered)
+        self.assertIn("add column if not exists gemini31_rb_weighted_opportunity_ppr", lowered)
+        self.assertNotIn("drop ", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("truncate ", lowered)
 
     def test_vor_baseline_sensitivity_sql_is_read_only_and_policy_scoped(self):
         sql = rfb.build_vor_baseline_sensitivity_sql(
@@ -1829,8 +1848,8 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         )
         lowered = sql.lower()
 
-        self.assertIn("gemini_style_qb15_rb36_wr55_te12", sql)
-        self.assertIn("current_sql_native_qb12_rb24_wr24_te12", sql)
+        self.assertIn("deep_vorp_qb15_rb36_wr55_te12", sql)
+        self.assertIn("current_sql_vorp_qb12_rb24_wr24_te12", sql)
         self.assertIn("value_over_replacement_captured_rate", sql)
         self.assertIn("overall_pairwise_draft_win_rate", sql)
         self.assertIn("source_row_count", sql)
@@ -1848,13 +1867,13 @@ class RankingFormulaBacktestTests(unittest.TestCase):
             target_seasons=(2024, 2025),
             scoring_profile_ids=("ppr",),
             positions=("QB", "RB", "WR", "TE"),
-            backtest_run_id_prefix="ranking_backtest_sql_native_role_context_vor_sensitivity_v0",
-            formula_version="ranking_backtest_sql_native_role_context_vor_sensitivity_v0",
+            backtest_run_id_prefix="ranking_backtest_sql_native_role_context_vor_firstdown_v0",
+            formula_version="ranking_backtest_sql_native_role_context_vor_firstdown_v0",
             candidate_rows=rfb.role_context_and_vor_sensitivity_tournament_candidates(),
         )
         lowered = sql.lower()
 
-        self.assertIn("ranking_backtest_sql_native_role_context_vor_sensitivity_v0", sql)
+        self.assertIn("ranking_backtest_sql_native_role_context_vor_firstdown_v0", sql)
         self.assertIn("insert into `p.d.ranking_backtest_runs`", lowered)
         self.assertIn("insert into `p.d.ranking_backtest_candidate_summaries`", lowered)
         self.assertNotIn("ranking_backtest_results", lowered)

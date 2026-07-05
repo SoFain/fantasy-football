@@ -54,9 +54,9 @@ DRAFT_UTILITY_METRIC_CONTRACT = {
     "value_over_replacement_captured_rate": "Positive VOR captured by predicted top K divided by ideal actual top K VOR.",
 }
 VOR_BASELINE_POLICIES = {
-    "current_sql_native_qb12_rb24_wr24_te12": {"QB": 12, "RB": 24, "WR": 24, "TE": 12},
-    "gemini_style_qb15_rb36_wr55_te12": {"QB": 15, "RB": 36, "WR": 55, "TE": 12},
-    "middle_qb12_rb30_wr42_te12": {"QB": 12, "RB": 30, "WR": 42, "TE": 12},
+    "current_sql_vorp_qb12_rb24_wr24_te12": {"QB": 12, "RB": 24, "WR": 24, "TE": 12},
+    "deep_vorp_qb15_rb36_wr55_te12": {"QB": 15, "RB": 36, "WR": 55, "TE": 12},
+    "middle_vorp_qb12_rb30_wr42_te12": {"QB": 12, "RB": 30, "WR": 42, "TE": 12},
 }
 BQML_TRAIN_SEASONS = (2017, 2023)
 BQML_VALIDATION_SEASON = 2024
@@ -250,6 +250,12 @@ FIRST_DOWN_PBP_PROXY_FEATURES = {
     "receiving_chain_mover_score_3yr",
     "rushing_chain_mover_score_3yr",
 }
+RB_WEIGHTED_OPPORTUNITY_FEATURES = {
+    "red_zone_carries",
+    "outside_red_zone_targets",
+    "outside_red_zone_carries",
+    "gemini31_rb_weighted_opportunity_ppr",
+}
 POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     "QB": COMMON_FEATURES
     | TREND_FEATURES
@@ -270,9 +276,11 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | IDEAL_STAT_FEATURES
     | PBP_XFP_FEATURES
     | FIRST_DOWN_PBP_PROXY_FEATURES
+    | RB_WEIGHTED_OPPORTUNITY_FEATURES
     | {
         "carries",
         "targets",
+        "red_zone_targets",
         "rush_success_rate",
         "receiving_usage",
         "goal_line_opportunities",
@@ -340,6 +348,10 @@ FEATURE_SOURCE_MAP = {
     "receiving_yards": "receiving_yards",
     "receiving_epa": "receiving_epa",
     "red_zone_targets": "red_zone_targets",
+    "red_zone_carries": "red_zone_carries",
+    "outside_red_zone_targets": "outside_red_zone_targets",
+    "outside_red_zone_carries": "outside_red_zone_carries",
+    "gemini31_rb_weighted_opportunity_ppr": "gemini31_rb_weighted_opportunity_ppr",
     "success_rate": "success_rate",
     "passing_success_rate": "passing_success_rate",
     "cpoe": "cpoe",
@@ -2501,6 +2513,10 @@ INSERT INTO `{mart_table}` (
     receiving_yards,
     receiving_epa,
     red_zone_targets,
+    red_zone_carries,
+    outside_red_zone_targets,
+    outside_red_zone_carries,
+    gemini31_rb_weighted_opportunity_ppr,
     success_rate,
     passing_success_rate,
     dropbacks,
@@ -2606,6 +2622,15 @@ season_features AS (
         AVG(truth.receiving_yards) AS receiving_yards,
         AVG(truth.receiving_epa) AS receiving_epa,
         AVG(metrics.red_zone_targets) AS red_zone_targets,
+        AVG(opportunity.red_zone_carries) AS red_zone_carries,
+        AVG(GREATEST(COALESCE(metrics.targets, 0.0) - COALESCE(metrics.red_zone_targets, 0.0), 0.0)) AS outside_red_zone_targets,
+        AVG(GREATEST(COALESCE(metrics.carries, 0.0) - COALESCE(opportunity.red_zone_carries, 0.0), 0.0)) AS outside_red_zone_carries,
+        AVG(
+            0.47 * GREATEST(COALESCE(metrics.carries, 0.0) - COALESCE(opportunity.red_zone_carries, 0.0), 0.0)
+            + 1.28 * COALESCE(opportunity.red_zone_carries, 0.0)
+            + 1.54 * GREATEST(COALESCE(metrics.targets, 0.0) - COALESCE(metrics.red_zone_targets, 0.0), 0.0)
+            + 2.39 * COALESCE(metrics.red_zone_targets, 0.0)
+        ) AS gemini31_rb_weighted_opportunity_ppr,
         AVG(metrics.success_rate) AS success_rate,
         AVG(metrics.success_rate) AS passing_success_rate,
         AVG(truth.pass_attempts) AS dropbacks,
@@ -2730,6 +2755,10 @@ source_features AS (
         AVG(receiving_yards) AS receiving_yards,
         AVG(receiving_epa) AS receiving_epa,
         AVG(red_zone_targets) AS red_zone_targets,
+        AVG(red_zone_carries) AS red_zone_carries,
+        AVG(outside_red_zone_targets) AS outside_red_zone_targets,
+        AVG(outside_red_zone_carries) AS outside_red_zone_carries,
+        AVG(gemini31_rb_weighted_opportunity_ppr) AS gemini31_rb_weighted_opportunity_ppr,
         AVG(success_rate) AS success_rate,
         AVG(passing_success_rate) AS passing_success_rate,
         AVG(dropbacks) AS dropbacks,
@@ -2871,10 +2900,14 @@ with_source AS (
         source.role_stability_score,
         source.targets,
         source.carries,
-        source.receiving_yards,
-        source.receiving_epa,
-        source.red_zone_targets,
-        source.success_rate,
+    source.receiving_yards,
+    source.receiving_epa,
+    source.red_zone_targets,
+    source.red_zone_carries,
+    source.outside_red_zone_targets,
+    source.outside_red_zone_carries,
+    source.gemini31_rb_weighted_opportunity_ppr,
+    source.success_rate,
         source.passing_success_rate,
         source.dropbacks,
         source.rushing_attempts,
@@ -3005,6 +3038,10 @@ SELECT
     receiving_yards,
     receiving_epa,
     red_zone_targets,
+    red_zone_carries,
+    outside_red_zone_targets,
+    outside_red_zone_carries,
+    gemini31_rb_weighted_opportunity_ppr,
     success_rate,
     passing_success_rate,
     dropbacks,
@@ -3463,6 +3500,10 @@ feature_values AS (
       WHEN 'receiving_yards' THEN receiving_yards
       WHEN 'receiving_epa' THEN receiving_epa
       WHEN 'red_zone_targets' THEN red_zone_targets
+      WHEN 'red_zone_carries' THEN red_zone_carries
+      WHEN 'outside_red_zone_targets' THEN outside_red_zone_targets
+      WHEN 'outside_red_zone_carries' THEN outside_red_zone_carries
+      WHEN 'gemini31_rb_weighted_opportunity_ppr' THEN gemini31_rb_weighted_opportunity_ppr
       WHEN 'success_rate' THEN success_rate
       WHEN 'passing_success_rate' THEN passing_success_rate
       WHEN 'cpoe' THEN cpoe
@@ -3561,7 +3602,7 @@ scored_features AS (
       WHEN feature_name IN ('epa_per_play', 'passing_epa_per_play', 'receiving_epa', 'team_epa_per_play') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 25.0))
       WHEN feature_name = 'air_yards' AND raw_feature_value BETWEEN 0 AND 1 THEN LEAST(100.0, GREATEST(0.0, raw_feature_value * 100.0))
       WHEN feature_name IN ('air_yards', 'receiving_yards') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 150.0 * 100.0))
-      WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
+      WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_carries', 'outside_red_zone_targets', 'outside_red_zone_carries', 'gemini31_rb_weighted_opportunity_ppr', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
       WHEN feature_name IN ('receiving_xfp_pbp_3yr', 'rushing_xfp_pbp_3yr', 'passing_xfp_pbp_3yr', 'high_value_target_xfp_score_3yr', 'high_value_rush_xfp_score_3yr') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 18.0 * 100.0))
       WHEN feature_name IN ('receiving_first_down_exp_pbp_3yr', 'rushing_first_down_exp_pbp_3yr', 'passing_first_down_exp_pbp_3yr') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 8.0 * 100.0))
       ELSE LEAST(100.0, GREATEST(0.0, raw_feature_value))
@@ -4556,7 +4597,7 @@ def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, A
             "score_expression": "weighted_linear",
             "normalization": {"method": "bounded_0_100_sql"},
             "source_flags": {
-                "uses_phase_32_18_role_context_vor_sensitivity": True,
+                "uses_phase_32_18_role_context_vor_firstdown": True,
                 "no_2025_holdout_weight_tuning": True,
                 "no_champion_activation": True,
                 **source_flags,
@@ -4569,7 +4610,7 @@ def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, A
             "Injury Depth Role Diagnostic",
             formula(
                 position="RB",
-                version="role_context_and_vor_sensitivity_v0",
+                version="role_context_vor_firstdown_v0",
                 features=["profile_points_score", "injury_risk_score_3yr", "depth_chart_role_score_3yr"],
                 weights={"profile_points_score": 0.50, "injury_risk_score_3yr": 0.25, "depth_chart_role_score_3yr": 0.25},
                 source_flags={
@@ -4584,7 +4625,7 @@ def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, A
             "First Down PBP Proxy Diagnostic",
             formula(
                 position="WR",
-                version="role_context_and_vor_sensitivity_v0",
+                version="role_context_vor_firstdown_v0",
                 features=[
                     "profile_points_score",
                     "receiving_first_down_exp_pbp_3yr",
@@ -4604,11 +4645,46 @@ def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, A
             ),
         ),
         (
+            "gemini31_rb_weighted_opportunity_ppr_v0",
+            "Gemini 3.1 RB Weighted Opportunity PPR",
+            formula(
+                position="RB",
+                version="role_context_vor_firstdown_v0",
+                features=[
+                    "profile_points_score",
+                    "outside_red_zone_carries",
+                    "red_zone_carries",
+                    "outside_red_zone_targets",
+                    "red_zone_targets",
+                    "gemini31_rb_weighted_opportunity_ppr",
+                ],
+                weights={
+                    "profile_points_score": 0.10,
+                    "outside_red_zone_carries": 0.047,
+                    "red_zone_carries": 0.128,
+                    "outside_red_zone_targets": 0.154,
+                    "red_zone_targets": 0.239,
+                    "gemini31_rb_weighted_opportunity_ppr": 0.322,
+                },
+                source_flags={
+                    "gemini31_report_hypothesis": True,
+                    "ppr_only_diagnostic": True,
+                    "outside_red_zone_carry_multiplier": 0.47,
+                    "red_zone_carry_multiplier": 1.28,
+                    "outside_red_zone_target_multiplier": 1.54,
+                    "red_zone_target_multiplier": 2.39,
+                    "red_zone_definition": "yardline_100 <= 20",
+                    "does_not_apply_to_standard_half_ppr_or_gng_keeper": True,
+                    "no_2025_holdout_weight_tuning": True,
+                },
+            ),
+        ),
+        (
             "rb_role_pbp_context_blend_v0",
             "RB Role PBP Context Blend",
             formula(
                 position="RB",
-                version="role_context_and_vor_sensitivity_v0",
+                version="role_context_vor_firstdown_v0",
                 features=[
                     "profile_points_score",
                     "rushing_xfp_pbp_3yr",
@@ -4638,7 +4714,7 @@ def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, A
             "WR Chain Mover Context Blend",
             formula(
                 position="WR",
-                version="role_context_and_vor_sensitivity_v0",
+                version="role_context_vor_firstdown_v0",
                 features=[
                     "profile_points_score",
                     "receiving_role_dominance_xfp_3yr",
@@ -4664,11 +4740,11 @@ def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, A
             ),
         ),
         (
-            "gemini31_vor_baseline_sensitivity_v0",
-            "Gemini 3.1 VOR Baseline Sensitivity",
+            "deep_vorp_qb15_rb36_wr55_te12_diagnostic_v0",
+            "Deep VOR Baseline Sensitivity",
             formula(
                 position="QB",
-                version="role_context_and_vor_sensitivity_v0",
+                version="role_context_vor_firstdown_v0",
                 features=[
                     "profile_points_score",
                     "analytical_grade_proxy",
@@ -4685,7 +4761,7 @@ def role_context_and_vor_sensitivity_tournament_candidates() -> list[dict[str, A
                 },
                 source_flags={
                     "evaluated_by_vor_baseline_sensitivity_sql": True,
-                    "gemini_style_baseline_policy": "QB15/RB36/WR55/TE12",
+                    "deep_vorp_policy": "deep_vorp_qb15_rb36_wr55_te12",
                     "does_not_change_stored_vor_semantics": True,
                 },
             ),
@@ -5745,6 +5821,10 @@ feature_values AS (
       WHEN 'receiving_yards' THEN receiving_yards
       WHEN 'receiving_epa' THEN receiving_epa
       WHEN 'red_zone_targets' THEN red_zone_targets
+      WHEN 'red_zone_carries' THEN red_zone_carries
+      WHEN 'outside_red_zone_targets' THEN outside_red_zone_targets
+      WHEN 'outside_red_zone_carries' THEN outside_red_zone_carries
+      WHEN 'gemini31_rb_weighted_opportunity_ppr' THEN gemini31_rb_weighted_opportunity_ppr
       WHEN 'success_rate' THEN success_rate
       WHEN 'passing_success_rate' THEN passing_success_rate
       WHEN 'cpoe' THEN cpoe
@@ -5797,7 +5877,7 @@ scored_features AS (
       WHEN feature_name IN ('epa_per_play', 'passing_epa_per_play', 'receiving_epa', 'team_epa_per_play') THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 25.0))
       WHEN feature_name = 'air_yards' AND raw_feature_value BETWEEN 0 AND 1 THEN LEAST(100.0, GREATEST(0.0, raw_feature_value * 100.0))
       WHEN feature_name IN ('air_yards', 'receiving_yards') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 150.0 * 100.0))
-      WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
+      WHEN feature_name IN ('targets', 'carries', 'dropbacks', 'rushing_attempts', 'usage_volume', 'red_zone_targets', 'red_zone_carries', 'outside_red_zone_targets', 'outside_red_zone_carries', 'gemini31_rb_weighted_opportunity_ppr', 'red_zone_opportunities', 'goal_line_opportunities') THEN LEAST(100.0, GREATEST(0.0, raw_feature_value / 25.0 * 100.0))
       ELSE LEAST(100.0, GREATEST(0.0, raw_feature_value))
     END AS feature_score
   FROM feature_values
@@ -6937,7 +7017,20 @@ def _feature_value_to_score(feature: str, value: float) -> float:
         return max(0.0, min(100.0, (value / 150.0) * 100.0))
     if feature == "fantasy_points_over_expectation_3yr":
         return max(0.0, min(100.0, 50.0 + (value * 5.0)))
-    if feature in {"targets", "carries", "dropbacks", "rushing_attempts", "usage_volume", "red_zone_targets", "red_zone_opportunities", "goal_line_opportunities"}:
+    if feature in {
+        "targets",
+        "carries",
+        "dropbacks",
+        "rushing_attempts",
+        "usage_volume",
+        "red_zone_targets",
+        "red_zone_carries",
+        "outside_red_zone_targets",
+        "outside_red_zone_carries",
+        "gemini31_rb_weighted_opportunity_ppr",
+        "red_zone_opportunities",
+        "goal_line_opportunities",
+    }:
         return max(0.0, min(100.0, (value / 25.0) * 100.0))
     return max(0.0, min(100.0, value))
 

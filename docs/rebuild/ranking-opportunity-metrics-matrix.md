@@ -201,7 +201,7 @@ Next missing source recommendation:
 2. Direct NGS receiving and rushing ingest if source coverage is real.
 3. A narrower WR refinement that preserves current Pigskin pairwise strength before adding PBP captured-points boosters.
 
-## Phase 32.18 Role Context and VOR Sensitivity Matrix
+## Phase 32.18 Role Context, First-Down Proxy, Weighted Opportunity, and VOR Sensitivity Matrix
 
 Phase 32.18 added first-down PBP proxy fields to the PBP derived table and ranking feature mart. These fields are chain-mover proxies from existing `ffopportunity` PBP fields. They are not route-based metrics and must not be described as `1D/RR`, route share, or first-read share.
 
@@ -213,23 +213,26 @@ Phase 32.18 added first-down PBP proxy fields to the PBP derived table and ranki
 | `high_value_first_down_opportunity_score` | Derived from passing, rushing, and receiving first-down expected values | `high_value_first_down_opportunity_score_3yr` | Near complete where PBP identity exists. | Useful as secondary high-value opportunity context. |
 | `receiving_chain_mover_score` | Bounded score from receiving first-down proxy | `receiving_chain_mover_score_3yr` | Strong WR/TE/RB receiving coverage. | Useful for WR/TE context. |
 | `rushing_chain_mover_score` | Bounded score from rushing first-down proxy | `rushing_chain_mover_score_3yr` | Strong RB/QB coverage. | Useful for RB/QB context. |
+| `gemini31_rb_weighted_opportunity_ppr` | `0.47 * outside_red_zone_carries + 1.28 * red_zone_carries + 1.54 * outside_red_zone_targets + 2.39 * red_zone_targets` | `gemini31_rb_weighted_opportunity_ppr` | Populated for PPR feature mart target seasons 2017-2025 after migration 0035. | PPR-only diagnostic. Do not apply to Standard, Half PPR, or GNG Keeper. |
 | `injury_risk_score_3yr` | `raw_nflverse_injuries` lane | existing feature mart field | Blocked. `raw_nflverse_injuries` currently has 0 rows. | Leave missing and flagged. Do not fabricate. |
 | `depth_chart_role_score_3yr` | `raw_nflverse_depth_charts` lane | existing feature mart field | Blocked. `raw_nflverse_depth_charts` currently has 0 rows. | Leave missing and flagged. Do not fabricate. |
 
 Feature refresh and validation:
 
 - Migration `0034__first_down_pbp_proxy_features.sql` applied.
+- Migration `0035__ranking_feature_mart_rb_weighted_opportunity.sql` applied.
 - `player_week_pbp_opportunity_metrics` refreshed for 2014-2025 with 65,358 rows.
-- `ranking_backtest_feature_mart` refreshed for target seasons 2017-2025 with 156,244 rows.
+- `ranking_backtest_feature_mart` PPR QB/RB/WR/TE slices refreshed for target seasons 2017-2025 after migration 0035.
 - PBP validations 223 through 230 passed after the validation contract was extended to include first-down proxy fields.
+- Feature mart validations 213, 214, 221, 222, and 228 through 231 passed after adding RB weighted-opportunity columns.
 - Broad ranking validation still has an unrelated projection-rank ordering failure in validation 093. Ranking formula and feature mart validations passed.
 
 VOR baseline sensitivity:
 
 | Policy | Replacement ranks | Result |
 |---|---|---|
-| Current SQL-native | QB12/RB24/WR24/TE12 | Best VOR captured on 2024-2025 PPR slice: 0.8403. |
-| Middle | QB12/RB30/WR42/TE12 | Lower VOR captured: 0.7896. |
-| Gemini-style | QB15/RB36/WR55/TE12 | Lowest tested VOR captured: 0.7805, highest pick-band regret. |
+| `current_sql_vorp_qb12_rb24_wr24_te12` | QB12/RB24/WR24/TE12 | Best VOR captured on refreshed 2024-2025 PPR slice: 0.6911. |
+| `middle_vorp_qb12_rb30_wr42_te12` | QB12/RB30/WR42/TE12 | Lower VOR captured: 0.6690. |
+| `deep_vorp_qb15_rb36_wr55_te12` | QB15/RB36/WR55/TE12 | Lowest tested VOR captured: 0.6370, highest pick-band regret. |
 
-Decision: keep first-down proxies as component inputs. Injury/depth needs source remediation before scoring. Do not change the official stored VOR semantics yet.
+Decision: keep first-down proxies and the PPR RB weighted-opportunity diagnostic as component inputs. Injury/depth needs source remediation before scoring. Do not change the official stored VOR semantics yet.
