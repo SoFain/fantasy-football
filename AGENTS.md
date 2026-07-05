@@ -71,6 +71,34 @@ Patch the narrow failing path first.
 Avoid unrelated cleanup.
 Do not add helpers, wrappers, maps, files, abstractions, or validation layers unless they clearly reduce complexity.
 
+## DOX Framework
+
+Use the DOX AGENTS.md hierarchy pattern from https://github.com/agent0ai/dox.
+
+AGENTS.md files are binding work contracts for their subtrees.
+Before editing, read the root AGENTS.md, identify the paths you expect to touch, then walk from the repo root to each target path and read every AGENTS.md found along that route.
+The nearest AGENTS.md controls local details. Parent files still control repo-wide rules.
+If docs conflict, the closer doc controls local work details, but child docs may not weaken root-level quality, safety, or workflow rules.
+
+After meaningful changes, do a DOX pass before closing the task.
+Update the closest owning AGENTS.md when a change affects durable structure, responsibilities, workflow, required inputs or outputs, permissions, constraints, artifacts, user preferences, or quality standards.
+Update parent docs when parent-level structure, workflow, or the child index changes.
+Remove stale or contradictory text instead of explaining history.
+Small edits that do not change behavior or contracts may leave docs unchanged, but the DOX pass still applies.
+
+Child AGENTS.md files should use this section order when created:
+
+- Purpose
+- Ownership
+- Local Contracts
+- Work Guidance
+- Verification
+- Child DOX Index
+
+Keep DOX docs concise, current, and operational.
+Document stable contracts, not diary entries.
+Put broad rules in parent docs and concrete local rules in child docs.
+
 ## Patterns to Avoid
 
 Avoid single-use abstractions.
@@ -129,5 +157,12 @@ After work, summarize:
 - remaining risk
 
 Keep summaries short. Do not explain obvious edits.
+
+## Child DOX Index
+
+- `bigquery/AGENTS.md`
+- `docs/rebuild/AGENTS.md`
+- `src/AGENTS.md`
+- `tests/AGENTS.md`
 
 Oververbosity:low
