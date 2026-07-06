@@ -102,6 +102,7 @@ Current blockers:
 - `ranking_backtest_feature_mart` has 2025 target slices, not 2026.
 - The existing BQML prediction helper is built for historical rows with known outcome labels. A 2026 review path needs an outcome-free prediction input.
 - There is no dedicated review-only ranking table yet.
+- `analytics_pigskin_rankings_candidates` currently has only the 2026 `ppr` slice. Standard, Half PPR, and GNG Keeper review boards are blocked until a non-mutating profile-specific candidate input exists.
 
 ## Sleeper Live-Context Guardrails
 
@@ -113,6 +114,8 @@ Current blockers:
 
 ## Latest Evidence
 
+- [Phase 32.31 scoring-profile review input audit](validation/phase-32-31-scoring-profile-review-inputs-report.md)
+- [Phase 32.30 live 2026 review boards](validation/phase-32-30-live-2026-review-board-report.md)
 - [Phase 32.28 BQML NGS retrain](validation/phase-32-28-bqml-ngs-retrain-report.md)
 - [Phase 32.27 direct NGS metrics](validation/phase-32-27-ngs-direct-metrics-report.md)
 - [Phase 32.26 BQML candidate rankings](validation/phase-32-26-bqml-candidate-rankings-owner-review-report.md)

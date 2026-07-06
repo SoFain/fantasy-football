@@ -4,6 +4,8 @@ Review version: `phase32_30_live_2026_ppr_review_20260706`
 
 Scope: PPR-only BQML review boards from the 2026 candidate universe. Active live rankings for all four scoring profiles were verified separately, but non-PPR BQML boards were not generated because `analytics_pigskin_rankings_candidates` only has `ppr` rows for 2026.
 
+Phase 32.31 Standard-first audit result: non-PPR review inputs are blocked. `standard`, `half_ppr`, and `gng_keeper` each have active live final rankings and profile fantasy-point history, but they do not have 2026 review candidate rows. Do not derive those boards from the PPR candidate slice.
+
 TE owner-review output is capped at TE35. Live ranking tables still have TE60 per scoring profile and were not changed.
 
 Owner-review scoring profile order is Standard, Half PPR, PPR, then GNG Keeper. Phase 32.30 can only display PPR BQML review boards because the available 2026 candidate input is PPR-only. Standard, Half PPR, and GNG Keeper are blocked for this review-board run. Do not treat the PPR challenger as a global winner across scoring systems.
@@ -16,6 +18,15 @@ Profile-specific challenger classification:
 | half_ppr | blocked | not selected |
 | ppr | generated with warnings | ranking_bqml_enriched_logistic_elite_v1 |
 | gng_keeper | blocked | not selected |
+
+Phase 32.31 classification:
+
+| Scoring profile | Candidate rows | Active baseline rows | Review input status |
+|---|---:|---:|---|
+| standard | 0 | 285 | blocked |
+| half_ppr | 0 | 285 | blocked |
+| ppr | 936 | 285 | ready with warnings |
+| gng_keeper | 0 | 285 | blocked |
 
 ## Model Summary
 | Model | Rows | Score min | Score max | Score avg | Avg missing % |

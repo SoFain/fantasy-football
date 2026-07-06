@@ -40,6 +40,19 @@ The practical target is a formula that beats the current deterministic baseline 
 - `standard`
 - `gng_keeper`
 
+## Live 2026 Review Input Status
+
+Phase 32.31 confirmed that active final rankings exist for all four scoring profiles, but the transient 2026 candidate table is currently PPR-only.
+
+| Profile | 2026 candidate rows | Active final rows | Review-board status |
+|---|---:|---:|---|
+| `standard` | 0 | 285 | blocked |
+| `half_ppr` | 0 | 285 | blocked |
+| `ppr` | 936 | 285 | generated with warnings in Phase 32.30 |
+| `gng_keeper` | 0 | 285 | blocked |
+
+This is not a champion decision. Do not average PPR-only review output across scoring systems.
+
 ## Historical Seasons Covered
 
 Target seasons: 2017 through 2025.
