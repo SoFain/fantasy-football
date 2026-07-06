@@ -63,13 +63,28 @@ class PigskinContextToolTests(unittest.TestCase):
 
         sql, job_config = client.calls[0]
         self.assertIn("analytics_pigskin_rankings", sql)
+        self.assertIn("scoring_profile_id = @scoring_profile_id", sql)
         self.assertNotIn("DROP TABLE", sql)
         self.assertEqual(job_config.maximum_bytes_billed, tools.DEFAULT_MAX_BYTES_BILLED)
-        self.assertEqual(
-            {param.name: param.value for param in job_config.query_parameters}["limit"],
-            tools.MAX_RANKINGS_LIMIT,
-        )
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["limit"], tools.MAX_RANKINGS_LIMIT)
+        self.assertEqual(params["scoring_profile_id"], "standard")
         self.assertEqual(result["row_count"], 1)
+
+    def test_rankings_slice_accepts_scoring_profile_without_mixing_profiles(self):
+        client = FakeClient(rows=[])
+
+        tools.get_rankings_slice_tool(
+            scoring_profile_id="half_ppr",
+            limit=10,
+            client=client,
+            dataset_id="fantasy_football_brain",
+        )
+
+        sql, job_config = client.calls[0]
+        self.assertIn("CASE WHEN @position IS NULL THEN ranking_score END DESC", sql)
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["scoring_profile_id"], "half_ppr")
 
     def test_bad_dataset_identifier_is_rejected(self):
         client = FakeClient()

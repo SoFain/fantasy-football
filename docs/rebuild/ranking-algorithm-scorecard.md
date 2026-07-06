@@ -46,14 +46,16 @@ Phase 32.31 confirmed that active final rankings exist for all four scoring prof
 
 | Profile | 2026 candidate rows | Active final rows | Review-board status |
 |---|---:|---:|---|
-| `standard` | 936 CTE-only | 285 | generated with warnings in Phase 32.32 |
-| `half_ppr` | 936 CTE-only | 285 | generated with warnings in Phase 32.32 |
-| `ppr` | 936 CTE-only plus existing transient table | 285 | generated with warnings in Phase 32.32 |
-| `gng_keeper` | 936 CTE-only | 285 | generated with warnings in Phase 32.32 |
+| `standard` | 936 CTE-only | 260 | generated with warnings in Phase 32.32 |
+| `half_ppr` | 936 CTE-only | 260 | generated with warnings in Phase 32.32 |
+| `ppr` | 936 CTE-only plus existing transient table | 260 | generated with warnings in Phase 32.32 |
+| `gng_keeper` | 936 CTE-only | 260 | generated with warnings in Phase 32.32 |
 
 This is not a champion decision. Do not average review output across scoring systems. The production candidate table remains PPR-only and was not overwritten.
 
 Phase 32.37 changed active live ranking depth to QB45, RB80, WR100, and TE35 per scoring profile. Active live rows now total 1,040. No live ranking generation ran and no formula champion is active.
+
+Phase 32.38 set v1.0 live defaults without changing ranking data. Current Pigskin remains live for every scoring profile and position. Standard is the default scoring profile, ALL is the default Player Profiles board, and Pigskin chat now receives static read-only formula context. No challenger formula was promoted.
 
 ## Historical Seasons Covered
 
@@ -133,6 +135,31 @@ Production ranking depth:
 - Future owner-approved generation uses TE35 through `src.generate_pigskin_rankings.DEFAULT_POSITION_LIMITS`.
 
 No champion is active. Live ranking generation did not run.
+
+### Phase 32.38: V1.0 live ranking defaults and formula context
+
+Phase 32.38 held Current Pigskin as the v1.0 live formula for Standard, Half PPR, PPR, and GNG Keeper across QB, RB, WR, and TE.
+
+Decision:
+
+- No champion formula is active.
+- No challenger formula was promoted.
+- BQML Logistic remains review-only challenger evidence.
+- BQML Linear Points and BQML NGS remain context only.
+- Stats02, PBP, and NGS remain component signals.
+- Injury and availability remain risk flags.
+
+Live app defaults:
+
+- Player Profiles scoring default: `standard`.
+- Player Profiles position default: `ALL`.
+- `ALL` is a cross-position Current Pigskin board, not position chunks.
+- TE live depth remains 35.
+
+Pigskin chat context:
+
+- Static context file: `docs/rebuild/pigskin-live-ranking-formula-context.md`.
+- The context tells Pigskin to name Current Pigskin as active, avoid BQML-active claims, avoid champion-active claims, and not invent `pigskin_context_score`.
 
 ### Phase 32.5: Rolling multi-year tournament
 

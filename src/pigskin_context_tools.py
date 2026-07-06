@@ -80,10 +80,11 @@ def get_pigskin_context_tool_declarations() -> list[dict[str, Any]]:
         },
         {
             "name": "get_rankings_slice",
-            "description": "Load Pigskin-owned active rankings for a position, season, phase, or format.",
+            "description": "Load Pigskin-owned active rankings for a scoring profile, position, season, phase, or format.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "scoring_profile_id": {"type": "string"},
                     "position": {"type": "string"},
                     "season": {"type": "integer"},
                     "ranking_phase": {"type": "string"},
@@ -302,6 +303,7 @@ def search_players_tool(
 
 def get_rankings_slice_tool(
     *,
+    scoring_profile_id: str | None = None,
     position: str | None = None,
     season: int | str | None = None,
     ranking_phase: str | None = None,
@@ -317,6 +319,7 @@ def get_rankings_slice_tool(
     SELECT
         model_run_id,
         ranking_version,
+        scoring_profile_id,
         generated_at,
         adjudicated_at,
         season,
@@ -353,16 +356,21 @@ def get_rankings_slice_tool(
         data_snapshot_label
     FROM `{_table_id(query_client.project, dataset, "analytics_pigskin_rankings")}`
     WHERE is_active = TRUE
+        AND scoring_profile_id = @scoring_profile_id
         AND (@position IS NULL OR position = @position)
         AND (@season IS NULL OR season = @season)
         AND (@ranking_phase IS NULL OR ranking_phase = @ranking_phase)
         AND (@format IS NULL OR format = @format)
-    ORDER BY position, `rank`
+    ORDER BY
+        CASE WHEN @position IS NULL THEN ranking_score END DESC,
+        position,
+        `rank`
     LIMIT @limit
     """
     rows = _query_records(
         sql,
         [
+            ("scoring_profile_id", "STRING", _clean_optional(scoring_profile_id) or "standard"),
             ("position", "STRING", _clean_optional(position)),
             ("season", "INT64", _clean_int_optional(season)),
             ("ranking_phase", "STRING", _clean_optional(ranking_phase)),

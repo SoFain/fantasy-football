@@ -44,6 +44,7 @@ from src.pigskin_context_tools import (
     execute_pigskin_context_tool,
     get_pigskin_context_tool_declarations,
 )
+from src.pigskin_live_formula_context import load_pigskin_live_formula_context
 from src.pigskin_packet_guardrails import PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL
 from src.pigskin_packet_qa_ui import run_pigskin_packet_qa_lookup
 from src import player_profile_ranking_profiles as profile_ranking_profiles
@@ -3151,12 +3152,7 @@ def render_player_profiles_tab():
             f"`analytics_pigskin_rankings`, version `{version_label}`."
         )
     else:
-        if selected_scoring_option["scoring_profile_id"] == PLAYER_PROFILE_SCORING_PROFILE_DEFAULT:
-            st.warning(
-                "Canonical Pigskin rankings are not materialized yet. Showing legacy analytical grade order until Data Ops publishes Pigskin rankings."
-            )
-        else:
-            st.warning(PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE)
+        st.warning(PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE)
 
     # Helpers for rendering
     def format_currency(val):
@@ -3589,34 +3585,40 @@ def render_player_profiles_tab():
     else:
         # Segmented position controls
         if "selected_pos" not in st.session_state:
-            st.session_state.selected_pos = "QB"
+            st.session_state.selected_pos = "ALL"
 
         cols_pos = st.columns(5)
-        positions = ["All", "QB", "RB", "WR", "TE"]
+        positions = ["ALL", "QB", "RB", "WR", "TE"]
 
         for idx, pos in enumerate(positions):
-            label = f"🏈 {pos}" if pos != "All" else "🌍 All"
+            label = "🌍 ALL" if pos == "ALL" else f"🏈 {pos}"
             btn_type = "primary" if st.session_state.selected_pos == pos else "secondary"
             if cols_pos[idx].button(label, type=btn_type, width="stretch", key=f"pos_btn_{pos}"):
                 st.session_state.selected_pos = pos
                 st.rerun()
 
         selected_pos = st.session_state.selected_pos
-        st.markdown(f"#### 🏆 {selected_pos} Position Rankings Directory")
+        directory_label = "ALL Draft Board" if selected_pos == "ALL" else f"{selected_pos} Position Rankings Directory"
+        st.markdown(f"#### 🏆 {directory_label}")
 
         # Filter and show
         df_pos = df.copy()
-        if selected_pos != "All":
+        if selected_pos != "ALL":
             df_pos = df_pos[df_pos["position"] == selected_pos]
         if has_pigskin_rankings:
             df_pos = df_pos[df_pos["pigskin_rank"].notna()]
 
         df_pos["display_rank_sort"] = pd.to_numeric(df_pos["display_rank"], errors="coerce").fillna(9999)
         df_pos["display_score_sort"] = pd.to_numeric(df_pos["display_score"], errors="coerce").fillna(0)
-        if selected_pos == "All":
-            df_pos = df_pos.sort_values(by=["position", "display_rank_sort", "display_score_sort"], ascending=[True, True, False])
+        if selected_pos == "ALL":
+            df_pos = df_pos.sort_values(
+                by=["display_score_sort", "display_rank_sort", "position", "player_display_name"],
+                ascending=[False, True, True, True],
+            )
+            df_pos["board_rank"] = range(1, len(df_pos) + 1)
         else:
             df_pos = df_pos.sort_values(by=["display_rank_sort", "display_score_sort"], ascending=[True, False])
+            df_pos["board_rank"] = df_pos["display_rank"]
 
         if df_pos.empty:
             st.info("No players found matching the selected position.")
@@ -3624,6 +3626,7 @@ def render_player_profiles_tab():
 
         # Format columns for rankings display
         display_ranks = df_pos.copy()
+        display_ranks["display_rank"] = display_ranks["board_rank"]
         display_ranks["display_rank"] = display_ranks["display_rank"].apply(lambda x: f"{int(float(x))}" if not pd.isna(x) else "N/A")
         display_ranks["display_score"] = display_ranks["display_score"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
         display_ranks["pigskin_tier"] = display_ranks["pigskin_tier"].fillna("legacy grade")
@@ -3634,7 +3637,7 @@ def render_player_profiles_tab():
         display_ranks["weight"] = display_ranks["weight"].apply(lambda x: f"{int(float(x))} lbs" if (x and not pd.isna(x)) else "N/A")
 
         display_ranks = display_ranks.rename(columns={
-            "display_rank": "Rank",
+            "display_rank": "Board Rank" if selected_pos == "ALL" else "Rank",
             "player_display_name": "Player",
             "team": "Team",
             "college_name": "College",
@@ -3648,7 +3651,7 @@ def render_player_profiles_tab():
         })
 
         st.dataframe(
-            display_ranks[["Rank", "Player", "Team", "College", "Pigskin Score", "Tier", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
+            display_ranks[[("Board Rank" if selected_pos == "ALL" else "Rank"), "Player", "Team", "College", "Pigskin Score", "Tier", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
             width="stretch",
             hide_index=True
         )
@@ -4161,6 +4164,8 @@ def render_ai_cohost():
     [sarcastic] Great, he scored twice. Very cute. Now look at the target share before your roster starts paying vibes tax.
     """ if script_mode else ""
 
+        live_formula_context = load_pigskin_live_formula_context()
+
         # Define Co-Host System Prompt
         system_prompt = f"""
     You are Pigskin, the analytical co-host for AI vs Vibes, a fantasy football show built around evidence beating narrative.
@@ -4191,6 +4196,7 @@ def render_ai_cohost():
     Do not expose project internals to the user unless needed to explain a missing-data problem.
     {context_tool_protocol}
     {PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL}
+    {live_formula_context}
     {render_pigskin_chat_schema()}
 
     ### The Analytical Filter Protocol ###

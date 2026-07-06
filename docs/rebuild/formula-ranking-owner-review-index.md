@@ -8,6 +8,15 @@ Current Pigskin stays live.
 
 No formula champion is active. No BigQuery ML, NGS, injury, PBP, or Stats02 lane should replace current Pigskin without a separate owner-approved champion-selection phase and a separate live ranking generation phase.
 
+Phase 32.38 v1.0 studio defaults:
+
+- Live scoring default: `standard`.
+- Live board default: `ALL`.
+- Live ranking source: `analytics_pigskin_rankings` active Current Pigskin rows.
+- Live depth: QB45, RB80, WR100, TE35 per scoring profile.
+- Formula Review remains read-only owner-review evidence.
+- Pigskin chat has static read-only formula context for defending Current Pigskin ranks.
+
 ## Live Baseline
 
 | Lane | Status | Use |
@@ -130,7 +139,7 @@ Current constraints:
 
 ## Recommended Next Action
 
-Recommended: Phase 32.38, owner inspection and hold current Pigskin baseline.
+Recommended: studio use with Current Pigskin held for v1.0.
 
 The owner can now review the Formula Review tab. Any next phase should stay profile-specific and avoid one global winner across scoring systems.
 
@@ -143,6 +152,31 @@ Owner action choices:
 - Select a review-only challenger separately by scoring profile.
 - Request review-only table persistence if Markdown-backed dashboard data is not enough.
 - Approve live ranking generation only after explicit champion selection.
+
+## Phase 32.38 V1.0 Live Defaults
+
+Owner-approved v1.0 policy:
+
+| scoring_profile_id | QB | RB | WR | TE |
+|---|---|---|---|---|
+| `standard` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |
+| `half_ppr` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |
+| `ppr` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |
+| `gng_keeper` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |
+
+No profile-position challenger was promoted for v1.0. Enriched Logistic Elite remains review-only challenger evidence. Enriched Linear Points and BQML NGS remain context only. Stats02, PBP, and NGS remain component signals. Injury and availability remain risk flags.
+
+Player Profiles defaults:
+
+- Scoring system: `standard`.
+- Position board: `ALL`.
+- `ALL` sorts active Current Pigskin rows as one cross-position board by Pigskin score, then position rank, position, and player name.
+
+Pigskin chat formula context:
+
+- Static source: `docs/rebuild/pigskin-live-ranking-formula-context.md`.
+- Context is read-only and packaged into the Cloud Run image.
+- It does not expose backtest, champion, ranking-generation, or write controls.
 
 ## Phase 32.37 Emergency Formula Review Packaging Fix
 

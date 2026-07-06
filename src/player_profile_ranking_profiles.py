@@ -6,12 +6,12 @@ from google.cloud import bigquery
 
 
 PLAYER_PROFILE_SCORING_PROFILE_OPTIONS = (
-    {"label": "PPR", "scoring_profile_id": "ppr"},
-    {"label": "Half PPR", "scoring_profile_id": "half_ppr"},
     {"label": "Standard", "scoring_profile_id": "standard"},
+    {"label": "Half PPR", "scoring_profile_id": "half_ppr"},
+    {"label": "PPR", "scoring_profile_id": "ppr"},
     {"label": "GNG Keeper", "scoring_profile_id": "gng_keeper"},
 )
-PLAYER_PROFILE_SCORING_PROFILE_DEFAULT = "ppr"
+PLAYER_PROFILE_SCORING_PROFILE_DEFAULT = "standard"
 PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE = "Rankings for this scoring system have not been generated yet."
 PLAYER_PROFILE_POSITION_DEPTH_LIMITS = {
     "QB": 45,

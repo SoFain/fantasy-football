@@ -108,6 +108,22 @@ PBP values are xFP-like component proxies, not official fantasy-point xFP column
 - Phase 32.15 writes summary-only PBP diagnostic evidence. It does not write detail rows, live rankings, or champion rows.
 - Phase 32.32 confirms CTE-only live 2026 BQML review input is available for Standard, Half PPR, PPR, and GNG Keeper. The production candidate table remains PPR-only and was not overwritten.
 - Phase 32.37 deployed the read-only Formula Review dashboard code and reduced active live TE depth to 35 per scoring profile. It did not run live ranking generation, write champions, overwrite candidates, call Gemini, call Pigskin chat, call Sleeper, train BQML, or ingest source data.
+- Phase 32.38 keeps opportunity, role, ideal, PBP, NGS, injury, and availability fields as explanation context only for v1.0. Current Pigskin remains the live formula for every scoring profile and position. Pigskin chat can use `docs/rebuild/pigskin-live-ranking-formula-context.md` as static policy context, but it must not treat any component lane as an active champion.
+
+## Phase 32.38 Formula-Context Status
+
+| Field family | Pigskin chat use for v1.0 | Live formula status |
+|---|---|---|
+| Analytical grade proxy | Explain Current Pigskin candidate evidence. | Part of Current Pigskin candidate proxy. |
+| Opportunity score proxy | Explain role and workload strength. | Part of Current Pigskin candidate proxy. |
+| Efficiency score proxy | Explain production quality. | Part of Current Pigskin candidate proxy. |
+| Role stability score | Explain role reliability and volatility. | Part of Current Pigskin candidate proxy. |
+| Profile points score | Explain scoring-profile fit. | Part of Current Pigskin candidate proxy. |
+| Stats02 fields | Owner-review component signal only. | Not live. |
+| PBP xFP fields | Owner-review component signal only. | Not live. |
+| Direct NGS fields | Owner-review component signal only. | Not live. |
+| Injury and availability fields | Risk flags only. | Not live. |
+| Historical depth context | Blocked. | Not live. |
 
 ## Phase 32.23 Owner-Review Status
 
