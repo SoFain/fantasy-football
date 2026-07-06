@@ -954,10 +954,12 @@ Position read from latest stored summaries:
 
 Owner-review conclusion:
 
-- Current Pigskin remains live baseline.
-- BQML logistic and BQML linear points remain the strongest model challenger lanes.
-- Stats02 WR/TE and PBP RB/WR remain component or position-specific review lanes.
-- RB and TE availability should be displayed or reviewed as risk flags, not formula defaults.
+- Live baseline: current Pigskin candidate score v1.
+- Strong challenger lanes: BQML logistic elite, BQML linear points, and simple projection.
+- Owner-review concepts: Stats02 WR/TE, QB Stats02, and selected RB/PBP component lanes.
+- Risk flags only: RB availability, TE availability, injury burden, and missed-time risk.
+- Rejected or not default: generic 5 percent availability blend, v2 trend-aware champion path, broad ensembles, and injury-only candidates.
+- Blocked: historical depth context.
 - No champion formula is active.
 - Recommended next technical lane: BQML retrain with ideal, PBP, injury, and role context, or direct NGS ingest if the owner wants source expansion first.
 

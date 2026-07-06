@@ -191,14 +191,18 @@ Rejected or blocked as formula defaults:
 
 ## Owner Decision Summary
 
-Answers:
+Owner classification lock:
 
-- Live baseline: current Pigskin candidate score v1 remains the live baseline.
-- Owner-review candidates: BQML logistic elite, BQML linear points, Stats02 WR/TE, QB Stats02, and selected RB/PBP component lanes.
-- Useful but not activation-ready: simple projection, scarcity adjusted value, PBP RB/WR, TE availability, RB availability.
-- Rejected: generic 5 percent availability default, v2 trend-aware direct champion path, broad ensembles from Phase 32.11, injury-only candidates, historical LLM replay.
-- Risk flags only: RB and TE availability, injury burden, missed-time risk.
-- Blocked: historical depth context.
+| Category | Entries |
+|---|---|
+| Live baseline | current Pigskin candidate score v1 |
+| Strong challenger lanes | BQML logistic elite; BQML linear points; simple projection |
+| Owner-review concepts | Stats02 WR/TE; QB Stats02; selected RB/PBP component lanes |
+| Risk flags only | RB availability; TE availability; injury burden; missed-time risk |
+| Rejected or not default | generic 5 percent availability blend; v2 trend-aware champion path; broad ensembles; injury-only candidates |
+| Blocked | historical depth context |
+
+Interpretation: strong challenger does not mean production-ready. It means the lane deserves owner review, retrain, or follow-up comparison before any champion-selection phase.
 
 Recommended next technical phase:
 
