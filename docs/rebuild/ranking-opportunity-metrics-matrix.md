@@ -324,3 +324,26 @@ Result read:
 - WR remains fragile. It should not be promoted until it protects pairwise strength.
 
 Decision: keep injury availability as a low-weight modifier lane. Do not activate a champion. Do not tune on 2025 holdout. Do not use Sleeper current roster data as historical input.
+
+## Phase 32.22 Owner-Review Cutline Read
+
+Phase 32.22 evaluated the RB and TE availability modifiers as draft-utility cutline tools. It used read-only SQL only.
+
+| Field | Cutline read | Carry-forward decision |
+|---|---|---|
+| `availability_score_3yr` | Helps selected RB and TE movement, but does not consistently improve position cutlines. | Keep as a small risk flag and explainability field. |
+| `injury_burden_score_3yr` | Useful for capped penalty context, but missingness and source sparsity make it too rough for promotion. | Keep inverted and low-weight only. |
+| `missed_time_risk_score_3yr` | Sparse. It helps explain some penalty movement but cannot carry a formula. | Keep as warning context. |
+| `high_value_rush_xfp_score_3yr` | Drives much of the RB modifier movement. Overall draft cutlines improved, position cutlines did not. | Keep as RB component. Do not call the RB result an injury win. |
+| `receiving_role_dominance_xfp_3yr` | Drives much of the TE modifier movement. TE6 and TE12 improved in 2025 holdout, but 2024 TE12 weakened. | Keep as TE component with risk-flag overlay. |
+| `depth_chart_role_score_3yr` | Still unavailable. | Keep blocked and null. |
+| Sleeper current context | Not used. | Keep live-current display only, never historical backtest input. |
+
+Cutline decision:
+
+- RB availability modifier: `use as risk flag only`.
+- TE availability modifier: `use as risk flag only`.
+- Generic 5 percent availability blend: `reject as default`.
+- WR availability modifier: `reject for owner-review`.
+
+Reason: RB and TE have useful examples, but neither passes the full owner-review challenger threshold. RB improves overall draft-board cuts while failing position validation cuts. TE improves TE6 and TE12 in the holdout but has unstable TE3 and 2024 TE12 behavior. This is a risk-adjustment signal, not a ranking model.

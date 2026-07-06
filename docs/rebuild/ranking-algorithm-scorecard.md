@@ -859,6 +859,70 @@ Decision:
 - Keep WR injury modifiers out of owner-review challenger status until they preserve current Pigskin pairwise strength.
 - BQML comparison was unavailable in the persisted summary table for this run, so it remains a future comparison lane.
 
+### Phase 32.22: RB/TE availability owner-review cutlines
+
+Phase 32.22 turned the Phase 32.21 RB and TE availability-modifier signal into owner-readable cutline evidence. It used read-only SQL CTEs against `ranking_backtest_feature_mart` and the existing Phase 32.21 summary rows. No detail rows, champion rows, live rankings, Pigskin chat, Gemini calls, Sleeper calls, or deploys occurred.
+
+Evidence verified:
+
+| Check | Result |
+|---|---:|
+| Phase 32.21 run rows | 4 |
+| Phase 32.21 summary rows | 284 |
+| New injury-availability summary rows | 60 |
+| Detail rows for this run prefix | 0 |
+| Champion rows | 0 |
+
+Owner-review status:
+
+| Candidate | Position | Status | Reason |
+|---|---|---|---|
+| `rb_current_pigskin_pbp_availability_blend_v0` | RB | use as risk flag only | Strong overall draft-board deltas, but position cutlines weaken in 2024 validation and 2017-2025 aggregate. |
+| `te_current_pigskin_stats02_availability_blend_v0` | TE | use as risk flag only | Useful TE6/TE12 signal, but TE3 and 2024 TE12 remain unstable with hit-lost examples. |
+| `current_pigskin_availability_blend_05_v0` | all | reject as default | Phase 32.21 showed over-penalization risk. |
+| WR availability modifiers | WR | reject for owner-review | Pairwise remained fragile. |
+
+RB position cutline deltas versus current Pigskin, profile average:
+
+| Slice | RB6 pairwise | RB12 pairwise | RB24 pairwise | Captured read |
+|---|---:|---:|---:|---|
+| 2017-2025 aggregate | -0.0022 | -0.0029 | -0.0025 | RB12 captured -0.0012, RB24 captured -0.0019. |
+| 2024 validation | -0.0082 | -0.0075 | -0.0067 | RB6 captured -0.0168, RB24 captured -0.0122. |
+| 2025 holdout | -0.0007 | +0.0003 | -0.0007 | RB18 captured +0.0025. RB24 flat. |
+
+RB overall draft-board deltas versus current Pigskin, profile average:
+
+| Slice | Top 24 overall pairwise | Top 50 overall pairwise | Top 100 overall pairwise | Bust read |
+|---|---:|---:|---:|---|
+| 2017-2025 aggregate | +0.0115 | +0.0080 | +0.0036 | Bust rate improved at top 24 and top 50. |
+| 2024 validation | +0.0078 | +0.0059 | +0.0031 | Top 24 bust rate improved by 0.0347. |
+| 2025 holdout | +0.0090 | +0.0047 | +0.0041 | Top 24 bust rate improved by 0.0098. |
+
+TE position cutline deltas versus current Pigskin, profile average:
+
+| Slice | TE3 pairwise | TE6 pairwise | TE12 pairwise | Captured read |
+|---|---:|---:|---:|---|
+| 2017-2025 aggregate | +0.0015 | +0.0014 | +0.0020 | TE12 captured +0.0041, TE18 captured +0.0029. |
+| 2024 validation | +0.0032 | +0.0007 | -0.0137 | TE3 captured +0.0142, TE12 captured -0.0220. |
+| 2025 holdout | +0.0145 | +0.0082 | +0.0025 | TE6 captured +0.0108, TE12 captured +0.0021. |
+
+TE overall draft-board deltas versus current Pigskin, profile average:
+
+| Slice | Top 24 overall pairwise | Top 50 overall pairwise | Top 100 overall pairwise | Read |
+|---|---:|---:|---:|---|
+| 2017-2025 aggregate | +0.0007 | +0.0009 | +0.0006 | Tiny positive, not actionable by itself. |
+| 2024 validation | +0.0018 | +0.0015 | +0.0009 | Small overall positive despite TE position instability. |
+| 2025 holdout | -0.0002 | -0.0002 | -0.0006 | Slightly weaker overall. |
+
+Player movement read:
+
+- RB moved Kenneth Walker into the 2024 RB12 cutline, which helped in the example row, but also moved Brian Robinson and James Cook down in ways that hurt validation cutlines.
+- RB 2025 moved Kareem Hunt into RB12 in several profiles, but also moved Bam Knight out despite top-four actual outcomes in the sampled weeks.
+- TE moved Dallas Goedert and David Njoku into 2025 TE6 in PPR examples, but pushed Taysom Hill out in mixed cases and kept false negatives such as Anthony Firkser.
+- TE 2024 avoided some Jake Ferguson bust exposure, but also lost Ferguson hit rows and missed Noah Gray spike weeks.
+
+Decision: carry RB and TE low-weight availability forward as a risk flag only. It is not owner-review challenger status for champion selection yet. A future owner-review phase can look at risk badges or formula diagnostics, not production ranking activation.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
