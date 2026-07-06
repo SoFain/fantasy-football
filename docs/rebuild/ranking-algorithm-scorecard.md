@@ -1,6 +1,6 @@
 # Ranking Algorithm Scorecard
 
-Last updated: 2026-07-04
+Last updated: 2026-07-06
 
 ## Purpose
 
@@ -1146,3 +1146,41 @@ Decision:
 - Current Pigskin remains the live baseline.
 - No champion formula is active.
 - Recommended next lane: BQML retrain with direct NGS features.
+
+### Phase 32.28: BQML NGS retrain
+
+Phase 32.28 retrained bounded BigQuery ML challengers against `ranking_backtest_feature_mart` after the direct NGS fields landed. The run used train seasons 2017-2023, validation season 2024, and holdout season 2025. It wrote summary-only evidence to `ranking_backtest_runs` and `ranking_backtest_candidate_summaries`; it did not write detail rows, live rankings, or champions.
+
+Models trained:
+
+| Model | Type | Target | Training bytes | Runtime |
+|---|---|---|---:|---:|
+| `ranking_bqml_ngs_logistic_elite_v1` | `LOGISTIC_REG` | elite finish label | 71,101,044 | 110s |
+| `ranking_bqml_ngs_linear_points_v1` | `LINEAR_REG` | target fantasy points | 71,101,044 | 128s |
+| `ranking_bqml_ngs_linear_vor_v1` | `LINEAR_REG` | value over replacement | 71,101,044 | 144s |
+| `ranking_bqml_ngs_boosted_tree_vor_v1` | `BOOSTED_TREE_REGRESSOR` | value over replacement | 14,025,169,231 | 341s |
+
+PPR aggregate comparison:
+
+| Candidate | 2024 top-N | 2024 captured | 2024 VOR | 2024 NDCG | 2025 top-N | 2025 captured | 2025 VOR | 2025 NDCG |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Enriched logistic elite v1 | 0.5376 | 0.7365 | 0.6010 | 0.6828 | 0.8565 | 0.9060 | 0.8578 | 0.7980 |
+| NGS logistic elite v1 | 0.5376 | 0.7364 | 0.6008 | 0.6825 | 0.8576 | 0.9071 | 0.8592 | 0.7990 |
+| Enriched linear points v1 | 0.5330 | 0.7335 | 0.6013 | 0.6855 | 0.8565 | 0.9095 | 0.8616 | 0.7981 |
+| NGS linear points v1 | 0.5324 | 0.7297 | 0.5927 | 0.6785 | 0.8565 | 0.9081 | 0.8607 | 0.7971 |
+| Enriched boosted tree VOR v1 | 0.5382 | 0.7374 | 0.6027 | 0.6816 | 0.8565 | 0.9018 | 0.8494 | 0.7933 |
+| NGS boosted tree VOR v1 | 0.5295 | 0.7288 | 0.5892 | 0.6751 | 0.8588 | 0.9076 | 0.8618 | 0.8003 |
+
+Feature signal:
+
+- Boosted-tree VOR used `ngs_rushing_efficiency_score_3yr` and `ngs_rush_yards_over_expected_score_3yr` as real split features.
+- Linear models leaned heavily on missingness indicators and existing opportunity/profile features. That makes their NGS read less stable.
+- Public nflverse receiving still has no expected catch or catch-over-expected field in this lane. `ngs_catch_over_expected_score_3yr` remains null and flagged.
+
+Decision:
+
+- BQML NGS models are valid owner-review evidence, but they do not create a clear champion path.
+- The best holdout move was boosted-tree VOR improving 2025 VOR/NDCG over its enriched predecessor, but it regressed on 2024 validation.
+- Logistic elite was essentially flat versus enriched v1, with tiny 2025 gains and no material 2024 movement.
+- Current Pigskin remains the live baseline. No champion formula is active.
+- Recommended next lane: owner-review comparison of NGS challenger movements only if the owner wants player-level inspection; otherwise hold current Pigskin and focus on explainable review tooling.

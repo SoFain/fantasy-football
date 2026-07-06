@@ -459,3 +459,35 @@ Decision:
 - The standalone NGS diagnostic lanes are useful for owner review and explainability, but not champion selection.
 - RB rushing NGS and WR/TE receiving NGS are the strongest component lanes.
 - Missing expected catch and catch-over-expected stay flagged.
+
+## Phase 32.28 BQML NGS Retrain Feature Read
+
+Phase 32.28 retrained bounded BQML challengers with direct NGS feature-mart columns included. The split stayed chronological: train on 2017-2023, validate on 2024, and hold out 2025. No live rankings, champions, detail rows, deployment, Sleeper calls, Pigskin chat, or Gemini calls changed.
+
+| NGS field | BQML status | Read |
+|---|---|---|
+| `ngs_receiving_efficiency_score_3yr` | included | Real WR/TE coverage. Did not produce a broad WR champion signal in the NGS retrain. |
+| `ngs_yac_over_expected_score_3yr` | included | Real WR/TE YAC signal, useful for explanation but not enough to fix WR movement risk alone. |
+| `ngs_separation_score_3yr` | included | Real WR/TE separation signal. Linear models leaned more on missingness than the raw signal. |
+| `ngs_catch_over_expected_score_3yr` | included as nullable and missing-flagged | Public nflverse receiving did not provide expected catch or catch-over-expected. Keep null. Do not fabricate. |
+| `ngs_rushing_efficiency_score_3yr` | included | Strongest direct NGS signal in boosted-tree VOR. Keep as RB component signal. |
+| `ngs_rush_yards_over_expected_score_3yr` | included | Used by boosted-tree VOR, but not enough for a standalone champion path. |
+| `ngs_box_resilience_score_3yr` | included | Real RB context. Useful as explainability, not a default formula. |
+| `ngs_qb_passing_efficiency_score_3yr` | included | Strong QB coverage. No clear QB champion change from this retrain. |
+| `ngs_missing_flags_json` | included as evidence | Missingness matters. Linear BQML weights show missing indicators can dominate, so reports must show missingness beside scores. |
+
+Recent PPR coverage:
+
+| Target season | QB passing NGS | RB rushing NGS | TE receiving NGS | WR receiving NGS | Catch-over-expected |
+|---:|---:|---:|---:|---:|---:|
+| 2024 | 570 of 573 | 1,060 of 1,276 | 816 of 1,087 | 1,755 of 1,982 | 0 |
+| 2025 | 292 of 295 | 269 of 366 | 341 of 392 | 594 of 638 | 0 |
+| 2017-2025 | 4,474 of 4,646 | 8,066 of 9,969 | 6,082 of 8,458 | 13,814 of 15,988 | 0 |
+
+Decision:
+
+- Direct NGS remains a model feature and component signal.
+- It does not become a live ranking formula or champion.
+- RB rushing NGS is the clearest additive component signal.
+- WR/TE receiving NGS helps explain movement, but WR movement remains too fragile for automatic promotion.
+- Missing expected catch and catch-over-expected stay blocked and visible.

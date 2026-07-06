@@ -1879,6 +1879,64 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertNotIn("truncate", lowered)
         self.assertNotIn(" as rows", lowered)
 
+    def test_bqml_ngs_specs_are_versioned_and_include_direct_ngs_features(self):
+        specs = rfb.bqml_ngs_model_specs()
+        model_names = {spec["model_name"] for spec in specs}
+        predictor_sets = [set(spec["numeric_predictors"]) for spec in specs]
+
+        self.assertIn("ranking_bqml_ngs_logistic_elite_v1", model_names)
+        self.assertIn("ranking_bqml_ngs_linear_points_v1", model_names)
+        self.assertIn("ranking_bqml_ngs_linear_vor_v1", model_names)
+        self.assertIn("ranking_bqml_ngs_boosted_tree_vor_v1", model_names)
+        self.assertNotIn("ranking_bqml_ngs_random_forest_v1", model_names)
+        for predictors in predictor_sets:
+            self.assertIn("ngs_receiving_efficiency_score_3yr", predictors)
+            self.assertIn("ngs_rushing_efficiency_score_3yr", predictors)
+            self.assertIn("ngs_qb_passing_efficiency_score_3yr", predictors)
+            self.assertIn("availability_score_3yr", predictors)
+            self.assertNotIn("depth_chart_role_score_3yr", predictors)
+
+    def test_bqml_ngs_training_sql_excludes_targets_and_current_sleeper_context(self):
+        spec = rfb.bqml_ngs_model_specs(include_boosted_tree=False)[0]
+        sql = rfb.build_bqml_create_model_sql(project_id="p", dataset_id="d", spec=spec)
+        select_list = sql.split("FROM `p.d.ranking_backtest_feature_mart`", 1)[0]
+        lowered = select_list.lower()
+
+        self.assertIn("data_split_method='NO_SPLIT'", sql)
+        self.assertIn("target_season BETWEEN 2017 AND 2023", sql)
+        self.assertIn("source_window_end_season < target_season", sql)
+        self.assertIn("ngs_receiving_efficiency_score_3yr", select_list)
+        self.assertIn("ngs_rushing_efficiency_score_3yr", select_list)
+        self.assertIn("ngs_qb_passing_efficiency_score_3yr", select_list)
+        self.assertNotIn("target_fantasy_points,", select_list)
+        self.assertNotIn("actual_position_rank,", select_list)
+        self.assertNotIn("actual_overall_rank,", select_list)
+        self.assertNotIn("value_over_replacement,", select_list)
+        self.assertNotIn("sleeper", lowered)
+        self.assertNotIn("random", sql.lower())
+
+    def test_bqml_ngs_summary_write_is_summary_only(self):
+        sql = rfb.build_bqml_prediction_summary_write_sql(
+            project_id="p",
+            dataset_id="d",
+            specs=rfb.bqml_ngs_model_specs(include_boosted_tree=False)[:1],
+            target_seasons=(2024, 2025),
+            backtest_run_id_prefix="ranking_backtest_sql_native_bqml_ngs_v1",
+            formula_version="ranking_backtest_sql_native_bqml_ngs_v1",
+        )
+        lowered = sql.lower()
+
+        self.assertIn("ranking_backtest_sql_native_bqml_ngs_v1", sql)
+        self.assertIn("ML.PREDICT", sql)
+        self.assertIn("source_window_end_season < target_season", sql)
+        self.assertIn("insert into `p.d.ranking_backtest_runs`", lowered)
+        self.assertIn("insert into `p.d.ranking_backtest_candidate_summaries`", lowered)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("truncate", lowered)
+        self.assertNotIn(" as rows", lowered)
+
     def test_ensemble_specs_are_convex_and_keep_bqml_bounded(self):
         specs = rfb.ensemble_candidate_specs()
         rfb.validate_ensemble_specs(specs)

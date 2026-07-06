@@ -5859,6 +5859,68 @@ def bqml_enriched_model_specs(include_boosted_tree: bool = True, include_boosted
     return specs
 
 
+def bqml_ngs_model_specs(include_boosted_tree: bool = True, include_boosted_tree_elite: bool = False) -> list[dict[str, Any]]:
+    specs = [
+        {
+            "model_name": "ranking_bqml_ngs_logistic_elite_v1",
+            "candidate_id": "ranking_bqml_ngs_logistic_elite_v1",
+            "candidate_family": "bqml_ngs_logistic_elite",
+            "model_type": "LOGISTIC_REG",
+            "target": "elite_label",
+            "label_column": "elite_label",
+            "prediction_column": "predicted_elite_probability",
+            "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+        },
+        {
+            "model_name": "ranking_bqml_ngs_linear_points_v1",
+            "candidate_id": "ranking_bqml_ngs_linear_points_v1",
+            "candidate_family": "bqml_ngs_linear_points",
+            "model_type": "LINEAR_REG",
+            "target": "target_fantasy_points",
+            "label_column": "label_value",
+            "prediction_column": "predicted_label_value",
+            "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+        },
+        {
+            "model_name": "ranking_bqml_ngs_linear_vor_v1",
+            "candidate_id": "ranking_bqml_ngs_linear_vor_v1",
+            "candidate_family": "bqml_ngs_linear_vor",
+            "model_type": "LINEAR_REG",
+            "target": "value_over_replacement",
+            "label_column": "label_value",
+            "prediction_column": "predicted_label_value",
+            "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+        },
+    ]
+    if include_boosted_tree:
+        specs.append(
+            {
+                "model_name": "ranking_bqml_ngs_boosted_tree_vor_v1",
+                "candidate_id": "ranking_bqml_ngs_boosted_tree_vor_v1",
+                "candidate_family": "bqml_ngs_boosted_tree_vor",
+                "model_type": "BOOSTED_TREE_REGRESSOR",
+                "target": "value_over_replacement",
+                "label_column": "label_value",
+                "prediction_column": "predicted_label_value",
+                "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+            }
+        )
+    if include_boosted_tree_elite:
+        specs.append(
+            {
+                "model_name": "ranking_bqml_ngs_boosted_tree_elite_v1",
+                "candidate_id": "ranking_bqml_ngs_boosted_tree_elite_v1",
+                "candidate_family": "bqml_ngs_boosted_tree_elite",
+                "model_type": "BOOSTED_TREE_CLASSIFIER",
+                "target": "elite_label",
+                "label_column": "elite_label",
+                "prediction_column": "predicted_elite_probability",
+                "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+            }
+        )
+    return specs
+
+
 def build_bqml_training_select_sql(
     *,
     project_id: str,
