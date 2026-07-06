@@ -107,6 +107,24 @@ PBP values are xFP-like component proxies, not official fantasy-point xFP column
 - Phase 32.14 writes summary-only backtest evidence. It does not write `ranking_backtest_results`, `ranking_formula_champions`, `analytics_pigskin_rankings`, or `analytics_pigskin_rankings_candidates`.
 - Phase 32.15 writes summary-only PBP diagnostic evidence. It does not write detail rows, live rankings, or champion rows.
 
+## Phase 32.23 Owner-Review Status
+
+| Signal family | Current owner-review status | Notes |
+|---|---|---|
+| Stats02 ideal fields | owner-review concept | Useful WR/TE and QB component signal. Not a champion formula. |
+| PBP xFP fields | owner-review concept | Useful RB/WR component lane. RB improves selected short windows. WR helps captured points but weakens pairwise. |
+| Availability score | risk flag only | Keep beside rankings or in diagnostics until a separate owner-approved modifier phase. |
+| Injury burden and missed-time risk | risk flag only | Useful explanatory context, not a standalone ranking default. |
+| RB availability modifier | risk flag only | Phase 32.22 validation cutlines did not clear owner-review challenger threshold. |
+| TE availability modifier | risk flag only | Better TE cutline story than RB, but TE3 and 2024 TE12 instability block default use. |
+| WR availability modifier | rejected or deferred | Pairwise fragility remains the blocker. |
+| Generic 5 percent availability blend | rejected as default | Over-penalization risk. |
+| Historical depth role | blocked | No approved historical depth source. |
+| Sleeper current context | live-only display context | Do not use in historical backtests. |
+| Direct NGS receiving/rushing | not yet ingested | Candidate next source lane if owner wants source expansion before BQML retrain. |
+
+Phase 32.23 keeps these signals out of live rankings. The comparison report recommends BQML retrain with ideal, PBP, injury, and role context as the next technical lane unless the owner chooses NGS ingest first.
+
 ## Phase 32.14 Formula Usage
 
 | Feature | Used in Stats02 formulas | Coverage read |

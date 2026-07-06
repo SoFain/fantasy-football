@@ -923,6 +923,44 @@ Player movement read:
 
 Decision: carry RB and TE low-weight availability forward as a risk flag only. It is not owner-review challenger status for champion selection yet. A future owner-review phase can look at risk badges or formula diagnostics, not production ranking activation.
 
+### Phase 32.23: Formula comparison owner-review report
+
+Phase 32.23 built a lightweight owner-review comparison view from existing SQL-native summary evidence and bounded read-only BigQuery queries. It did not regenerate live rankings, activate champions, call Gemini, call Pigskin chat, use live Sleeper, write detail rows, or run the old Python full tournament.
+
+Status labels:
+
+| Candidate lane | Status | Owner read |
+|---|---|---|
+| Current Pigskin candidate score v1 | live baseline | Remains the live formula baseline. Latest stored aggregate average: pairwise 0.7385, captured points 0.7132, VOR captured 0.6007, missing 0.0050. |
+| Simple projection | strong challenger | Clean low-missing challenger. Latest stored aggregate pairwise 0.7238, below current Pigskin. |
+| BQML logistic elite | strong challenger | Best Phase 32.10 BQML top-N/VOR challenger. Not a champion. Needs retrain with newer ideal, PBP, injury, and role fields. |
+| BQML linear points | strong challenger | Strong Phase 32.10 high-confidence and overall pairwise BQML lane. Not a champion. |
+| Stats02 WR/TE ideal | owner-review concept | Useful position-specific signal. Current Pigskin still protects more aggregate utility. |
+| PBP RB/WR refinements | owner-review concept | RB has useful short-window signal. WR helps captured points in places but weakens pairwise. |
+| RB availability modifier | risk flag only | Phase 32.22 cutlines rejected formula-default status. |
+| TE availability modifier | risk flag only | Better than RB at selected TE cutlines, still unstable. |
+| WR availability modifier | deferred | Pairwise fragility keeps it out of challenger status. |
+| Generic 5 percent availability blend | rejected | Rejected as default due to over-penalization risk. |
+| Historical depth context | blocked | No approved historical depth source exists. |
+
+Position read from latest stored summaries:
+
+| Position | Baseline read | Strongest useful challenger read |
+|---|---|---|
+| QB | Current Pigskin pairwise 0.6871. | Stats02 position ideal pairwise 0.7172, but needs owner review and model-lane validation. |
+| RB | Current Pigskin pairwise 0.7485, captured 0.7440. | Simple projection improves captured/VOR but trails pairwise. Availability and PBP remain risk/component lanes. |
+| WR | Current Pigskin pairwise 0.7680. | Stats02/PBP/availability are not activation-ready because they do not protect baseline pairwise. |
+| TE | Current Pigskin pairwise 0.7505. | TE availability improves small averages but remains risk flag only after cutline instability. |
+
+Owner-review conclusion:
+
+- Current Pigskin remains live baseline.
+- BQML logistic and BQML linear points remain the strongest model challenger lanes.
+- Stats02 WR/TE and PBP RB/WR remain component or position-specific review lanes.
+- RB and TE availability should be displayed or reviewed as risk flags, not formula defaults.
+- No champion formula is active.
+- Recommended next technical lane: BQML retrain with ideal, PBP, injury, and role context, or direct NGS ingest if the owner wants source expansion first.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
