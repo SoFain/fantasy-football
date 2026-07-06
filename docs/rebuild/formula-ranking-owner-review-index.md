@@ -114,6 +114,7 @@ Current constraints:
 ## Latest Evidence
 
 - [Phase 32.32 non-PPR review candidate universe](validation/phase-32-32-non-ppr-review-candidate-universe-report.md)
+- [Phase 32.34 Formula Review dashboard smoke](validation/phase-32-34-formula-review-dashboard-smoke-report.md)
 - [Phase 32.33 formula comparison dashboard](validation/phase-32-33-formula-comparison-dashboard-report.md)
 - [Phase 32.31 scoring-profile review input audit](validation/phase-32-31-scoring-profile-review-inputs-report.md)
 - [Phase 32.30 live 2026 review boards](validation/phase-32-30-live-2026-review-board-report.md)
@@ -126,11 +127,42 @@ Current constraints:
 
 ## Recommended Next Action
 
-Recommended: Phase 32.34, owner selection by scoring profile or hold current Pigskin baseline.
+Recommended: Phase 32.35, owner selection by scoring profile or hold current Pigskin baseline.
 
 The owner can now review the Formula Review tab. Any next phase should stay profile-specific and avoid one global winner across scoring systems.
 
 Alternate: create review-only table persistence if sortable, durable dashboard data is needed. Do not make it a production ranking source.
+
+Owner action choices:
+
+- Inspect the Formula Review tab after enabling `USE_FORMULA_COMPARISON_DASHBOARD=true`.
+- Hold current Pigskin.
+- Select a review-only challenger separately by scoring profile.
+- Request review-only table persistence if Markdown-backed dashboard data is not enough.
+- Request production TE depth change as a separate owner-approved phase.
+
+## Phase 32.34 Dashboard Smoke Result
+
+Phase 32.34 committed the Phase 32.33 dashboard package and smoke-tested the local dashboard contract.
+
+Activation:
+
+- Exact flag: `USE_FORMULA_COMPARISON_DASHBOARD`.
+- Default: off when unset or false.
+- Enabled value: `true`.
+- Local smoke set the flag only inside the command process and removed it afterward.
+- Cloud Run or Streamlit runtime activation requires setting the environment variable and restarting/redeploying the app process.
+
+Smoke result:
+
+- Standard is first.
+- Half PPR, PPR, and GNG Keeper are visible after Standard.
+- Current Pigskin remains the live baseline.
+- Enriched Logistic Elite is review-only challenger for every scoring profile.
+- Enriched Linear Points is context only.
+- No global winner is displayed.
+- TE owner-review output remains capped at TE35 with TE6, TE12, and TE18 cutlines present.
+- Missingness warnings remain visible.
 
 ## Phase 32.33 Dashboard Result
 

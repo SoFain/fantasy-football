@@ -577,5 +577,8 @@ The review input uses source-backed candidate and historical feature fields only
 | BQML NGS | context only | Not included as a candidate board in the dashboard source. |
 | Missingness warnings | visible | Average missingness and high family missingness remain owner-review warnings. |
 | TE owner-review output | capped at TE35 | TE6, TE12, and TE18 cutlines remain visible. Live TE60 rows are unchanged. |
+| `USE_FORMULA_COMPARISON_DASHBOARD` | default-off activation flag | Phase 32.34 smoke verified `true` enables the dashboard locally while unset remains hidden. |
 
 The dashboard does not use `pigskin_context_score`, does not query BigQuery at runtime, and does not use Sleeper current context as historical input.
+
+Phase 32.34 smoke confirmed the dashboard source remains read-only, feature missingness remains visible, BQML outputs stay review-only, and no production ranking/champion path is exposed by the tab.

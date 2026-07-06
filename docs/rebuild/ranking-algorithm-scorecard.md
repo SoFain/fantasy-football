@@ -105,6 +105,20 @@ Dashboard status:
 - TE owner-review output is capped at TE35 while live TE60 rows remain unchanged.
 - Missingness warnings are displayed beside model scores.
 
+### Phase 32.34: Formula Review smoke and activation review
+
+Phase 32.34 committed the dashboard package and verified controlled local activation through `USE_FORMULA_COMPARISON_DASHBOARD=true`. The dashboard remains default-off in code. No deployment, live ranking generation, champion activation, BigQuery write, Gemini call, Pigskin chat call, Sleeper call, BQML training, or production ranking generator path ran.
+
+Smoke status:
+
+- Standard is first, followed by Half PPR, PPR, and GNG Keeper.
+- All four scoring profiles have profile sections, model tables, position boards, movement tables, and TE cutlines.
+- Current Pigskin remains live baseline for every profile.
+- Enriched Logistic Elite stays review-only challenger.
+- Enriched Linear Points stays context only.
+- TE output remains capped at TE35 for owner review.
+- No global winner is selected.
+
 ### Phase 32.5: Rolling multi-year tournament
 
 Backtest version: `ranking_backtest_tournament_v0_rolling_2017_2025`
