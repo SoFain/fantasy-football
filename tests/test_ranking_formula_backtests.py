@@ -1379,6 +1379,84 @@ class RankingFormulaBacktestTests(unittest.TestCase):
             formula = rfb.validate_formula(json.loads(row["formula_json"]))
             self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
 
+    def test_injury_availability_modifier_candidates_are_tight_and_low_weight(self):
+        candidates = rfb.injury_availability_modifier_tournament_candidates()
+        ids = {row["candidate_id"] for row in candidates}
+
+        self.assertEqual(
+            ids,
+            {
+                "current_pigskin_availability_blend_03_v0",
+                "current_pigskin_availability_blend_05_v0",
+                "current_pigskin_injury_penalty_cap_v0",
+                "rb_current_pigskin_pbp_availability_blend_v0",
+                "wr_current_pigskin_stats02_availability_blend_v0",
+                "te_current_pigskin_stats02_availability_blend_v0",
+            },
+        )
+        self.assertEqual(len(candidates), 15)
+        for row in candidates:
+            formula = rfb.validate_formula(json.loads(row["formula_json"]))
+            self.assertEqual(formula["version"], "injury_availability_modifier_v0")
+            self.assertEqual(formula["source_flags"]["uses_phase_32_20_injury_context"], True)
+            self.assertEqual(formula["source_flags"]["uses_sleeper_current_context"], False)
+            self.assertEqual(formula["source_flags"]["no_2025_holdout_weight_tuning"], True)
+            self.assertEqual(formula["source_flags"]["no_champion_activation"], True)
+            self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
+            self.assertLessEqual(float(formula["weights"].get("availability_score_3yr", 0)), 0.05)
+
+    def test_injury_availability_penalty_uses_inverted_risk_fields(self):
+        candidates = rfb.injury_availability_modifier_tournament_candidates()
+        penalty_rows = [
+            row for row in candidates if row["candidate_id"] == "current_pigskin_injury_penalty_cap_v0"
+        ]
+
+        self.assertEqual(len(penalty_rows), len(rfb.POSITIONS))
+        for row in penalty_rows:
+            formula = rfb.validate_formula(json.loads(row["formula_json"]))
+            self.assertEqual(formula["weights"]["injury_burden_score_3yr"], 0.025)
+            self.assertEqual(formula["weights"]["missed_time_risk_score_3yr"], 0.025)
+            self.assertLessEqual(
+                formula["weights"]["injury_burden_score_3yr"] + formula["weights"]["missed_time_risk_score_3yr"],
+                0.05,
+            )
+            self.assertEqual(formula["source_flags"]["risk_fields_inverted_by_sql_native_scoring"], True)
+
+        sql = rfb.build_sql_native_tournament_summary_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2024, 2025),
+            scoring_profile_ids=("ppr",),
+            candidate_rows=penalty_rows,
+        )
+        self.assertIn(
+            "feature_name IN ('injury_risk_score_3yr', 'injury_burden_score_3yr', 'missed_time_risk_score_3yr')",
+            sql,
+        )
+        self.assertIn("100.0 - raw_feature_value", sql)
+
+    def test_injury_availability_sql_native_summary_is_research_only(self):
+        candidates = rfb.injury_availability_modifier_tournament_candidates()
+        sql = rfb.build_sql_native_tournament_summary_write_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2017, 2025),
+            scoring_profile_ids=("ppr", "half_ppr", "standard", "gng_keeper"),
+            candidate_rows=candidates,
+            backtest_run_id_prefix="ranking_backtest_sql_native_injury_availability_modifier_v0",
+            formula_version="ranking_backtest_sql_native_injury_availability_modifier_v0",
+        )
+        lowered = sql.lower()
+
+        self.assertIn("ranking_backtest_runs", sql)
+        self.assertIn("ranking_backtest_candidate_summaries", sql)
+        self.assertIn("No detail rows", sql)
+        self.assertIn("missing features remain null", sql)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("sleeper_player_context_current", lowered)
+
     def test_sql_native_tournament_missing_features_are_not_zero_filled(self):
         sql = rfb.build_sql_native_tournament_summary_sql(project_id="p", dataset_id="d")
 

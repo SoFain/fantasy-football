@@ -4193,6 +4193,152 @@ def injury_context_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
     ]
 
 
+def injury_availability_modifier_tournament_candidates() -> list[dict[str, Any]]:
+    """Phase 32.21 low-weight injury availability modifier candidates."""
+
+    current_pigskin_weights = {
+        "analytical_grade_proxy": 0.55,
+        "opportunity_score_proxy": 0.15,
+        "efficiency_score_proxy": 0.10,
+        "role_stability_score": 0.10,
+        "profile_points_score": 0.10,
+    }
+
+    def scaled_current(scale: float) -> dict[str, float]:
+        return {feature: weight * scale for feature, weight in current_pigskin_weights.items()}
+
+    def formula(
+        *,
+        position: str,
+        version: str,
+        weights: dict[str, float],
+        notes: str,
+    ) -> dict[str, Any]:
+        return {
+            "version": version,
+            "position": position,
+            "features": list(weights),
+            "weights": weights,
+            "score_expression": "weighted_linear",
+            "normalization": {"method": "bounded_0_100_sql"},
+            "source_flags": {
+                "uses_phase_32_20_injury_context": True,
+                "uses_sleeper_current_context": False,
+                "historical_depth_scores_unavailable": True,
+                "risk_fields_inverted_by_sql_native_scoring": True,
+                "missing_injury_metrics_remain_null": True,
+                "no_2025_holdout_weight_tuning": True,
+                "no_champion_activation": True,
+                "no_live_ranking_writes": True,
+                "notes": notes,
+            },
+        }
+
+    rows: list[dict[str, Any]] = []
+    for position in POSITIONS:
+        weights_03 = scaled_current(0.97)
+        weights_03["availability_score_3yr"] = 0.03
+        rows.append(
+            build_candidate_row(
+                formula(
+                    position=position,
+                    version="injury_availability_modifier_v0",
+                    weights=weights_03,
+                    notes="97 percent current Pigskin baseline, 3 percent availability score.",
+                ),
+                formula_name="Current Pigskin Availability Blend 03 v0",
+                candidate_id="current_pigskin_availability_blend_03_v0",
+                target_name="position_default_top_n",
+            )
+        )
+
+        weights_05 = scaled_current(0.95)
+        weights_05["availability_score_3yr"] = 0.05
+        rows.append(
+            build_candidate_row(
+                formula(
+                    position=position,
+                    version="injury_availability_modifier_v0",
+                    weights=weights_05,
+                    notes="95 percent current Pigskin baseline, 5 percent availability score.",
+                ),
+                formula_name="Current Pigskin Availability Blend 05 v0",
+                candidate_id="current_pigskin_availability_blend_05_v0",
+                target_name="position_default_top_n",
+            )
+        )
+
+        penalty_weights = scaled_current(0.95)
+        penalty_weights["injury_burden_score_3yr"] = 0.025
+        penalty_weights["missed_time_risk_score_3yr"] = 0.025
+        rows.append(
+            build_candidate_row(
+                formula(
+                    position=position,
+                    version="injury_availability_modifier_v0",
+                    weights=penalty_weights,
+                    notes="Current Pigskin baseline with risk fields inverted by SQL scoring. Max blend penalty is 5 points.",
+                ),
+                formula_name="Current Pigskin Injury Penalty Cap v0",
+                candidate_id="current_pigskin_injury_penalty_cap_v0",
+                target_name="position_default_top_n",
+            )
+        )
+
+    rb_weights = scaled_current(0.85)
+    rb_weights["high_value_rush_xfp_score_3yr"] = 0.12
+    rb_weights["availability_score_3yr"] = 0.03
+    rows.append(
+        build_candidate_row(
+            formula(
+                position="RB",
+                version="injury_availability_modifier_v0",
+                weights=rb_weights,
+                notes="RB-only blend: 85 percent current Pigskin, 12 percent high-value rush xFP, 3 percent availability.",
+            ),
+            formula_name="RB Current Pigskin PBP Availability Blend v0",
+            candidate_id="rb_current_pigskin_pbp_availability_blend_v0",
+            target_name="position_default_top_n",
+        )
+    )
+
+    wr_weights = scaled_current(0.88)
+    wr_weights["receiving_role_dominance_xfp_3yr"] = 0.09
+    wr_weights["availability_score_3yr"] = 0.03
+    rows.append(
+        build_candidate_row(
+            formula(
+                position="WR",
+                version="injury_availability_modifier_v0",
+                weights=wr_weights,
+                notes="WR-only blend: 88 percent current Pigskin, 9 percent receiving role dominance xFP, 3 percent availability.",
+            ),
+            formula_name="WR Current Pigskin Stats02 Availability Blend v0",
+            candidate_id="wr_current_pigskin_stats02_availability_blend_v0",
+            target_name="position_default_top_n",
+        )
+    )
+
+    te_weights = scaled_current(0.88)
+    te_weights["receiving_role_dominance_xfp_3yr"] = 0.09
+    te_weights["availability_score_3yr"] = 0.03
+    rows.append(
+        build_candidate_row(
+            formula(
+                position="TE",
+                version="injury_availability_modifier_v0",
+                weights=te_weights,
+                notes="TE-only blend: 88 percent current Pigskin, 9 percent receiving role dominance xFP, 3 percent availability.",
+            ),
+            formula_name="TE Current Pigskin Stats02 Availability Blend v0",
+            candidate_id="te_current_pigskin_stats02_availability_blend_v0",
+            target_name="position_default_top_n",
+        )
+    )
+
+    return rows
+
+
 def opportunity_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
     specs = [
         (

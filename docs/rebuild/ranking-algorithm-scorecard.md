@@ -803,6 +803,62 @@ Decision:
 - Keep depth role context blocked until a real historical depth source exists.
 - Keep Sleeper current context out of historical feature marts. It remains a current-roster display aid only.
 
+### Phase 32.21: Low-weight injury availability modifier sprint
+
+Phase 32.21 tested injury availability only as a low-weight modifier on top of existing stronger formula families. It did not regenerate live rankings, activate champions, write detail rows, expose Pigskin chat, call Gemini, call Sleeper, or tune on 2025 holdout.
+
+Candidate family:
+
+- `current_pigskin_availability_blend_03_v0`: current Pigskin proxy at 97 percent, availability at 3 percent.
+- `current_pigskin_availability_blend_05_v0`: current Pigskin proxy at 95 percent, availability at 5 percent.
+- `current_pigskin_injury_penalty_cap_v0`: current Pigskin proxy at 95 percent, inverted burden and missed-time risk at 2.5 percent each.
+- `rb_current_pigskin_pbp_availability_blend_v0`: RB current Pigskin plus high-value rush xFP and 3 percent availability.
+- `wr_current_pigskin_stats02_availability_blend_v0`: WR current Pigskin plus receiving role dominance xFP and 3 percent availability.
+- `te_current_pigskin_stats02_availability_blend_v0`: TE current Pigskin plus receiving role dominance xFP and 3 percent availability.
+
+Summary-only write:
+
+| Object | Result |
+|---|---:|
+| `ranking_backtest_runs` | 4 rows |
+| `ranking_backtest_candidate_summaries` | 284 rows |
+| New injury-availability summary rows | 60 rows |
+| `ranking_backtest_results` | 0 rows |
+| `ranking_formula_champions` | 0 rows |
+
+2017-2025 aggregate read:
+
+| Position | Best low-weight read | Result |
+|---|---|---|
+| QB | `current_pigskin_availability_blend_03_v0` or capped penalty by profile | Mostly tie or tiny decline versus current Pigskin. GNG Keeper had a tiny positive penalty-cap read. |
+| RB | `rb_current_pigskin_pbp_availability_blend_v0` | Consistent pairwise improvement across profiles, but captured points usually slipped slightly. |
+| WR | `wr_current_pigskin_stats02_availability_blend_v0` | Fragile. Pairwise weakened versus current Pigskin despite occasional captured-points help. |
+| TE | `te_current_pigskin_stats02_availability_blend_v0` | Clearest aggregate signal. PPR pairwise improved by about 0.0039 and captured points by about 0.0028 versus current Pigskin. |
+
+2025 holdout read:
+
+| Position | Best low-weight read | Result |
+|---|---|---|
+| QB | `current_pigskin_injury_penalty_cap_v0` | Pairwise and captured-points improved across PPR, Half PPR, and Standard. |
+| RB | `rb_current_pigskin_pbp_availability_blend_v0` | Pairwise improved by about 0.010 to 0.013 across profiles. Captured points stayed maxed at 1.0000. |
+| WR | availability blend or WR special by profile | Mixed. Captured points sometimes improved, but pairwise stayed weaker. |
+| TE | `te_current_pigskin_stats02_availability_blend_v0` in most profiles | Pairwise improved. Captured points were mixed, especially in Standard. |
+
+2024 validation read:
+
+- QB penalty-cap improved pairwise, but captured points often fell.
+- RB special improved pairwise, but captured points fell in validation.
+- TE special improved pairwise in most profiles, but 2024 captured points dropped materially.
+- WR remained weak on pairwise.
+
+Decision:
+
+- Low-weight availability shows signal as a modifier, especially for RB pairwise and TE aggregate.
+- Do not promote any injury-availability candidate to champion.
+- Do not use the 5 percent generic blend as the default. It over-penalizes in multiple slices.
+- Keep WR injury modifiers out of owner-review challenger status until they preserve current Pigskin pairwise strength.
+- BQML comparison was unavailable in the persisted summary table for this run, so it remains a future comparison lane.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:

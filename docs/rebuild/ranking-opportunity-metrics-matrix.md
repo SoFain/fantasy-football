@@ -286,3 +286,41 @@ Decision read:
 - The direct injury-only diagnostic is not a champion path.
 - Depth remains blocked and must stay null until a historical source with season/week truth exists.
 - Sleeper 2026 snapshot is live-current context only. It was not used in the historical feature mart.
+
+## Phase 32.21 Low-Weight Injury Availability Modifier
+
+Phase 32.21 tested whether the Phase 32.20 injury fields help when used as a small modifier rather than a standalone formula. It used SQL-native summary evaluation only.
+
+| Field | Direction | Modifier use | Read |
+|---|---|---|---|
+| `availability_score_3yr` | Higher is healthier | 3 percent or 5 percent blend with current Pigskin and position-specific xFP candidates | 3 percent is safer. 5 percent over-penalizes in several slices. |
+| `injury_status_score_3yr` | Higher is healthier | Available but not selected as the main low-weight blend field | Keep as supporting context. |
+| `injury_burden_score_3yr` | Higher is riskier | Inverted by SQL-native scoring in capped penalty candidate | Useful as a tiny risk-side signal. Do not overweight. |
+| `missed_time_risk_score_3yr` | Higher is riskier | Inverted by SQL-native scoring in capped penalty candidate | Sparse but useful for penalty-cap tests. Do not overweight. |
+| `depth_chart_role_score_3yr` | Higher would be stronger role | Not used | Still blocked because historical season/week depth rows are unavailable. |
+| Sleeper current context | Current roster display only | Not used | Must stay out of historical backtest features. |
+
+Coverage read:
+
+| Slice | QB availability non-null | RB availability non-null | WR availability non-null | TE availability non-null |
+|---|---:|---:|---:|---:|
+| 2017-2025 aggregate | 0.7152 | 0.7137 | 0.7344 | 0.7012 |
+| 2024 validation | 0.5079 | 0.3378 | 0.3895 | 0.3707 |
+| 2025 holdout | 0.8983 | 0.8716 | 0.8652 | 0.9796 |
+
+Summary-only write:
+
+- Four run rows were written, one per scoring profile.
+- 284 summary rows were written across the comparison set.
+- 60 rows covered the six new low-weight injury availability candidate IDs.
+- Zero detail rows were written.
+- Zero champion rows were written.
+
+Result read:
+
+- RB low-weight availability plus high-value rush xFP improved pairwise on 2025 holdout and aggregate profile slices, but captured points often slipped slightly.
+- TE low-weight availability plus receiving role dominance xFP showed the cleanest aggregate signal, especially PPR and Half PPR.
+- QB saw tiny gains only from capped penalty in selected profiles.
+- WR remains fragile. It should not be promoted until it protects pairwise strength.
+
+Decision: keep injury availability as a low-weight modifier lane. Do not activate a champion. Do not tune on 2025 holdout. Do not use Sleeper current roster data as historical input.
