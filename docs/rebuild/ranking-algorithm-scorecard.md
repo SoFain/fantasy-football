@@ -1184,3 +1184,41 @@ Decision:
 - Logistic elite was essentially flat versus enriched v1, with tiny 2025 gains and no material 2024 movement.
 - Current Pigskin remains the live baseline. No champion formula is active.
 - Recommended next lane: owner-review comparison of NGS challenger movements only if the owner wants player-level inspection; otherwise hold current Pigskin and focus on explainable review tooling.
+
+### Phase 32.29: Baseline hold and live 2026 review path
+
+Phase 32.29 closed the current ranking-research loop. Current Pigskin remains the live baseline, and no formula champion is active.
+
+Final lane classifications:
+
+| Lane | Classification | Decision |
+|---|---|---|
+| Current Pigskin candidate score v1 plus LLM final rankings | live baseline | Keep live. |
+| Simple projection | owner-review signal | Use as a sanity-check challenger. |
+| Enriched BQML logistic elite v1 | owner-review signal | Keep for top-N, VOR, NDCG, and bust-control review. |
+| Enriched BQML linear points v1 | owner-review signal | Keep for board-ordering review. |
+| BQML NGS logistic elite v1 | context only | Flat to enriched logistic. |
+| BQML NGS linear points v1 | context only | Did not improve materially over enriched linear points. |
+| BQML boosted tree VOR lanes | context only | Interesting nonlinear check, but validation and cost block promotion. |
+| Stats02 WR/TE | component signal | Keep as position-specific explanation. |
+| PBP RB/WR | component signal | Keep RB high-value opportunity signal. Protect WR movement. |
+| NGS direct diagnostics | component signal | RB rushing NGS is the clearest additive component. |
+| Injury and availability | risk flag only | Display as risk context, not a formula default. |
+| Historical depth | blocked | Source still lacks required historical season/week context. |
+| Sleeper current context | live-only display/context | Never use as historical backtest truth. |
+
+Current no-change state:
+
+- `analytics_pigskin_rankings`: 1,140 active rows across PPR, Half PPR, Standard, and GNG Keeper.
+- Active profile-position shape: QB 45, RB 80, WR 100, TE 60 per scoring profile.
+- Latest active ranking timestamp: `2026-07-04T07:29:22.569631Z`.
+- `ranking_formula_champions`: 0 rows, 0 active champions.
+- Enriched BQML v1 summaries: 128 rows.
+- BQML NGS v1 summaries: 128 rows.
+
+Live 2026 review-board readiness:
+
+- `analytics_pigskin_rankings_candidates` has a 2026 PPR candidate slice with 936 rows.
+- `ranking_backtest_feature_mart` has 2025 target slices, not 2026.
+- The current BQML prediction builder expects historical outcome labels and is not a live 2026 review input yet.
+- Next owner-approved technical step should build an outcome-free, review-only 2026 prediction path. It must not call Gemini, write live rankings, or activate champions.

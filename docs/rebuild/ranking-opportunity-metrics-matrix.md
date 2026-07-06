@@ -491,3 +491,28 @@ Decision:
 - RB rushing NGS is the clearest additive component signal.
 - WR/TE receiving NGS helps explain movement, but WR movement remains too fragile for automatic promotion.
 - Missing expected catch and catch-over-expected stay blocked and visible.
+
+## Phase 32.29 Final Source Status
+
+Phase 32.29 holds current Pigskin as the live baseline. No formula champion is active.
+
+| Source or signal | Final status | Use |
+|---|---|---|
+| Current Pigskin final rankings | live baseline | Keep as production ranking source. |
+| Simple projection | owner-review signal | Keep as a basic sanity-check challenger. |
+| Enriched BQML logistic elite v1 | owner-review signal | Use for top-N, VOR, NDCG, and bust-control review. |
+| Enriched BQML linear points v1 | owner-review signal | Use for board-ordering review. |
+| BQML NGS models | context only | Direct NGS did not materially improve over enriched v1. |
+| Direct NGS diagnostics | component signal | RB rushing NGS is the strongest component. WR/TE receiving NGS is explainability context. |
+| Stats02 WR/TE | component signal | Keep for position-specific review, not default ranking. |
+| PBP RB/WR | component signal | Keep RB high-value opportunity. Protect WR movement. |
+| Injury and availability | risk flag only | Display as low-weight context. Do not promote as a formula. |
+| Sleeper current context | live-only display/context | Use only for live review fields with freshness. Never use as historical truth. |
+| Historical depth | blocked | Keep blocked until a historical source with season/week role context exists. |
+
+Live 2026 review-board source read:
+
+- `analytics_pigskin_rankings_candidates` contains 936 PPR candidate rows for 2026.
+- `ranking_backtest_feature_mart` does not yet contain a 2026 target slice.
+- `sleeper_player_context_current` contains 12,200 latest-context rows with snapshot timestamp `2026-07-05T17:52:48.174830Z`.
+- A future review board needs an outcome-free 2026 prediction input before BQML challenger ranks can be generated safely.
