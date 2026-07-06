@@ -178,6 +178,13 @@ Pigskin chat formula context:
 - Context is read-only and packaged into the Cloud Run image.
 - It does not expose backtest, champion, ranking-generation, or write controls.
 
+Production deploy:
+
+- Revision: `nfl-studio-dashboard-00086-wpx`.
+- Image digest: `sha256:6f443eb45e42409510885c44592c3b303cdfd0fbba531ba9c61ceec8f1a69ceb`.
+- Health endpoint: `200 ok`.
+- Rollback baseline: `nfl-studio-dashboard-00085-6v4`.
+
 ## Phase 32.37 Emergency Formula Review Packaging Fix
 
 The owner screenshot showed the `Formula Review` tab was visible in production, but the tab could not load the review boards because the deployed image did not contain:
