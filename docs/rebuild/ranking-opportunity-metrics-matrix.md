@@ -106,7 +106,7 @@ PBP values are xFP-like component proxies, not official fantasy-point xFP column
 - Phase 32.14 formula weights are profile-aware in the SQL-native evaluator. PPR, Half PPR, Standard, and GNG Keeper can differ without falling back to a single board.
 - Phase 32.14 writes summary-only backtest evidence. It does not write `ranking_backtest_results`, `ranking_formula_champions`, `analytics_pigskin_rankings`, or `analytics_pigskin_rankings_candidates`.
 - Phase 32.15 writes summary-only PBP diagnostic evidence. It does not write detail rows, live rankings, or champion rows.
-- Phase 32.31 confirms profile fantasy points exist for Standard, Half PPR, PPR, and GNG Keeper, but live 2026 BQML review input is PPR-only until a safe non-PPR candidate universe is built.
+- Phase 32.32 confirms CTE-only live 2026 BQML review input is available for Standard, Half PPR, PPR, and GNG Keeper. The production candidate table remains PPR-only and was not overwritten.
 
 ## Phase 32.23 Owner-Review Status
 
@@ -553,3 +553,15 @@ Decision:
 - Scoring systems should be reviewed in this order when all are available: Standard, Half PPR, PPR, GNG Keeper.
 - All-profile aggregate should be treated as stability/context only, not as a champion-selection decision.
 - Current Pigskin remains the live baseline.
+
+
+## Phase 32.32 Profile-Specific Review Coverage
+
+| Profile | Candidate rows | Average missing feature rate | Standard-first status |
+|---|---:|---:|---|
+| `standard` | 936 | 69.0% | ready with warnings |
+| `half_ppr` | 936 | 69.0% | ready with warnings |
+| `ppr` | 936 | 69.0% | ready with warnings |
+| `gng_keeper` | 936 | 69.0% | ready with warnings |
+
+The review input uses source-backed candidate and historical feature fields only. `pigskin_context_score` is not required or fabricated. Missing NGS, PBP, ideal, and injury fields stay visible as missingness warnings.

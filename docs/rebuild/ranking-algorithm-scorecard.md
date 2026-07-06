@@ -46,12 +46,12 @@ Phase 32.31 confirmed that active final rankings exist for all four scoring prof
 
 | Profile | 2026 candidate rows | Active final rows | Review-board status |
 |---|---:|---:|---|
-| `standard` | 0 | 285 | blocked |
-| `half_ppr` | 0 | 285 | blocked |
-| `ppr` | 936 | 285 | generated with warnings in Phase 32.30 |
-| `gng_keeper` | 0 | 285 | blocked |
+| `standard` | 936 CTE-only | 285 | generated with warnings in Phase 32.32 |
+| `half_ppr` | 936 CTE-only | 285 | generated with warnings in Phase 32.32 |
+| `ppr` | 936 CTE-only plus existing transient table | 285 | generated with warnings in Phase 32.32 |
+| `gng_keeper` | 936 CTE-only | 285 | generated with warnings in Phase 32.32 |
 
-This is not a champion decision. Do not average PPR-only review output across scoring systems.
+This is not a champion decision. Do not average review output across scoring systems. The production candidate table remains PPR-only and was not overwritten.
 
 ## Historical Seasons Covered
 
@@ -88,6 +88,10 @@ Target-season features are excluded.
 | Python ML baselines | skipped | none | `scikit-learn` was not installed. No packages were installed. |
 
 ## Tournament History
+### Phase 32.32: Non-PPR 2026 review candidate universe
+
+Phase 32.32 used CTE-only candidate SELECTs to generate Standard, Half PPR, PPR, and GNG Keeper review boards without writing live rankings or replacing `analytics_pigskin_rankings_candidates`. The bounded logistic BQML challenger is the best owner-review lane for each scoring profile. Current Pigskin remains live and no champion is active.
+
 
 ### Phase 32.5: Rolling multi-year tournament
 

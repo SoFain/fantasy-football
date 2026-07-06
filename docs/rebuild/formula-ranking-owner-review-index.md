@@ -97,12 +97,11 @@ TE owner-review output rules:
 - Do not reduce active `analytics_pigskin_rankings` TE rows in the review-board phase.
 - Future owner-approved live-ranking depth change: reduce TE from 60 to 35.
 
-Current blockers:
+Current constraints:
 
-- `ranking_backtest_feature_mart` has 2025 target slices, not 2026.
-- The existing BQML prediction helper is built for historical rows with known outcome labels. A 2026 review path needs an outcome-free prediction input.
-- There is no dedicated review-only ranking table yet.
-- `analytics_pigskin_rankings_candidates` currently has only the 2026 `ppr` slice. Standard, Half PPR, and GNG Keeper review boards are blocked until a non-mutating profile-specific candidate input exists.
+- Phase 32.32 generated CTE-only 2026 review inputs for Standard, Half PPR, PPR, and GNG Keeper. The production candidate table remains PPR-only by design.
+- The review universe is not persisted. A dedicated read-only dashboard should either rebuild it from CTEs or use a separately owner-approved review table.
+- Live ranking generation, champion activation, and TE depth reduction still need separate owner approval.
 
 ## Sleeper Live-Context Guardrails
 
@@ -114,6 +113,7 @@ Current blockers:
 
 ## Latest Evidence
 
+- [Phase 32.32 non-PPR review candidate universe](validation/phase-32-32-non-ppr-review-candidate-universe-report.md)
 - [Phase 32.31 scoring-profile review input audit](validation/phase-32-31-scoring-profile-review-inputs-report.md)
 - [Phase 32.30 live 2026 review boards](validation/phase-32-30-live-2026-review-board-report.md)
 - [Phase 32.28 BQML NGS retrain](validation/phase-32-28-bqml-ngs-retrain-report.md)
@@ -125,7 +125,7 @@ Current blockers:
 
 ## Recommended Next Action
 
-Recommended: Phase 32.30, live 2026 review-board generation, review-only.
+Recommended: Phase 32.33, formula comparison dashboard in app, read-only.
 
 That phase should build an outcome-free 2026 prediction input and generate owner-review outputs without writing `analytics_pigskin_rankings`, `ranking_formula_champions`, or `ranking_backtest_results`.
 
@@ -151,10 +151,10 @@ Phase 32.30 profile status:
 
 | Scoring profile | Board status | Best review-only challenger |
 |---|---|---|
-| `standard` | blocked | not selected |
-| `half_ppr` | blocked | not selected |
+| `standard` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
+| `half_ppr` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
 | `ppr` | generated with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
-| `gng_keeper` | blocked | not selected |
+| `gng_keeper` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
 
 Main warning: the available 2026 candidate slice is PPR-only, so Standard, Half PPR, and GNG Keeper review boards were not generated and must not silently fall back to PPR.
 
