@@ -122,6 +122,7 @@ Current constraints:
 
 ## Latest Evidence
 
+- [Phase 32.39 Pigskin chat live-ranking grounding bugfix](validation/phase-32-39-pigskin-chat-ranking-grounding-bugfix-report.md)
 - [Phase 32.37 emergency Formula Review owner-review enablement](validation/phase-32-37-v1-owner-review-enable-report.md)
 - [Phase 32.36 owner inspection checklist](validation/phase-32-36-owner-inspection-checklist.md)
 - [Phase 32.36 dashboard owner inspection support](validation/phase-32-36-dashboard-owner-inspection-support-report.md)
