@@ -113,6 +113,7 @@ Current constraints:
 
 ## Latest Evidence
 
+- [Phase 32.35 Formula Review dashboard enablement](validation/phase-32-35-formula-review-dashboard-enable-report.md)
 - [Phase 32.32 non-PPR review candidate universe](validation/phase-32-32-non-ppr-review-candidate-universe-report.md)
 - [Phase 32.34 Formula Review dashboard smoke](validation/phase-32-34-formula-review-dashboard-smoke-report.md)
 - [Phase 32.33 formula comparison dashboard](validation/phase-32-33-formula-comparison-dashboard-report.md)
@@ -127,7 +128,7 @@ Current constraints:
 
 ## Recommended Next Action
 
-Recommended: Phase 32.35, owner selection by scoring profile or hold current Pigskin baseline.
+Recommended: Phase 32.36, owner selection by scoring profile or hold current Pigskin baseline.
 
 The owner can now review the Formula Review tab. Any next phase should stay profile-specific and avoid one global winner across scoring systems.
 
@@ -140,6 +141,37 @@ Owner action choices:
 - Select a review-only challenger separately by scoring profile.
 - Request review-only table persistence if Markdown-backed dashboard data is not enough.
 - Request production TE depth change as a separate owner-approved phase.
+
+## Phase 32.35 Dashboard Enablement Result
+
+Phase 32.35 enabled the read-only Formula Review dashboard in the production Cloud Run service.
+
+Runtime state:
+
+- Service: `nfl-studio-dashboard`.
+- Revision: `nfl-studio-dashboard-00083-tlr`.
+- URL: `https://nfl-studio-dashboard-inypcgbx7a-uc.a.run.app`.
+- Flag: `USE_FORMULA_COMPARISON_DASHBOARD=true`.
+- Image digest unchanged from the prior production revision.
+- Data Ops trigger flags remain false.
+- Production Pigskin historical packet tool remains unset.
+- Trade Analyzer score flags remain false.
+
+Owner inspection:
+
+- Sign in to the production app.
+- Open the `Formula Review` tab.
+- Review each scoring profile separately in this order: `standard`, `half_ppr`, `ppr`, `gng_keeper`.
+- Treat all-profile aggregate as context only.
+- Do not select one global winner averaged across scoring systems.
+
+Next owner choices:
+
+- Hold current Pigskin.
+- Select a review-only challenger separately by scoring profile.
+- Request review-only table persistence.
+- Request production TE depth change as a separate phase.
+- Approve live ranking generation only in a separate explicit phase.
 
 ## Phase 32.34 Dashboard Smoke Result
 
