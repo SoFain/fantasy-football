@@ -1224,3 +1224,33 @@ Live 2026 review-board readiness:
 - Next owner-approved technical step should build an outcome-free, review-only 2026 prediction path. It must not call Gemini, write live rankings, or activate champions.
 - Phase 32.30 owner-review board output should use QB45, RB80, WR100, and TE35. Current live ranking tables may still verify TE60 per scoring profile until a separate owner-approved live-ranking depth change exists.
 - Future owner-approved live-ranking depth change: reduce TE from 60 to 35.
+
+### Phase 32.30: Live 2026 review boards
+
+Phase 32.30 generated Markdown-only PPR owner-review boards from the 2026 candidate universe. It used a read-only, outcome-free BQML prediction input and did not call Gemini, Pigskin chat, live Sleeper, the production ranking generator, or any write path.
+
+Review input status:
+
+- `analytics_pigskin_rankings_candidates` supplied 936 active 2026 PPR candidate rows.
+- `ranking_backtest_feature_mart` still has 0 target-season 2026 rows, so prior compatible feature rows and candidate proxies were used for a review-only input.
+- The input excluded target fantasy points, actual ranks, VOR, elite labels, starter labels, and pick-band labels.
+- `pigskin_context_score` was not required or fabricated.
+
+BQML board status:
+
+| Model | Rows | Score range | Average missing feature rate | Classification |
+|---|---:|---:|---:|---|
+| `ranking_bqml_enriched_logistic_elite_v1` | 936 | 0.66 to 99.80 | 77.9% | review-only challenger |
+| `ranking_bqml_enriched_linear_points_v1` | 936 | -340.08 to 620.70 | 77.9% | review-only challenger |
+| `ranking_bqml_ngs_logistic_elite_v1` | 936 | 0.67 to 99.71 | 77.9% | context only |
+| `ranking_bqml_ngs_linear_points_v1` | 936 | -147.96 to 22766.48 | 77.9% | context only |
+
+Decision:
+
+- Live Pigskin remains the baseline.
+- No champion formula is active.
+- No live ranking table changed.
+- Review boards are ready for owner inspection with warnings, mainly PPR-only coverage, high missingness, sparse Sleeper current-team matches, and volatile linear-point output.
+- Standard, Half PPR, and GNG Keeper review boards are blocked until 2026 candidate input exists for those profiles.
+- Do not average all four scoring systems into one global challenger. Select or reject challengers separately by scoring profile. All-profile aggregate is stability/context only.
+- Recommended next step: read-only formula comparison dashboard if the owner wants UI review. Otherwise hold current Pigskin.

@@ -516,3 +516,39 @@ Live 2026 review-board source read:
 - `ranking_backtest_feature_mart` does not yet contain a 2026 target slice.
 - `sleeper_player_context_current` contains 12,200 latest-context rows with snapshot timestamp `2026-07-05T17:52:48.174830Z`.
 - A future review board needs an outcome-free 2026 prediction input before BQML challenger ranks can be generated safely.
+
+## Phase 32.30 Live Review Input Coverage
+
+Phase 32.30 built the first outcome-free 2026 BQML review input and generated PPR-only owner boards. It did not write live rankings, champions, detail backtest rows, or persistent review tables.
+
+Input source status:
+
+| Source or family | Live 2026 status | Review use |
+|---|---|---|
+| Current Pigskin active rankings | 1,140 active rows, four scoring profiles | Live baseline only. |
+| 2026 ranking candidates | 936 PPR rows | PPR review universe. No non-PPR fallback. |
+| `ranking_backtest_feature_mart` | 0 target-season 2026 rows | Prior compatible predictors only. No outcome fields selected. |
+| Sleeper current context | 12,200 rows, latest snapshot `2026-07-05 17:52:48.174830+00:00` | Display-only context joined by internal ID and GSIS ID. |
+| Direct NGS | Sparse in live review input | Component signal and context only. |
+| Injury and availability | Sparse in live review input | Risk flag only. |
+
+Feature coverage in the PPR review input:
+
+| Feature family | Populated values | Possible values | Coverage |
+|---|---:|---:|---:|
+| Baseline candidate proxies | 3,090 | 5,616 | 55.0% |
+| Trend proxies | 523 | 4,680 | 11.2% |
+| Ideal xFP | 428 | 3,744 | 11.4% |
+| PBP xFP and first-down proxies | 416 | 5,616 | 7.4% |
+| Direct NGS | 236 | 7,488 | 3.2% |
+| Injury and availability | 484 | 5,616 | 8.6% |
+
+Decision:
+
+- Baseline candidate proxies are usable for owner review.
+- Ideal, PBP, NGS, and injury families remain too sparse for automatic promotion.
+- Sleeper current context is display-only. Null current teams remain unknown, with no stale identity-team fallback.
+- Standard, Half PPR, and GNG Keeper live review boards remain blocked because the 2026 candidate input is PPR-only.
+- Scoring systems should be reviewed in this order when all are available: Standard, Half PPR, PPR, GNG Keeper.
+- All-profile aggregate should be treated as stability/context only, not as a champion-selection decision.
+- Current Pigskin remains the live baseline.

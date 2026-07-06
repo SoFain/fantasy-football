@@ -128,6 +128,33 @@ That phase should build an outcome-free 2026 prediction input and generate owner
 
 Alternate: build a read-only formula comparison UI if the owner wants visual review before any 2026 board output.
 
+## Phase 32.30 Review Result
+
+Phase 32.30 generated PPR-only live 2026 review boards:
+
+- [Phase 32.30 report](validation/phase-32-30-live-2026-review-board-report.md)
+- [Live 2026 ranking review boards](live-2026-ranking-review-boards.md)
+
+Owner-review scoring profile order:
+
+1. `standard`
+2. `half_ppr`
+3. `ppr`
+4. `gng_keeper`
+
+Do not choose one global challenger by averaging all scoring profiles. Pick or reject challengers separately by scoring profile. All-profile aggregate reads are stability/context only.
+
+Phase 32.30 profile status:
+
+| Scoring profile | Board status | Best review-only challenger |
+|---|---|---|
+| `standard` | blocked | not selected |
+| `half_ppr` | blocked | not selected |
+| `ppr` | generated with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
+| `gng_keeper` | blocked | not selected |
+
+Main warning: the available 2026 candidate slice is PPR-only, so Standard, Half PPR, and GNG Keeper review boards were not generated and must not silently fall back to PPR.
+
 ## Champion Activation Requirements
 
 Before any champion activation:
