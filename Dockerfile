@@ -21,6 +21,7 @@ COPY src/ ./src/
 COPY scripts/run_bigquery_validations.py ./scripts/run_bigquery_validations.py
 COPY bigquery/validations/ ./bigquery/validations/
 COPY data/ ./data/
+COPY docs/rebuild/live-2026-ranking-review-boards.md ./docs/rebuild/live-2026-ranking-review-boards.md
 
 # Set Streamlit environment variables
 ENV STREAMLIT_SERVER_PORT=8501 \

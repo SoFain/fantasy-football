@@ -162,6 +162,16 @@ class FormulaReviewDashboardTests(unittest.TestCase):
         self.assertIn("Formula Review", app_source)
         self.assertNotIn("USE_FORMULA_COMPARISON_DASHBOARD=true", app_source)
 
+    def test_formula_review_markdown_is_packaged_in_container(self):
+        dashboard_doc = Path("docs/rebuild/live-2026-ranking-review-boards.md")
+        dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+
+        self.assertTrue(dashboard_doc.exists())
+        self.assertIn(
+            "COPY docs/rebuild/live-2026-ranking-review-boards.md ./docs/rebuild/live-2026-ranking-review-boards.md",
+            dockerfile,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
