@@ -142,6 +142,23 @@ Phase 32.24 used enriched BQML v1 models to test the current feature mart as a m
 
 Decision: enriched BQML improved the challenger lane, especially logistic elite and linear points, but not enough to activate a champion.
 
+## Phase 32.25 BQML Owner-Review Feature Read
+
+Phase 32.25 reviewed enriched BQML player movement and cutlines without training new models or changing live rankings.
+
+| Feature family | Owner-review read | Decision |
+|---|---|---|
+| Baseline Pigskin proxies | Still protect pairwise and rank correlation. | Keep current Pigskin live. |
+| Ideal xFP fields | Helped enough to keep enriched BQML alive as a challenger lane. | Use in BQML owner-review cuts. |
+| PBP xFP fields | Useful in RB movement and some upside signals. WR movement remains fragile. | Component signal, not a standalone formula. |
+| First-down proxies | Included in BQML v1, but no separate activation proof. | Keep as supporting context. |
+| Role-history metrics | Logistic elite weights favored elite rate, spike rate, target slope, carry slope, and WOPR slope. | Strongest explainability lane. |
+| Injury and availability | Useful for warning context, but sparse in 2024 and not proven as a default formula. | Risk flag only. |
+| Historical depth | Not used because source context remains blocked. | Blocked. |
+| Direct NGS receiving/rushing | Still not ingested. | Best next source gap if owner wants better signal before another retrain. |
+
+Owner-read summary: enriched logistic elite v1 is the cleaner top-N utility challenger. Enriched linear points v1 is the better board-ordering challenger. Neither should replace current Pigskin without owner review of generated candidate boards.
+
 ## Phase 32.14 Formula Usage
 
 | Feature | Used in Stats02 formulas | Coverage read |

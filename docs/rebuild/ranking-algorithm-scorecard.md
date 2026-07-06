@@ -1005,6 +1005,41 @@ Decision:
 - No champion formula is active.
 - Recommended next lane: owner review of enriched BQML challengers or direct NGS receiving/rushing ingest.
 
+### Phase 32.25: BQML owner-review cutlines
+
+Phase 32.25 converted Phase 32.24 enriched BQML results into owner-review evidence using read-only SQL and existing trained models. No live rankings, champion formulas, BQML training, detail rows, Pigskin chat, Gemini calls, Sleeper calls, source ingest, or deploy changed.
+
+Candidate labels:
+
+| Candidate | Label | Owner read |
+|---|---|---|
+| Current Pigskin candidate score v1 | live baseline | Keep live. Still protects rank correlation and pairwise behavior. |
+| Enriched BQML logistic elite v1 | owner-review challenger | Best top-N utility challenger. Useful RB/TE depth reads, but weak overall pairwise. |
+| Enriched BQML linear points v1 | owner-review challenger | Best BQML board-ordering challenger. Stronger overall pairwise and early-board cutlines. |
+| Enriched boosted tree VOR v1 | context only | Costly, with no clear owner-review edge. |
+| Enriched linear VOR v1 | context only | Weaker than the two primary challengers. |
+| Injury and availability | risk flag only | Useful warning context, not a default formula. |
+| Historical depth | blocked | Still excluded. |
+
+Cutline read:
+
+- Overall top 24: linear points improved top-N by 0.1412 and captured points by 0.1043 versus current Pigskin. Logistic improved top-N by 0.0541 and VOR captured by 0.0699.
+- RB24: logistic improved VOR captured by 0.0626, linear points by 0.0546. Both are reviewable.
+- WR12 and WR24: both enriched BQML models hurt the early WR tiers. Do not let either model own WR cutlines.
+- TE18: logistic had the best depth signal, with +0.0100 top-N and +0.0277 VOR captured. TE6 and TE12 remain mixed.
+
+Movement read:
+
+- Useful moves: Kyren Williams was a good RB riser for both models. Ezekiel Elliott and Tyler Higbee were examples of busts the BQML cuts demoted.
+- Risky moves: C.J. Stroud and Cooper Kupp were false positives. Tee Higgins and Marvin Mims were large WR false negatives.
+
+Owner-review recommendation:
+
+- Generate BQML candidate rankings for owner review only if the owner wants player-level board inspection.
+- Do not activate a champion.
+- Keep current Pigskin as the live baseline.
+- Direct NGS receiving/rushing ingest remains the cleanest source-expansion lane if the owner wants better signal before more model work.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
