@@ -125,6 +125,23 @@ PBP values are xFP-like component proxies, not official fantasy-point xFP column
 
 Phase 32.23 keeps these signals out of live rankings. The comparison report recommends BQML retrain with ideal, PBP, injury, and role context as the next technical lane unless the owner chooses NGS ingest first.
 
+## Phase 32.24 BQML Enriched Feature Read
+
+Phase 32.24 used enriched BQML v1 models to test the current feature mart as a model challenger lane. It did not write live rankings or champions.
+
+| Feature family | BQML v1 status | Read |
+|---|---|---|
+| Baseline Pigskin proxies | included | Still useful. Boosted tree importance included `analytical_grade_proxy`, `opportunity_score_proxy`, and `profile_points_score`. |
+| Ideal xFP fields | included | `xfp_share_3yr` and `fantasy_points_over_expectation_3yr` showed model signal. |
+| PBP xFP fields | included | Logistic elite used receiving and rushing xFP share fields as positive signals. |
+| First-down proxies | included | Included as bounded predictors. No standalone causal claim. |
+| Injury and availability | included as predictors, still risk flags | Coverage is sparse in 2024 and stronger in 2025. They remain risk flags, not default ranking formulas. |
+| Historical depth | excluded | Still blocked. `depth_chart_role_score_3yr` was intentionally excluded from enriched BQML predictors. |
+| Sleeper current context | excluded | Live-only display context. Not used in historical training. |
+| Direct NGS receiving/rushing | not yet ingested | Still the cleanest source gap if the owner wants better feature signal before another retrain. |
+
+Decision: enriched BQML improved the challenger lane, especially logistic elite and linear points, but not enough to activate a champion.
+
 ## Phase 32.14 Formula Usage
 
 | Feature | Used in Stats02 formulas | Coverage read |

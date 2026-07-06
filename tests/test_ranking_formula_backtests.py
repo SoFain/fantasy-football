@@ -1818,6 +1818,67 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertIn("ranking_bqml_boosted_tree_vor_v0", model_names)
         self.assertNotIn("ranking_bqml_random_forest_vor_v0", model_names)
 
+    def test_bqml_enriched_specs_are_v1_and_exclude_blocked_depth(self):
+        specs = rfb.bqml_enriched_model_specs()
+        model_names = {spec["model_name"] for spec in specs}
+        predictor_sets = [set(spec["numeric_predictors"]) for spec in specs]
+
+        self.assertIn("ranking_bqml_enriched_logistic_elite_v1", model_names)
+        self.assertIn("ranking_bqml_enriched_linear_points_v1", model_names)
+        self.assertIn("ranking_bqml_enriched_linear_vor_v1", model_names)
+        self.assertIn("ranking_bqml_enriched_boosted_tree_vor_v1", model_names)
+        self.assertNotIn("ranking_bqml_random_forest_vor_v0", model_names)
+        for predictors in predictor_sets:
+            self.assertIn("xfp_score_3yr", predictors)
+            self.assertIn("receiving_xfp_pbp_3yr", predictors)
+            self.assertIn("receiving_first_down_exp_pbp_3yr", predictors)
+            self.assertIn("injury_burden_score_3yr", predictors)
+            self.assertIn("missed_time_risk_score_3yr", predictors)
+            self.assertIn("availability_score_3yr", predictors)
+            self.assertNotIn("depth_chart_role_score_3yr", predictors)
+
+    def test_bqml_enriched_training_sql_excludes_target_outcomes_and_sleeper_context(self):
+        spec = rfb.bqml_enriched_model_specs(include_boosted_tree=False)[0]
+        sql = rfb.build_bqml_training_select_sql(
+            project_id="p",
+            dataset_id="d",
+            target_name=spec["target"],
+            numeric_predictors=tuple(spec["numeric_predictors"]),
+        )
+        select_list = sql.split("FROM `p.d.ranking_backtest_feature_mart`", 1)[0]
+        lowered = select_list.lower()
+
+        self.assertIn("injury_burden_score_3yr", select_list)
+        self.assertIn("availability_score_3yr", select_list)
+        self.assertIn("source_window_end_season < target_season", sql)
+        self.assertNotIn("depth_chart_role_score_3yr", select_list)
+        self.assertNotIn("sleeper", lowered)
+        self.assertNotIn("target_fantasy_points,", select_list)
+        self.assertNotIn("actual_position_rank,", select_list)
+        self.assertNotIn("actual_overall_rank,", select_list)
+        self.assertNotIn("value_over_replacement,", select_list)
+
+    def test_bqml_enriched_summary_write_is_summary_only(self):
+        sql = rfb.build_bqml_prediction_summary_write_sql(
+            project_id="p",
+            dataset_id="d",
+            specs=rfb.bqml_enriched_model_specs(include_boosted_tree=False)[:1],
+            target_seasons=(2024,),
+        )
+        lowered = sql.lower()
+
+        self.assertIn("insert into `p.d.ranking_backtest_runs`", lowered)
+        self.assertIn("insert into `p.d.ranking_backtest_candidate_summaries`", lowered)
+        self.assertIn("ranking_backtest_sql_native_bqml_enriched_v1", sql)
+        self.assertIn("ML.PREDICT", sql)
+        self.assertIn("source_window_end_season < target_season", sql)
+        self.assertIn("high_confidence_pairwise_win_rate AS pairwise_win_rate", sql)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("truncate", lowered)
+        self.assertNotIn(" as rows", lowered)
+
     def test_ensemble_specs_are_convex_and_keep_bqml_bounded(self):
         specs = rfb.ensemble_candidate_specs()
         rfb.validate_ensemble_specs(specs)

@@ -140,6 +140,16 @@ BQML_NUMERIC_PREDICTORS = (
     "receiving_chain_mover_score_3yr",
     "rushing_chain_mover_score_3yr",
 )
+BQML_ENRICHED_NUMERIC_PREDICTORS = tuple(
+    column
+    for column in BQML_NUMERIC_PREDICTORS
+    if column not in {"depth_chart_role_score_3yr"}
+) + (
+    "injury_status_score_3yr",
+    "injury_burden_score_3yr",
+    "missed_time_risk_score_3yr",
+    "availability_score_3yr",
+)
 BQML_CATEGORICAL_PREDICTORS = ("scoring_profile_id", "position")
 ENSEMBLE_REFERENCE_SEASONS = tuple(range(2017, 2024))
 ENSEMBLE_TUNING_SEASON = 2024
@@ -5481,9 +5491,13 @@ def write_sql_native_tournament_summaries(
     }
 
 
-def _bqml_feature_select_sql(*, include_categorical: bool = True) -> str:
+def _bqml_feature_select_sql(
+    *,
+    include_categorical: bool = True,
+    numeric_predictors: tuple[str, ...] = BQML_NUMERIC_PREDICTORS,
+) -> str:
     numeric_columns = []
-    for column in BQML_NUMERIC_PREDICTORS:
+    for column in numeric_predictors:
         numeric_columns.append(f"    COALESCE({column}, 0.0) AS {column}")
         numeric_columns.append(f"    IF({column} IS NULL, 1, 0) AS {column}_missing")
     categorical_columns = [f"    {column}" for column in BQML_CATEGORICAL_PREDICTORS] if include_categorical else []
@@ -5547,6 +5561,68 @@ def bqml_model_specs(include_boosted_tree: bool = True, include_random_forest: b
     return specs
 
 
+def bqml_enriched_model_specs(include_boosted_tree: bool = True, include_boosted_tree_elite: bool = False) -> list[dict[str, Any]]:
+    specs = [
+        {
+            "model_name": "ranking_bqml_enriched_linear_vor_v1",
+            "candidate_id": "ranking_bqml_enriched_linear_vor_v1",
+            "candidate_family": "bqml_enriched_linear_vor",
+            "model_type": "LINEAR_REG",
+            "target": "value_over_replacement",
+            "label_column": "label_value",
+            "prediction_column": "predicted_label_value",
+            "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+        },
+        {
+            "model_name": "ranking_bqml_enriched_linear_points_v1",
+            "candidate_id": "ranking_bqml_enriched_linear_points_v1",
+            "candidate_family": "bqml_enriched_linear_points",
+            "model_type": "LINEAR_REG",
+            "target": "target_fantasy_points",
+            "label_column": "label_value",
+            "prediction_column": "predicted_label_value",
+            "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+        },
+        {
+            "model_name": "ranking_bqml_enriched_logistic_elite_v1",
+            "candidate_id": "ranking_bqml_enriched_logistic_elite_v1",
+            "candidate_family": "bqml_enriched_logistic_elite",
+            "model_type": "LOGISTIC_REG",
+            "target": "elite_label",
+            "label_column": "elite_label",
+            "prediction_column": "predicted_elite_probability",
+            "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+        },
+    ]
+    if include_boosted_tree:
+        specs.append(
+            {
+                "model_name": "ranking_bqml_enriched_boosted_tree_vor_v1",
+                "candidate_id": "ranking_bqml_enriched_boosted_tree_vor_v1",
+                "candidate_family": "bqml_enriched_boosted_tree_vor",
+                "model_type": "BOOSTED_TREE_REGRESSOR",
+                "target": "value_over_replacement",
+                "label_column": "label_value",
+                "prediction_column": "predicted_label_value",
+                "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+            }
+        )
+    if include_boosted_tree_elite:
+        specs.append(
+            {
+                "model_name": "ranking_bqml_enriched_boosted_tree_elite_v1",
+                "candidate_id": "ranking_bqml_enriched_boosted_tree_elite_v1",
+                "candidate_family": "bqml_enriched_boosted_tree_elite",
+                "model_type": "BOOSTED_TREE_CLASSIFIER",
+                "target": "elite_label",
+                "label_column": "elite_label",
+                "prediction_column": "predicted_elite_probability",
+                "numeric_predictors": BQML_ENRICHED_NUMERIC_PREDICTORS,
+            }
+        )
+    return specs
+
+
 def build_bqml_training_select_sql(
     *,
     project_id: str,
@@ -5555,11 +5631,15 @@ def build_bqml_training_select_sql(
     season_start: int = BQML_TRAIN_SEASONS[0],
     season_end: int = BQML_TRAIN_SEASONS[1],
     include_identity: bool = False,
+    numeric_predictors: tuple[str, ...] = BQML_NUMERIC_PREDICTORS,
 ) -> str:
     if target_name not in {"value_over_replacement", "target_fantasy_points", "elite_label"}:
         raise FormulaValidationError(f"Unsupported BQML target: {target_name}")
     mart_table = table_id(project_id, dataset_id, "ranking_backtest_feature_mart")
-    feature_columns = _bqml_feature_select_sql(include_categorical=not include_identity)
+    feature_columns = _bqml_feature_select_sql(
+        include_categorical=not include_identity,
+        numeric_predictors=numeric_predictors,
+    )
     identity_columns = """
     target_season,
     target_week,
@@ -5601,7 +5681,7 @@ def build_bqml_create_model_sql(
     spec: Mapping[str, Any],
 ) -> str:
     model_type = str(spec["model_type"]).upper()
-    if model_type not in {"LINEAR_REG", "LOGISTIC_REG", "BOOSTED_TREE_REGRESSOR", "RANDOM_FOREST_REGRESSOR"}:
+    if model_type not in {"LINEAR_REG", "LOGISTIC_REG", "BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER", "RANDOM_FOREST_REGRESSOR"}:
         raise FormulaValidationError(f"Unsupported BQML model type: {model_type}")
     model_table = table_id(project_id, dataset_id, str(spec["model_name"]))
     target_name = str(spec["target"])
@@ -5613,7 +5693,7 @@ def build_bqml_create_model_sql(
     ]
     if model_type in {"LINEAR_REG", "LOGISTIC_REG"}:
         options.append("max_iterations=20")
-    elif model_type == "BOOSTED_TREE_REGRESSOR":
+    elif model_type in {"BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER"}:
         options.extend(("max_iterations=20", "max_tree_depth=4", "learn_rate=0.1"))
     elif model_type == "RANDOM_FOREST_REGRESSOR":
         options.extend(("num_parallel_tree=20", "max_tree_depth=6"))
@@ -5624,6 +5704,7 @@ def build_bqml_create_model_sql(
         season_start=BQML_TRAIN_SEASONS[0],
         season_end=BQML_TRAIN_SEASONS[1],
         include_identity=False,
+        numeric_predictors=tuple(spec.get("numeric_predictors", BQML_NUMERIC_PREDICTORS)),
     )
     return f"""
 CREATE OR REPLACE MODEL `{model_table}`
@@ -5652,6 +5733,7 @@ def build_bqml_prediction_union_sql(
             season_start=season_start,
             season_end=season_end,
             include_identity=True,
+            numeric_predictors=tuple(spec.get("numeric_predictors", BQML_NUMERIC_PREDICTORS)),
         )
         if spec["model_type"] == "LOGISTIC_REG":
             predicted_score = "100.0 * COALESCE((SELECT prob FROM UNNEST(predicted_elite_label_probs) WHERE CAST(label AS STRING) = '1' LIMIT 1), 0.0)"
@@ -5877,6 +5959,187 @@ LEFT JOIN pairwise USING (candidate_id, target_season, position, scoring_profile
 LEFT JOIN overall_pairwise USING (candidate_id, target_season, scoring_profile_id, league_type_id, roster_format_id)
 ORDER BY target_season, scoring_profile_id, position, candidate_id
 """.strip()
+
+
+def build_bqml_prediction_summary_write_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    specs: list[Mapping[str, Any]] | None = None,
+    target_seasons: list[int] | tuple[int, ...] = (BQML_VALIDATION_SEASON, BQML_HOLDOUT_SEASON),
+    backtest_run_id_prefix: str = "ranking_backtest_sql_native_bqml_enriched_v1",
+    formula_version: str = "ranking_backtest_sql_native_bqml_enriched_v1",
+    league_type_id: str = DEFAULT_LEAGUE_TYPE_ID,
+    roster_format_id: str = DEFAULT_ROSTER_FORMAT_ID,
+) -> str:
+    summary_sql = build_bqml_prediction_summary_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        specs=specs or bqml_enriched_model_specs(include_boosted_tree=True),
+        target_seasons=target_seasons,
+    )
+    run_table = table_id(project_id, dataset_id, "ranking_backtest_runs")
+    summary_table = table_id(project_id, dataset_id, "ranking_backtest_candidate_summaries")
+    season_start = min(int(season) for season in target_seasons)
+    season_end = max(int(season) for season in target_seasons)
+    return f"""
+CREATE TEMP TABLE bqml_summary AS
+{summary_sql};
+
+DELETE FROM `{summary_table}`
+WHERE backtest_run_id IN (
+  SELECT CONCAT({_sql_string(backtest_run_id_prefix)}, '_', CAST(target_season AS STRING), '_', scoring_profile_id)
+  FROM (SELECT DISTINCT target_season, scoring_profile_id FROM bqml_summary)
+);
+
+DELETE FROM `{run_table}`
+WHERE backtest_run_id IN (
+  SELECT CONCAT({_sql_string(backtest_run_id_prefix)}, '_', CAST(target_season AS STRING), '_', scoring_profile_id)
+  FROM (SELECT DISTINCT target_season, scoring_profile_id FROM bqml_summary)
+);
+
+INSERT INTO `{run_table}` (
+  backtest_run_id,
+  formula_set_id,
+  formula_version,
+  candidate_count,
+  season_start,
+  season_end,
+  week_start,
+  week_end,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_definition_json,
+  input_tables_json,
+  dry_run,
+  status,
+  created_by,
+  created_at,
+  completed_at,
+  error_message,
+  notes
+)
+SELECT
+  CONCAT({_sql_string(backtest_run_id_prefix)}, '_', CAST(target_season AS STRING), '_', scoring_profile_id) AS backtest_run_id,
+  CAST(NULL AS STRING) AS formula_set_id,
+  {_sql_string(formula_version)} AS formula_version,
+  COUNT(DISTINCT candidate_id) AS candidate_count,
+  target_season AS season_start,
+  target_season AS season_end,
+  CAST(NULL AS INT64) AS week_start,
+  CAST(NULL AS INT64) AS week_end,
+  scoring_profile_id,
+  {_sql_string(league_type_id)} AS league_type_id,
+  {_sql_string(roster_format_id)} AS roster_format_id,
+  TO_JSON_STRING(STRUCT('position_default_top_n' AS target_name, 'BQML enriched draft utility metrics in metric_json' AS metric_contract)) AS target_definition_json,
+  TO_JSON_STRING(['ranking_backtest_feature_mart', 'BigQuery ML enriched v1 models']) AS input_tables_json,
+  FALSE AS dry_run,
+  'complete' AS status,
+  {_sql_string(CREATED_BY)} AS created_by,
+  CURRENT_TIMESTAMP() AS created_at,
+  CURRENT_TIMESTAMP() AS completed_at,
+  CAST(NULL AS STRING) AS error_message,
+  'SQL-native BQML enriched summary-only evaluation. No detail rows, no champions, no live rankings.' AS notes
+FROM bqml_summary
+GROUP BY target_season, scoring_profile_id;
+
+INSERT INTO `{summary_table}` (
+  backtest_run_id,
+  candidate_id,
+  formula_version,
+  position,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  target_name,
+  sample_size,
+  pairwise_win_rate,
+  top_n_hit_rate,
+  rank_correlation,
+  mean_absolute_error,
+  regret_score,
+  actual_points_captured_rate,
+  missing_input_rate,
+  metric_json,
+  missing_flags_json,
+  source_freshness_json,
+  created_at
+)
+SELECT
+  CONCAT({_sql_string(backtest_run_id_prefix)}, '_', CAST(target_season AS STRING), '_', scoring_profile_id) AS backtest_run_id,
+  candidate_id,
+  {_sql_string(formula_version)} AS formula_version,
+  position,
+  scoring_profile_id,
+  league_type_id,
+  roster_format_id,
+  'position_default_top_n' AS target_name,
+  sample_size,
+  high_confidence_pairwise_win_rate AS pairwise_win_rate,
+  top_n_hit_rate,
+  rank_correlation,
+  CAST(NULL AS FLOAT64) AS mean_absolute_error,
+  pick_band_regret AS regret_score,
+  actual_points_captured_rate,
+  CAST(0.0 AS FLOAT64) AS missing_input_rate,
+  TO_JSON_STRING(STRUCT(
+    ndcg_at_k AS ndcg_at_k,
+    actual_points_captured_rate AS value_captured_at_k,
+    elite_recall_at_k AS elite_recall_at_k,
+    tier_accuracy AS tier_accuracy,
+    bust_rate AS bust_rate,
+    pick_band_regret AS pick_band_regret,
+    overall_pairwise_draft_win_rate AS overall_pairwise_draft_win_rate,
+    high_confidence_pairwise_win_rate AS high_confidence_pairwise_win_rate,
+    value_over_replacement_captured_rate AS value_over_replacement_captured_rate,
+    target_season AS target_season,
+    'ranking_backtest_candidate_summaries.metric_json' AS persistence_target
+  )) AS metric_json,
+  TO_JSON_STRING(STRUCT(
+    0.0 AS missing_input_rate,
+    'BQML feature SQL uses COALESCE plus explicit missing indicators for numeric predictors' AS missing_policy
+  )) AS missing_flags_json,
+  TO_JSON_STRING(STRUCT(
+    'ranking_backtest_feature_mart' AS feature_source_table,
+    'source_window_end_season < target_season' AS leakage_policy,
+    {season_start} AS requested_season_start,
+    {season_end} AS requested_season_end,
+    '2025 holdout not used for training or tuning' AS holdout_policy
+  )) AS source_freshness_json,
+  CURRENT_TIMESTAMP() AS created_at
+FROM bqml_summary;
+""".strip()
+
+
+def write_bqml_prediction_summaries(
+    *,
+    client: Any,
+    project_id: str = DEFAULT_PROJECT,
+    dataset_id: str = DEFAULT_DATASET,
+    specs: list[Mapping[str, Any]] | None = None,
+    target_seasons: list[int] | tuple[int, ...] = (BQML_VALIDATION_SEASON, BQML_HOLDOUT_SEASON),
+    backtest_run_id_prefix: str = "ranking_backtest_sql_native_bqml_enriched_v1",
+    formula_version: str = "ranking_backtest_sql_native_bqml_enriched_v1",
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    require_write_authorization(env)
+    sql = build_bqml_prediction_summary_write_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        specs=specs,
+        target_seasons=target_seasons,
+        backtest_run_id_prefix=backtest_run_id_prefix,
+        formula_version=formula_version,
+    )
+    job = client.query(sql)
+    job.result()
+    return {
+        "write": True,
+        "summary_only": True,
+        "detail_rows_written": 0,
+        "job_id": getattr(job, "job_id", None),
+    }
 
 
 def ensemble_candidate_specs() -> list[dict[str, Any]]:

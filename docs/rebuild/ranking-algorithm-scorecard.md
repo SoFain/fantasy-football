@@ -971,6 +971,40 @@ Metric sanity note:
 - For the sampled SQL-native summary rows, those two values are identical by construction because the SQL-native summary currently stores the high-confidence pairwise CTE result in both places.
 - Treat them as a contract caveat, not as two independent evidence columns, until the summary contract adds a separate all-pairwise metric.
 
+### Phase 32.24: BQML enriched retrain
+
+Phase 32.24 retrained bounded BQML challengers with enriched ideal xFP, PBP split xFP, first-down proxies, injury availability, and role-context predictors from `ranking_backtest_feature_mart`. It did not regenerate live rankings, activate champions, write detail rows, call Gemini, call Pigskin chat, call Sleeper, or ingest new sources.
+
+Trained models:
+
+| Model | Type | Target | Read |
+|---|---|---|---|
+| `ranking_bqml_enriched_logistic_elite_v1` | logistic regression | position-specific elite finish | Best v1 top-N and holdout utility challenger. |
+| `ranking_bqml_enriched_linear_points_v1` | linear regression | target fantasy points | Best v1 overall pairwise challenger. |
+| `ranking_bqml_enriched_linear_vor_v1` | linear regression | value over replacement | Weaker and noisy. |
+| `ranking_bqml_enriched_boosted_tree_vor_v1` | boosted tree regression | value over replacement | Competitive top-N, but costlier and lacks pairwise reads due sparse high-confidence comparisons. |
+
+2024-2025 comparison:
+
+| Candidate | Top-N | Captured | VOR captured | Rank corr | High-conf | Overall pairwise | NDCG | Tier acc | Bust |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Enriched logistic elite v1 | 0.6866 | 0.8030 | 0.6972 | 0.5451 | 0.7419 | 0.6392 | 0.7125 | 0.5558 | 0.0822 |
+| Enriched linear points v1 | 0.6824 | 0.8015 | 0.6963 | 0.5521 | 0.9098 | 0.8361 | 0.7125 | 0.5552 | 0.0854 |
+| Enriched boosted tree VOR v1 | 0.6855 | 0.8007 | 0.6960 | 0.5424 | n/a | n/a | 0.7085 | 0.5548 | 0.0825 |
+| Enriched linear VOR v1 | 0.6743 | 0.7950 | 0.6865 | 0.5325 | 1.0000 | n/a | 0.7069 | 0.5459 | 0.0886 |
+| Phase 32.10 logistic elite | 0.6861 | 0.8051 | 0.7031 | 0.5476 | 0.7468 | 0.6405 | 0.7157 | 0.5529 | 0.0826 |
+| Phase 32.10 linear points | 0.6815 | 0.8004 | 0.6963 | 0.5425 | 0.9098 | 0.8178 | 0.7090 | 0.5544 | 0.0841 |
+| Current Pigskin baseline | 0.6755 | 0.7929 | 0.6800 | 0.6219 | 0.7540 | 0.7621 | 0.7086 | 0.5528 | 0.0891 |
+
+Decision:
+
+- Enriched BQML improves the challenger lane but does not clear champion-selection criteria.
+- Logistic elite v1 is the best top-N and holdout utility challenger.
+- Linear points v1 is the strongest overall pairwise challenger and improved over Phase 32.10 linear points.
+- Top-N lift versus current Pigskin remains below the 1.5 percentage point activation threshold.
+- No champion formula is active.
+- Recommended next lane: owner review of enriched BQML challengers or direct NGS receiving/rushing ingest.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
