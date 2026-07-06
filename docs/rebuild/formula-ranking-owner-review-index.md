@@ -100,7 +100,7 @@ TE owner-review output rules:
 Current constraints:
 
 - Phase 32.32 generated CTE-only 2026 review inputs for Standard, Half PPR, PPR, and GNG Keeper. The production candidate table remains PPR-only by design.
-- The review universe is not persisted. A dedicated read-only dashboard should either rebuild it from CTEs or use a separately owner-approved review table.
+- The review universe is not persisted. Phase 32.33 uses the committed Markdown review boards as the dashboard source.
 - Live ranking generation, champion activation, and TE depth reduction still need separate owner approval.
 
 ## Sleeper Live-Context Guardrails
@@ -114,6 +114,7 @@ Current constraints:
 ## Latest Evidence
 
 - [Phase 32.32 non-PPR review candidate universe](validation/phase-32-32-non-ppr-review-candidate-universe-report.md)
+- [Phase 32.33 formula comparison dashboard](validation/phase-32-33-formula-comparison-dashboard-report.md)
 - [Phase 32.31 scoring-profile review input audit](validation/phase-32-31-scoring-profile-review-inputs-report.md)
 - [Phase 32.30 live 2026 review boards](validation/phase-32-30-live-2026-review-board-report.md)
 - [Phase 32.28 BQML NGS retrain](validation/phase-32-28-bqml-ngs-retrain-report.md)
@@ -125,11 +126,32 @@ Current constraints:
 
 ## Recommended Next Action
 
-Recommended: Phase 32.33, formula comparison dashboard in app, read-only.
+Recommended: Phase 32.34, owner selection by scoring profile or hold current Pigskin baseline.
 
-That phase should build an outcome-free 2026 prediction input and generate owner-review outputs without writing `analytics_pigskin_rankings`, `ranking_formula_champions`, or `ranking_backtest_results`.
+The owner can now review the Formula Review tab. Any next phase should stay profile-specific and avoid one global winner across scoring systems.
 
-Alternate: build a read-only formula comparison UI if the owner wants visual review before any 2026 board output.
+Alternate: create review-only table persistence if sortable, durable dashboard data is needed. Do not make it a production ranking source.
+
+## Phase 32.33 Dashboard Result
+
+Phase 32.33 added a read-only Formula Review tab behind `USE_FORMULA_COMPARISON_DASHBOARD`.
+
+Dashboard source:
+
+- Static committed Markdown: `docs/rebuild/live-2026-ranking-review-boards.md`.
+- No BigQuery runtime query is required by the dashboard.
+- No live ranking table, candidate table, champion table, backtest detail table, Gemini path, Pigskin chat path, Sleeper API call, or production ranking generator path is invoked.
+
+Owner-review state:
+
+| Scoring profile | Dashboard status | Best review-only challenger | Current decision |
+|---|---|---|---|
+| `standard` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` | Current Pigskin holds. |
+| `half_ppr` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` | Current Pigskin holds. |
+| `ppr` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` | Current Pigskin holds. |
+| `gng_keeper` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` | Current Pigskin holds. |
+
+The dashboard defaults to Standard first, caps owner-review TE output at TE35, keeps TE6, TE12, and TE18 cutlines visible, and labels Enriched Linear Points as context only. Missingness warnings remain visible beside model scores.
 
 ## Phase 32.30 Review Result
 
@@ -151,10 +173,10 @@ Phase 32.30 profile status:
 
 | Scoring profile | Board status | Best review-only challenger |
 |---|---|---|
-| `standard` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
-| `half_ppr` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
+| `standard` | blocked in Phase 32.30 | none |
+| `half_ppr` | blocked in Phase 32.30 | none |
 | `ppr` | generated with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
-| `gng_keeper` | ready with warnings | `ranking_bqml_enriched_logistic_elite_v1` |
+| `gng_keeper` | blocked in Phase 32.30 | none |
 
 Main warning: the available 2026 candidate slice is PPR-only, so Standard, Half PPR, and GNG Keeper review boards were not generated and must not silently fall back to PPR.
 

@@ -549,7 +549,7 @@ Decision:
 - Baseline candidate proxies are usable for owner review.
 - Ideal, PBP, NGS, and injury families remain too sparse for automatic promotion.
 - Sleeper current context is display-only. Null current teams remain unknown, with no stale identity-team fallback.
-- Standard, Half PPR, and GNG Keeper live review boards remain blocked because the 2026 candidate input is PPR-only.
+- At Phase 32.30, Standard, Half PPR, and GNG Keeper live review boards were blocked because the 2026 candidate input was PPR-only.
 - Scoring systems should be reviewed in this order when all are available: Standard, Half PPR, PPR, GNG Keeper.
 - All-profile aggregate should be treated as stability/context only, not as a champion-selection decision.
 - Current Pigskin remains the live baseline.
@@ -565,3 +565,17 @@ Decision:
 | `gng_keeper` | 936 | 69.0% | ready with warnings |
 
 The review input uses source-backed candidate and historical feature fields only. `pigskin_context_score` is not required or fabricated. Missing NGS, PBP, ideal, and injury fields stay visible as missingness warnings.
+
+## Phase 32.33 Dashboard Source Status
+
+| Source or display lane | Status | Owner-review use |
+|---|---|---|
+| `docs/rebuild/live-2026-ranking-review-boards.md` | dashboard source | Static read-only source for Standard, Half PPR, PPR, and GNG Keeper review boards. |
+| Formula Review app tab | ready behind `USE_FORMULA_COMPARISON_DASHBOARD` | Owner-facing review only. It does not write warehouse rows or run BQML predictions. |
+| Enriched Logistic Elite | review-only challenger | Displayed per scoring profile. It is not a champion or live ranking source. |
+| Enriched Linear Points | context only | Displayed as volatile board-ordering context. |
+| BQML NGS | context only | Not included as a candidate board in the dashboard source. |
+| Missingness warnings | visible | Average missingness and high family missingness remain owner-review warnings. |
+| TE owner-review output | capped at TE35 | TE6, TE12, and TE18 cutlines remain visible. Live TE60 rows are unchanged. |
+
+The dashboard does not use `pigskin_context_score`, does not query BigQuery at runtime, and does not use Sleeper current context as historical input.

@@ -24,6 +24,7 @@ from src.compat_flags import (
     USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS,
     DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER,
     USE_PIGSKIN_PACKET_QA_UI,
+    USE_FORMULA_COMPARISON_DASHBOARD,
     compat_flag_enabled,
 )
 from src.cloud_run_jobs import (
@@ -154,6 +155,10 @@ def data_ops_local_subprocess_controls_enabled():
 
 def use_pigskin_packet_qa_ui():
     return compat_flag_enabled(USE_PIGSKIN_PACKET_QA_UI)
+
+
+def use_formula_comparison_dashboard():
+    return compat_flag_enabled(USE_FORMULA_COMPARISON_DASHBOARD)
 
 # Set Streamlit Page Configuration
 st.set_page_config(
@@ -1219,6 +1224,199 @@ def render_backtest_dashboard():
             st.caption(f"Backtest job preview is unavailable: {ex}")
     else:
         st.caption("Cloud Run Job preview is hidden until `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`.")
+
+
+def render_formula_comparison_dashboard():
+    from src.formula_review_dashboard import (
+        MODEL_TABLES,
+        MOVEMENT_TABLES,
+        POSITION_TABLES,
+        PROFILE_OPTIONS,
+        RISK_FILTERS,
+        build_formula_review_payload,
+        filter_formula_review_rows,
+        get_profile_decision,
+        get_profile_model_summary,
+        get_profile_table,
+        load_formula_review_markdown,
+    )
+
+    try:
+        markdown_text = load_formula_review_markdown()
+    except Exception as ex:
+        st.warning(f"Formula review boards are unavailable: {ex}")
+        return
+
+    payload = build_formula_review_payload(markdown_text)
+    render_tab_bookmarks([
+        ("Status", "formula-review-status"),
+        ("Profile Boards", "formula-profile-boards"),
+        ("Global Context", "formula-global-context"),
+        ("Safety", "formula-read-only-safety"),
+    ])
+    render_data_path_status("Formula Review", True)
+
+    render_section_header(
+        "Formula Review Status",
+        "formula-review-status",
+        "Read-only 2026 owner-review boards. Current Pigskin remains the live baseline.",
+        first=True,
+    )
+    st.warning(
+        "Review-only dashboard. Current Pigskin is the live baseline. No champion is active. "
+        "No live rankings were changed."
+    )
+    st.caption(
+        "Data source: committed Markdown review boards from `docs/rebuild/live-2026-ranking-review-boards.md`. "
+        "This page does not run BigQuery, Gemini, Pigskin chat, Sleeper API calls, or ranking generation."
+    )
+    st.caption(
+        "BQML outputs are owner-review evidence only. Enriched Linear Points is context only. "
+        "BQML NGS is context only and is not displayed as a candidate board here."
+    )
+
+    status_cols = st.columns(5)
+    status_cols[0].metric("Review version", payload.get("review_version") or "unknown")
+    status_cols[1].metric("Scoring profiles", len(PROFILE_OPTIONS))
+    status_cols[2].metric("TE review cap", "35")
+    status_cols[3].metric("Champion active", "No")
+    status_cols[4].metric("Live ranking writes", "No")
+    st.info(
+        "Missingness is high. Phase 32.32 reported about 69 percent average missing feature rate, "
+        "NGS direct near 89.6 percent missing, and injury/availability near 90.2 percent missing."
+    )
+
+    render_section_header(
+        "Profile Boards",
+        "formula-profile-boards",
+        "Standard is first. Each scoring profile is reviewed separately.",
+    )
+    profile_tabs = st.tabs([profile["label"] for profile in PROFILE_OPTIONS])
+    for tab, profile in zip(profile_tabs, PROFILE_OPTIONS):
+        profile_id = profile["id"]
+        with tab:
+            decision = get_profile_decision(payload, profile_id)
+            logistic = get_profile_model_summary(payload, profile_id, "enriched_logistic")
+            linear = get_profile_model_summary(payload, profile_id, "enriched_linear_points")
+            riser_rows = get_profile_table(markdown_text, profile_id, "Logistic Risers")
+            faller_rows = get_profile_table(markdown_text, profile_id, "Logistic Fallers")
+            wr_movement_count = _formula_wr_movement_count(riser_rows + faller_rows)
+
+            profile_cols = st.columns(5)
+            profile_cols[0].metric("Board status", decision.get("Board status") or "unknown")
+            profile_cols[1].metric("Best challenger", "Logistic Elite")
+            profile_cols[2].metric("Current Pigskin", "holds")
+            profile_cols[3].metric("Avg missingness", logistic.get("Missing %") or "n/a")
+            profile_cols[4].metric("WR movement >20", wr_movement_count)
+            st.caption(
+                f"`{profile_id}` review: Current Pigskin holds. "
+                "Enriched Logistic Elite is the review-only challenger. "
+                "Enriched Linear Points is context only."
+            )
+
+            filter_cols = st.columns(3)
+            with filter_cols[0]:
+                model_label = st.selectbox(
+                    "Board model",
+                    list(MODEL_TABLES.keys()),
+                    key=f"formula_model_{profile_id}",
+                )
+            with filter_cols[1]:
+                position_label = st.selectbox(
+                    "Position board",
+                    list(POSITION_TABLES.keys()),
+                    key=f"formula_position_{profile_id}",
+                )
+            with filter_cols[2]:
+                movement_label = st.selectbox(
+                    "Movement view",
+                    list(MOVEMENT_TABLES.keys()),
+                    key=f"formula_movement_{profile_id}",
+                )
+            selected_filters = st.multiselect(
+                "Risk and warning filters",
+                RISK_FILTERS,
+                key=f"formula_filters_{profile_id}",
+            )
+
+            model_rows = filter_formula_review_rows(
+                get_profile_table(markdown_text, profile_id, MODEL_TABLES[model_label]),
+                selected_filters,
+            )
+            st.markdown(f"##### {model_label}")
+            if model_rows:
+                st.dataframe(model_rows, hide_index=True, width="stretch")
+            else:
+                st.info("No rows matched the selected model and risk filters.")
+
+            position_rows = filter_formula_review_rows(
+                get_profile_table(markdown_text, profile_id, POSITION_TABLES[position_label]),
+                selected_filters,
+            )
+            st.markdown(f"##### {position_label} board")
+            if position_rows:
+                st.dataframe(position_rows, hide_index=True, width="stretch")
+            else:
+                st.info("No position rows matched the selected filters.")
+
+            movement_rows = filter_formula_review_rows(
+                get_profile_table(markdown_text, profile_id, MOVEMENT_TABLES[movement_label]),
+                selected_filters,
+            )
+            st.markdown(f"##### {movement_label}")
+            if movement_rows:
+                st.dataframe(movement_rows, hide_index=True, width="stretch")
+            else:
+                st.info("No movement rows matched the selected filters.")
+
+            if position_label == "TE":
+                st.caption(
+                    "TE owner-review output is capped at TE35. TE6, TE12, and TE18 cutlines stay visible. "
+                    "Future owner-approved live-ranking depth change: reduce TE from 60 to 35."
+                )
+
+    render_section_header(
+        "Global Context",
+        "formula-global-context",
+        "All-profile aggregates are stability context only, not a decision rule.",
+    )
+    st.markdown("##### Profile Decision Summary")
+    st.dataframe(payload.get("profile_decisions") or [], hide_index=True, width="stretch")
+    st.markdown("##### Model Summary")
+    st.dataframe(payload.get("model_summary") or [], hide_index=True, width="stretch")
+    st.markdown("##### Candidate Coverage")
+    st.dataframe(payload.get("candidate_coverage") or [], hide_index=True, width="stretch")
+
+    render_section_header(
+        "Read-Only Safety",
+        "formula-read-only-safety",
+        "The dashboard reads committed Markdown evidence and does not invoke production ranking paths.",
+    )
+    st.markdown(
+        """
+        - Does not write `analytics_pigskin_rankings`.
+        - Does not overwrite `analytics_pigskin_rankings_candidates`.
+        - Does not write `ranking_formula_champions`.
+        - Does not write `ranking_backtest_results`.
+        - Does not call Gemini, Pigskin chat, Sleeper API, or `src.generate_pigskin_rankings`.
+        - Does not require or fabricate `pigskin_context_score`.
+        - Does not silently fall back to PPR when reviewing Standard, Half PPR, or GNG Keeper.
+        """
+    )
+
+
+def _formula_wr_movement_count(rows):
+    count = 0
+    for row in rows:
+        if row.get("Pos") != "WR":
+            continue
+        try:
+            delta = abs(float(str(row.get("Delta") or "0").replace("+", "").replace(",", "")))
+        except ValueError:
+            delta = 0
+        if delta > 20:
+            count += 1
+    return count
 
 
 def _backtest_run_label(backtest_run_id, runs):
@@ -4910,6 +5108,7 @@ st.markdown(
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
 backtest_dashboard_enabled = use_backtest_dashboard()
+formula_comparison_dashboard_enabled = use_formula_comparison_dashboard()
 claim_ledger_ui_enabled = use_claim_ledger_ui()
 content_brief_review_enabled = use_content_brief_review_ui()
 
@@ -4925,6 +5124,8 @@ tab_labels = [
 ]
 if backtest_dashboard_enabled:
     tab_labels.append("📈 Backtesting")
+if formula_comparison_dashboard_enabled:
+    tab_labels.append("📊 Formula Review")
 if claim_ledger_ui_enabled:
     tab_labels.append("🧾 Claim Ledger")
 if content_brief_review_enabled:
@@ -4935,6 +5136,9 @@ tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_l
 next_extra_tab = 7
 tab_backtesting = tabs[next_extra_tab] if backtest_dashboard_enabled else None
 if backtest_dashboard_enabled:
+    next_extra_tab += 1
+tab_formula_review = tabs[next_extra_tab] if formula_comparison_dashboard_enabled else None
+if formula_comparison_dashboard_enabled:
     next_extra_tab += 1
 tab_claim_ledger = tabs[next_extra_tab] if claim_ledger_ui_enabled else None
 if claim_ledger_ui_enabled:
@@ -5687,6 +5891,10 @@ with tab_data_ops:
 if tab_backtesting is not None:
     with tab_backtesting:
         render_backtest_dashboard()
+
+if tab_formula_review is not None:
+    with tab_formula_review:
+        render_formula_comparison_dashboard()
 
 if tab_claim_ledger is not None:
     with tab_claim_ledger:

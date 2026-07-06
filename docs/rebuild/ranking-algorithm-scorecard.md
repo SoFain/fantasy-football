@@ -92,6 +92,18 @@ Target-season features are excluded.
 
 Phase 32.32 used CTE-only candidate SELECTs to generate Standard, Half PPR, PPR, and GNG Keeper review boards without writing live rankings or replacing `analytics_pigskin_rankings_candidates`. The bounded logistic BQML challenger is the best owner-review lane for each scoring profile. Current Pigskin remains live and no champion is active.
 
+### Phase 32.33: Read-only formula comparison dashboard
+
+Phase 32.33 added a default-off Formula Review dashboard in the app behind `USE_FORMULA_COMPARISON_DASHBOARD`. The dashboard reads `docs/rebuild/live-2026-ranking-review-boards.md` and does not query BigQuery, run BQML predictions, call Gemini, call Pigskin chat, call Sleeper, invoke `src.generate_pigskin_rankings`, write live rankings, overwrite the candidate table, write backtest detail rows, or activate champions.
+
+Dashboard status:
+
+- Standard displays first, followed by Half PPR, PPR, and GNG Keeper.
+- Current Pigskin remains the live baseline for every scoring profile.
+- Enriched Logistic Elite is the review-only challenger for each scoring profile.
+- Enriched Linear Points is context only.
+- TE owner-review output is capped at TE35 while live TE60 rows remain unchanged.
+- Missingness warnings are displayed beside model scores.
 
 ### Phase 32.5: Rolling multi-year tournament
 
@@ -1124,10 +1136,10 @@ Decision: this is approximately tied with the current baseline, not a clear repl
 
 ## Next Experiments
 
-1. Build a formula comparison dashboard for owner review.
-2. Add a BigQuery-native feature mart and persist cross-position overall draft-order scoring.
+1. Owner selection by scoring profile or hold current Pigskin.
+2. Review-only table persistence if the Markdown-backed dashboard needs sortable durable data.
 3. Improve TE/WR features before another champion-selection attempt.
-4. Generate formula-driven candidate rankings only after owner approval.
+4. Generate formula-driven candidate rankings only after explicit owner approval.
 
 ### Phase 32.27: Direct nflverse NGS metrics
 
