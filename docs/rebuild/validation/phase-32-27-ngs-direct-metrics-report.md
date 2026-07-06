@@ -32,7 +32,19 @@ Direct public nflverse Next Gen Stats receiving, rushing, and passing data exist
 - `docs/rebuild/ranking-algorithm-scorecard.md`
 - `docs/rebuild/ranking-opportunity-metrics-matrix.md`
 
-Commit hash: the final package commit is created after this report is written.
+Package commit hash: `9c25f00 phase 32.27 add direct ngs metrics`.
+
+Git state before Phase 32.27 package:
+
+- Phase 32.26 work was already committed in `1233638`, `d8920db`, and `fe1f90f`.
+- The remaining unrelated files were historical validation backlog and owner-review artifacts under `docs/rebuild/validation/`.
+- No unrelated AGENTS changes were staged.
+
+Git state after Phase 32.27 package:
+
+- `9c25f00` contains the NGS source, migration, validation, feature-mart, tests, scorecard, matrix, and report package.
+- No staged or tracked modifications remained after the package commit.
+- Historical validation backlog files remain untracked by owner-review policy.
 
 ## Source Audit
 
