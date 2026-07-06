@@ -159,6 +159,23 @@ Phase 32.25 reviewed enriched BQML player movement and cutlines without training
 
 Owner-read summary: enriched logistic elite v1 is the cleaner top-N utility challenger. Enriched linear points v1 is the better board-ordering challenger. Neither should replace current Pigskin without owner review of generated candidate boards.
 
+## Phase 32.26 BQML Board Movement Read
+
+Phase 32.26 generated review-only BQML candidate boards for PPR, Half PPR, Standard, and GNG Keeper from the existing 2025 Week 18 feature-mart slice.
+
+| Feature family | Movement read | Decision |
+|---|---|---|
+| Baseline Pigskin proxies | Current Pigskin remains the comparison baseline for every row. | Keep live. |
+| Ideal xFP fields | Present in board explanation fields and useful for BQML movement context. | Owner-review signal. |
+| PBP xFP fields | Visible in movement explanations, especially for RB and some upside WR movement. | Component signal. |
+| First-down proxies | Available to the enriched model family, but not surfaced as a standalone owner explanation in the compact board tables. | Supporting context. |
+| Role-history metrics | Elite-week rate, spike rate, and bust rate are the clearest review fields for logistic movement. | Strong explanation lane. |
+| Injury and availability | Included as warning fields. Still not proof of a default ranking formula. | Risk flag only. |
+| Historical depth | Not used. | Blocked. |
+| Direct NGS receiving/rushing | Still absent from the board. | Best next source gap. |
+
+Decision: BQML board movement is useful enough for owner review. It is not enough for champion activation, mostly because WR movement remains fragile and current Pigskin still protects the live baseline.
+
 ## Phase 32.14 Formula Usage
 
 | Feature | Used in Stats02 formulas | Coverage read |

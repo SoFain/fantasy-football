@@ -1040,6 +1040,27 @@ Owner-review recommendation:
 - Keep current Pigskin as the live baseline.
 - Direct NGS receiving/rushing ingest remains the cleanest source-expansion lane if the owner wants better signal before more model work.
 
+### Phase 32.26: BQML owner-review candidate boards
+
+Phase 32.26 generated Markdown-only owner-review candidate boards from the two enriched BQML challenger lanes. It used existing trained models and read-only `ML.PREDICT` against the 2025 Week 18 holdout slice. No persistent review table was created. No live rankings, champions, detail rows, model training, Pigskin chat, Gemini calls, Sleeper calls, source ingest, or deploy changed.
+
+Review board IDs:
+
+| Board ID | Label | Status |
+|---|---|---|
+| `bqml_enriched_logistic_elite_v1_owner_review` | BQML Logistic Elite v1 | review-only board |
+| `bqml_enriched_linear_points_v1_owner_review` | BQML Linear Points v1 | review-only board |
+
+Board read:
+
+- All four scoring profiles were generated: `ppr`, `half_ppr`, `standard`, and `gng_keeper`.
+- PPR top-50, position-board, movement, and cutline tables were written into the Phase 32.26 report.
+- Logistic elite remains the top-N and bust-control review board, but still carries overall pairwise risk.
+- Linear points remains the stronger cross-position board-ordering review board, but its explanation path is noisier.
+- WR movement is still the biggest warning. Neither board should own WR cutlines without owner inspection.
+
+Decision: BQML candidate rankings are ready for owner review with warnings. Current Pigskin remains the live baseline. No champion is active.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
