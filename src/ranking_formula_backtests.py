@@ -139,6 +139,14 @@ BQML_NUMERIC_PREDICTORS = (
     "high_value_first_down_opportunity_score_3yr",
     "receiving_chain_mover_score_3yr",
     "rushing_chain_mover_score_3yr",
+    "ngs_receiving_efficiency_score_3yr",
+    "ngs_yac_over_expected_score_3yr",
+    "ngs_separation_score_3yr",
+    "ngs_catch_over_expected_score_3yr",
+    "ngs_rushing_efficiency_score_3yr",
+    "ngs_rush_yards_over_expected_score_3yr",
+    "ngs_box_resilience_score_3yr",
+    "ngs_qb_passing_efficiency_score_3yr",
 )
 BQML_ENRICHED_NUMERIC_PREDICTORS = tuple(
     column
@@ -264,6 +272,16 @@ FIRST_DOWN_PBP_PROXY_FEATURES = {
     "receiving_chain_mover_score_3yr",
     "rushing_chain_mover_score_3yr",
 }
+DIRECT_NGS_FEATURES = {
+    "ngs_receiving_efficiency_score_3yr",
+    "ngs_yac_over_expected_score_3yr",
+    "ngs_separation_score_3yr",
+    "ngs_catch_over_expected_score_3yr",
+    "ngs_rushing_efficiency_score_3yr",
+    "ngs_rush_yards_over_expected_score_3yr",
+    "ngs_box_resilience_score_3yr",
+    "ngs_qb_passing_efficiency_score_3yr",
+}
 RB_WEIGHTED_OPPORTUNITY_FEATURES = {
     "red_zone_carries",
     "outside_red_zone_targets",
@@ -276,6 +294,7 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | IDEAL_STAT_FEATURES
     | PBP_XFP_FEATURES
     | FIRST_DOWN_PBP_PROXY_FEATURES
+    | {"ngs_qb_passing_efficiency_score_3yr"}
     | {
         "passing_epa_per_play",
         "passing_success_rate",
@@ -292,6 +311,11 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | FIRST_DOWN_PBP_PROXY_FEATURES
     | RB_WEIGHTED_OPPORTUNITY_FEATURES
     | {
+        "ngs_rushing_efficiency_score_3yr",
+        "ngs_rush_yards_over_expected_score_3yr",
+        "ngs_box_resilience_score_3yr",
+    }
+    | {
         "carries",
         "targets",
         "red_zone_targets",
@@ -306,6 +330,12 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | PBP_XFP_FEATURES
     | FIRST_DOWN_PBP_PROXY_FEATURES
     | {
+        "ngs_receiving_efficiency_score_3yr",
+        "ngs_yac_over_expected_score_3yr",
+        "ngs_separation_score_3yr",
+        "ngs_catch_over_expected_score_3yr",
+    }
+    | {
         "targets",
         "air_yards",
         "receiving_yards",
@@ -318,6 +348,12 @@ POSITION_FEATURE_ALLOWLISTS: dict[str, set[str]] = {
     | IDEAL_STAT_FEATURES
     | PBP_XFP_FEATURES
     | FIRST_DOWN_PBP_PROXY_FEATURES
+    | {
+        "ngs_receiving_efficiency_score_3yr",
+        "ngs_yac_over_expected_score_3yr",
+        "ngs_separation_score_3yr",
+        "ngs_catch_over_expected_score_3yr",
+    }
     | {
         "targets",
         "air_yards",
@@ -347,6 +383,7 @@ ALLOWED_INPUT_TABLES = (
     "player_week_ideal_opportunity_metrics",
     "player_week_pbp_opportunity_metrics",
     "player_week_role_context_metrics",
+    "player_week_ngs_metrics",
 )
 ALLOWED_CANDIDATE_STATUSES = ("draft", "reviewed", "approved")
 FEATURE_SOURCE_MAP = {
@@ -436,6 +473,14 @@ FEATURE_SOURCE_MAP = {
     "high_value_first_down_opportunity_score_3yr": "high_value_first_down_opportunity_score_3yr",
     "receiving_chain_mover_score_3yr": "receiving_chain_mover_score_3yr",
     "rushing_chain_mover_score_3yr": "rushing_chain_mover_score_3yr",
+    "ngs_receiving_efficiency_score_3yr": "ngs_receiving_efficiency_score_3yr",
+    "ngs_yac_over_expected_score_3yr": "ngs_yac_over_expected_score_3yr",
+    "ngs_separation_score_3yr": "ngs_separation_score_3yr",
+    "ngs_catch_over_expected_score_3yr": "ngs_catch_over_expected_score_3yr",
+    "ngs_rushing_efficiency_score_3yr": "ngs_rushing_efficiency_score_3yr",
+    "ngs_rush_yards_over_expected_score_3yr": "ngs_rush_yards_over_expected_score_3yr",
+    "ngs_box_resilience_score_3yr": "ngs_box_resilience_score_3yr",
+    "ngs_qb_passing_efficiency_score_3yr": "ngs_qb_passing_efficiency_score_3yr",
 }
 FORBIDDEN_TABLE_REFERENCES = {
     "weekly_metrics",
@@ -2494,6 +2539,7 @@ def build_feature_mart_insert_sql(*, project_id: str, dataset_id: str) -> str:
     ideal_table = table_id(project_id, dataset_id, "player_week_ideal_opportunity_metrics")
     pbp_ideal_table = table_id(project_id, dataset_id, "player_week_pbp_opportunity_metrics")
     role_context_table = table_id(project_id, dataset_id, "player_week_role_context_metrics")
+    ngs_table = table_id(project_id, dataset_id, "player_week_ngs_metrics")
     return f"""
 CREATE TEMP FUNCTION _slope(points ARRAY<STRUCT<season INT64, value FLOAT64>>)
 RETURNS FLOAT64
@@ -2584,6 +2630,15 @@ INSERT INTO `{mart_table}` (
     receiving_role_dominance_xfp_3yr,
     high_value_xfp_score_3yr,
     qb_ngs_efficiency_score_3yr,
+    ngs_receiving_efficiency_score_3yr,
+    ngs_yac_over_expected_score_3yr,
+    ngs_separation_score_3yr,
+    ngs_catch_over_expected_score_3yr,
+    ngs_rushing_efficiency_score_3yr,
+    ngs_rush_yards_over_expected_score_3yr,
+    ngs_box_resilience_score_3yr,
+    ngs_qb_passing_efficiency_score_3yr,
+    ngs_missing_flags_json,
     injury_risk_score_3yr,
     injury_status_score_3yr,
     injury_burden_score_3yr,
@@ -2694,6 +2749,14 @@ season_features AS (
         AVG(ideal.receiving_role_dominance_xfp) AS receiving_role_dominance_xfp,
         AVG(ideal.high_value_xfp_score) AS high_value_xfp_score,
         AVG(ideal.qb_ngs_efficiency_score) AS qb_ngs_efficiency_score,
+        AVG(ngs.ngs_receiving_efficiency_score) AS ngs_receiving_efficiency_score,
+        AVG(LEAST(100.0, GREATEST(0.0, 50.0 + ngs.ngs_yac_over_expected * 12.0))) AS ngs_yac_over_expected_score,
+        AVG(LEAST(100.0, GREATEST(0.0, ngs.ngs_avg_separation / 4.0 * 100.0))) AS ngs_separation_score,
+        AVG(CAST(NULL AS FLOAT64)) AS ngs_catch_over_expected_score,
+        AVG(ngs.ngs_rushing_efficiency_score) AS ngs_rushing_efficiency_score,
+        AVG(LEAST(100.0, GREATEST(0.0, 50.0 + ngs.ngs_rush_yards_over_expected_per_attempt * 12.0))) AS ngs_rush_yards_over_expected_score,
+        AVG(ngs.ngs_box_resilience_score) AS ngs_box_resilience_score,
+        AVG(ngs.ngs_passing_efficiency_score) AS ngs_qb_passing_efficiency_score,
         AVG(ideal.injury_risk_score) AS injury_risk_score,
         AVG(role_context.injury_status_score) AS injury_status_score,
         AVG(role_context.injury_burden_score) AS injury_burden_score,
@@ -2730,6 +2793,8 @@ season_features AS (
         ANY_VALUE(ideal.missing_flags_json) AS ideal_missing_flags,
         ANY_VALUE(role_context.source_provenance_json) AS role_context_source_provenance_json,
         ANY_VALUE(role_context.injury_context_missing_flags_json) AS role_context_missing_flags,
+        ANY_VALUE(ngs.source_provenance_json) AS ngs_source_provenance_json,
+        ANY_VALUE(ngs.ngs_missing_flags_json) AS ngs_missing_flags,
         ANY_VALUE(pbp_ideal.source_provenance_json) AS pbp_source_provenance_json,
         ANY_VALUE(pbp_ideal.missing_flags_json) AS pbp_missing_flags
     FROM `{metrics_table}` metrics
@@ -2769,6 +2834,12 @@ season_features AS (
      AND metrics.week = role_context.week
      AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(role_context.player_id_internal, r'^gsis:', '')
      AND metrics.position = role_context.position
+    LEFT JOIN `{ngs_table}` ngs
+      ON metrics.season = ngs.season
+     AND metrics.week = ngs.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(ngs.player_id_internal, r'^gsis:', '')
+     AND metrics.position = ngs.position
+     AND ngs.source_version = 'nflverse_ngs_direct_latest'
     WHERE metrics.season BETWEEN @source_window_start_season AND @source_window_end_season
       AND metrics.season < @target_season
       AND metrics.scoring_profile_id = 'ppr'
@@ -2827,6 +2898,14 @@ source_features AS (
         AVG(receiving_role_dominance_xfp) AS receiving_role_dominance_xfp_3yr,
         AVG(high_value_xfp_score) AS high_value_xfp_score_3yr,
         AVG(qb_ngs_efficiency_score) AS qb_ngs_efficiency_score_3yr,
+        AVG(ngs_receiving_efficiency_score) AS ngs_receiving_efficiency_score_3yr,
+        AVG(ngs_yac_over_expected_score) AS ngs_yac_over_expected_score_3yr,
+        AVG(ngs_separation_score) AS ngs_separation_score_3yr,
+        AVG(ngs_catch_over_expected_score) AS ngs_catch_over_expected_score_3yr,
+        AVG(ngs_rushing_efficiency_score) AS ngs_rushing_efficiency_score_3yr,
+        AVG(ngs_rush_yards_over_expected_score) AS ngs_rush_yards_over_expected_score_3yr,
+        AVG(ngs_box_resilience_score) AS ngs_box_resilience_score_3yr,
+        AVG(ngs_qb_passing_efficiency_score) AS ngs_qb_passing_efficiency_score_3yr,
         AVG(injury_risk_score) AS injury_risk_score_3yr,
         AVG(injury_status_score) AS injury_status_score_3yr,
         AVG(injury_burden_score) AS injury_burden_score_3yr,
@@ -2878,6 +2957,8 @@ source_features AS (
         ANY_VALUE(ideal_missing_flags HAVING MAX season) AS ideal_missing_flags,
         ANY_VALUE(role_context_source_provenance_json HAVING MAX season) AS role_context_source_provenance_json,
         ANY_VALUE(role_context_missing_flags HAVING MAX season) AS role_context_missing_flags,
+        ANY_VALUE(ngs_source_provenance_json HAVING MAX season) AS ngs_source_provenance_json,
+        ANY_VALUE(ngs_missing_flags HAVING MAX season) AS ngs_missing_flags,
         ANY_VALUE(pbp_source_provenance_json HAVING MAX season) AS pbp_source_provenance_json,
         ANY_VALUE(pbp_missing_flags HAVING MAX season) AS pbp_missing_flags
     FROM season_features
@@ -2996,6 +3077,15 @@ with_source AS (
         source.receiving_role_dominance_xfp_3yr,
         source.high_value_xfp_score_3yr,
         source.qb_ngs_efficiency_score_3yr,
+        source.ngs_receiving_efficiency_score_3yr,
+        source.ngs_yac_over_expected_score_3yr,
+        source.ngs_separation_score_3yr,
+        source.ngs_catch_over_expected_score_3yr,
+        source.ngs_rushing_efficiency_score_3yr,
+        source.ngs_rush_yards_over_expected_score_3yr,
+        source.ngs_box_resilience_score_3yr,
+        source.ngs_qb_passing_efficiency_score_3yr,
+        source.ngs_missing_flags AS ngs_missing_flags_json,
         source.injury_risk_score_3yr,
         source.injury_status_score_3yr,
         source.injury_burden_score_3yr,
@@ -3034,6 +3124,7 @@ with_source AS (
         source.ideal_missing_flags,
         source.role_context_source_provenance_json,
         source.role_context_missing_flags,
+        source.ngs_source_provenance_json,
         source.pbp_source_provenance_json,
         source.pbp_missing_flags,
         packet.packet_source_freshness_json
@@ -3144,6 +3235,15 @@ SELECT
     receiving_role_dominance_xfp_3yr,
     high_value_xfp_score_3yr,
     qb_ngs_efficiency_score_3yr,
+    ngs_receiving_efficiency_score_3yr,
+    ngs_yac_over_expected_score_3yr,
+    ngs_separation_score_3yr,
+    ngs_catch_over_expected_score_3yr,
+    ngs_rushing_efficiency_score_3yr,
+    ngs_rush_yards_over_expected_score_3yr,
+    ngs_box_resilience_score_3yr,
+    ngs_qb_passing_efficiency_score_3yr,
+    ngs_missing_flags_json,
     injury_risk_score_3yr,
     injury_status_score_3yr,
     injury_burden_score_3yr,
@@ -3203,6 +3303,15 @@ SELECT
         offensive_snap_share_3yr IS NULL AS offensive_snap_share_3yr_missing,
         receiving_role_dominance_xfp_3yr IS NULL AS receiving_role_dominance_xfp_3yr_missing,
         qb_ngs_efficiency_score_3yr IS NULL AS qb_ngs_efficiency_score_3yr_missing,
+        ngs_receiving_efficiency_score_3yr IS NULL AS ngs_receiving_efficiency_score_3yr_missing,
+        ngs_yac_over_expected_score_3yr IS NULL AS ngs_yac_over_expected_score_3yr_missing,
+        ngs_separation_score_3yr IS NULL AS ngs_separation_score_3yr_missing,
+        ngs_catch_over_expected_score_3yr IS NULL AS ngs_catch_over_expected_score_3yr_missing,
+        ngs_rushing_efficiency_score_3yr IS NULL AS ngs_rushing_efficiency_score_3yr_missing,
+        ngs_rush_yards_over_expected_score_3yr IS NULL AS ngs_rush_yards_over_expected_score_3yr_missing,
+        ngs_box_resilience_score_3yr IS NULL AS ngs_box_resilience_score_3yr_missing,
+        ngs_qb_passing_efficiency_score_3yr IS NULL AS ngs_qb_passing_efficiency_score_3yr_missing,
+        ngs_missing_flags_json AS ngs_missing_flags_json,
         injury_risk_score_3yr IS NULL AS injury_risk_score_3yr_missing,
         injury_status_score_3yr IS NULL AS injury_status_score_3yr_missing,
         injury_burden_score_3yr IS NULL AS injury_burden_score_3yr_missing,
@@ -3236,6 +3345,7 @@ SELECT
         opportunity_source_freshness_json AS opportunity_source_freshness_json,
         ideal_source_provenance_json AS ideal_source_provenance_json,
         role_context_source_provenance_json AS role_context_source_provenance_json,
+        ngs_source_provenance_json AS ngs_source_provenance_json,
         pbp_source_provenance_json AS pbp_source_provenance_json,
         packet_source_freshness_json AS packet_source_freshness_json
     )) AS source_freshness_json,
@@ -3639,6 +3749,14 @@ feature_values AS (
       WHEN 'high_value_first_down_opportunity_score_3yr' THEN high_value_first_down_opportunity_score_3yr
       WHEN 'receiving_chain_mover_score_3yr' THEN receiving_chain_mover_score_3yr
       WHEN 'rushing_chain_mover_score_3yr' THEN rushing_chain_mover_score_3yr
+      WHEN 'ngs_receiving_efficiency_score_3yr' THEN ngs_receiving_efficiency_score_3yr
+      WHEN 'ngs_yac_over_expected_score_3yr' THEN ngs_yac_over_expected_score_3yr
+      WHEN 'ngs_separation_score_3yr' THEN ngs_separation_score_3yr
+      WHEN 'ngs_catch_over_expected_score_3yr' THEN ngs_catch_over_expected_score_3yr
+      WHEN 'ngs_rushing_efficiency_score_3yr' THEN ngs_rushing_efficiency_score_3yr
+      WHEN 'ngs_rush_yards_over_expected_score_3yr' THEN ngs_rush_yards_over_expected_score_3yr
+      WHEN 'ngs_box_resilience_score_3yr' THEN ngs_box_resilience_score_3yr
+      WHEN 'ngs_qb_passing_efficiency_score_3yr' THEN ngs_qb_passing_efficiency_score_3yr
       ELSE NULL
     END AS raw_feature_value
   FROM mart
@@ -4861,6 +4979,124 @@ def pbp_xfp_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
     return [
         build_candidate_row(payload, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
         for candidate_id, name, payload in specs
+    ]
+
+def ngs_direct_metrics_tournament_candidates() -> list[dict[str, Any]]:
+    def formula(
+        *,
+        position: str,
+        version: str,
+        features: list[str],
+        weights: dict[str, float],
+    ) -> dict[str, Any]:
+        return {
+            "version": version,
+            "position": position,
+            "features": features,
+            "weights": weights,
+            "score_expression": "weighted_linear",
+            "normalization": {"method": "bounded_0_100_sql"},
+            "source_flags": {
+                "uses_direct_nflverse_ngs": True,
+                "ngs_expected_catch_percentage_unavailable": True,
+                "ngs_catch_over_expected_unavailable": True,
+                "no_2025_holdout_weight_tuning": True,
+                "no_champion_activation": True,
+                "no_live_ranking_writes": True,
+            },
+        }
+
+    specs = [
+        (
+            "ngs_wr_receiving_efficiency_v0",
+            "NGS WR Receiving Efficiency v0",
+            formula(
+                position="WR",
+                version="ngs_direct_metrics_v0",
+                features=[
+                    "profile_points_score",
+                    "receiving_role_dominance_xfp_3yr",
+                    "ngs_receiving_efficiency_score_3yr",
+                    "ngs_yac_over_expected_score_3yr",
+                    "ngs_separation_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.30,
+                    "receiving_role_dominance_xfp_3yr": 0.25,
+                    "ngs_receiving_efficiency_score_3yr": 0.20,
+                    "ngs_yac_over_expected_score_3yr": 0.15,
+                    "ngs_separation_score_3yr": 0.10,
+                },
+            ),
+        ),
+        (
+            "ngs_te_receiving_efficiency_v0",
+            "NGS TE Receiving Efficiency v0",
+            formula(
+                position="TE",
+                version="ngs_direct_metrics_v0",
+                features=[
+                    "profile_points_score",
+                    "receiving_role_dominance_xfp_3yr",
+                    "snap_role_stability_3yr",
+                    "ngs_receiving_efficiency_score_3yr",
+                    "ngs_separation_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.30,
+                    "receiving_role_dominance_xfp_3yr": 0.25,
+                    "snap_role_stability_3yr": 0.15,
+                    "ngs_receiving_efficiency_score_3yr": 0.20,
+                    "ngs_separation_score_3yr": 0.10,
+                },
+            ),
+        ),
+        (
+            "ngs_rb_rushing_efficiency_v0",
+            "NGS RB Rushing Efficiency v0",
+            formula(
+                position="RB",
+                version="ngs_direct_metrics_v0",
+                features=[
+                    "profile_points_score",
+                    "high_value_rush_xfp_score_3yr",
+                    "ngs_rushing_efficiency_score_3yr",
+                    "ngs_rush_yards_over_expected_score_3yr",
+                    "ngs_box_resilience_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.30,
+                    "high_value_rush_xfp_score_3yr": 0.25,
+                    "ngs_rushing_efficiency_score_3yr": 0.20,
+                    "ngs_rush_yards_over_expected_score_3yr": 0.15,
+                    "ngs_box_resilience_score_3yr": 0.10,
+                },
+            ),
+        ),
+        (
+            "ngs_qb_passing_efficiency_v0",
+            "NGS QB Passing Efficiency v0",
+            formula(
+                position="QB",
+                version="ngs_direct_metrics_v0",
+                features=[
+                    "profile_points_score",
+                    "qb_rushing_leverage_index",
+                    "qb_ngs_efficiency_score_3yr",
+                    "ngs_qb_passing_efficiency_score_3yr",
+                ],
+                weights={
+                    "profile_points_score": 0.35,
+                    "qb_rushing_leverage_index": 0.20,
+                    "qb_ngs_efficiency_score_3yr": 0.20,
+                    "ngs_qb_passing_efficiency_score_3yr": 0.25,
+                },
+            ),
+        ),
+    ]
+    return [
+        build_candidate_row(formula_payload, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, formula_payload in specs
     ]
 
 

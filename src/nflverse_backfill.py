@@ -82,7 +82,7 @@ SOURCE_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "normalized_player_name": ("normalized_player_name", "merge_name", "display_name", "full_name", "player_name", "name"),
     "latest_team": ("latest_team", "team", "recent_team"),
     "opponent_team": ("opponent_team", "opponent"),
-    "position": ("position", "position_group"),
+    "position": ("position", "position_group", "player_position"),
     "status": ("status", "status_description", "status_description_abbr"),
     "report_status": ("report_status", "game_status"),
     "game_status": ("game_status", "report_status"),
@@ -101,6 +101,12 @@ SOURCE_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "st_snaps": ("st_snaps", "special_teams", "special_teams_snap_count"),
     "source_week": ("week",),
     "source_season": ("season",),
+    "attempts": ("attempts", "rush_attempts"),
+    "expected_yards": ("expected_yards", "expected_rush_yards"),
+    "stacked_box_rate": ("stacked_box_rate", "percent_attempts_gte_eight_defenders"),
+    "cpoe": ("cpoe", "completion_percentage_above_expectation"),
+    "avg_air_yards": ("avg_air_yards", "avg_intended_air_yards"),
+    "expected_yac": ("expected_yac", "avg_expected_yac"),
 }
 FF_PLAYERID_PLATFORM_COLUMNS: dict[str, str] = {
     "sleeper_id": "sleeper",

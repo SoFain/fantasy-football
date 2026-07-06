@@ -2061,6 +2061,65 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertNotIn("ranking_formula_champions", lowered)
         self.assertNotIn("analytics_pigskin_rankings", lowered)
 
+    def test_feature_mart_insert_sql_consumes_direct_ngs_without_target_leakage(self):
+        sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
+
+        self.assertIn("player_week_ngs_metrics", sql)
+        self.assertIn("metrics.season = ngs.season", sql)
+        self.assertIn("metrics.week = ngs.week", sql)
+        self.assertIn("metrics.season < @target_season", sql)
+        self.assertIn("ngs_receiving_efficiency_score_3yr", sql)
+        self.assertIn("ngs_missing_flags_json", sql)
+        self.assertIn("ngs_source_provenance_json", sql)
+
+    def test_ngs_direct_candidates_are_position_scoped_and_sql_native_safe(self):
+        candidates = rfb.ngs_direct_metrics_tournament_candidates()
+        ids = {row["candidate_id"] for row in candidates}
+        joined = "\n".join(row["formula_json"] for row in candidates)
+        sql = rfb.build_sql_native_tournament_summary_write_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2024, 2025),
+            scoring_profile_ids=("ppr",),
+            positions=("QB", "RB", "WR", "TE"),
+            backtest_run_id_prefix="ranking_backtest_sql_native_ngs_direct_v0",
+            formula_version="ranking_backtest_sql_native_ngs_direct_v0",
+            candidate_rows=candidates,
+        )
+        lowered = sql.lower()
+
+        self.assertEqual(
+            ids,
+            {
+                "ngs_wr_receiving_efficiency_v0",
+                "ngs_te_receiving_efficiency_v0",
+                "ngs_rb_rushing_efficiency_v0",
+                "ngs_qb_passing_efficiency_v0",
+            },
+        )
+        self.assertIn("uses_direct_nflverse_ngs", joined)
+        self.assertIn("ngs_expected_catch_percentage_unavailable", joined)
+        self.assertIn("ngs_receiving_efficiency_score_3yr", sql)
+        self.assertIn("ngs_rushing_efficiency_score_3yr", sql)
+        self.assertIn("ngs_qb_passing_efficiency_score_3yr", sql)
+        self.assertIn("insert into `p.d.ranking_backtest_runs`", lowered)
+        self.assertIn("insert into `p.d.ranking_backtest_candidate_summaries`", lowered)
+        self.assertNotIn("ranking_backtest_results", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn(" as rows", lowered)
+
+    def test_direct_ngs_migration_is_additive(self):
+        migration = Path("bigquery/migrations/0039__direct_ngs_metrics.sql").read_text(encoding="utf-8")
+        lowered = migration.lower()
+
+        self.assertIn("create table if not exists", lowered)
+        self.assertIn("add column if not exists ngs_receiving_efficiency_score_3yr", lowered)
+        self.assertIn("player_week_ngs_metrics", lowered)
+        self.assertNotIn("drop ", lowered)
+        self.assertNotIn("delete ", lowered)
+        self.assertNotIn("truncate ", lowered)
+
     def _formula_set(self):
         return {
             "formula_set_id": "set-1",

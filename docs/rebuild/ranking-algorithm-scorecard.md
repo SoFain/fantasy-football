@@ -1111,3 +1111,38 @@ Decision: this is approximately tied with the current baseline, not a clear repl
 2. Add a BigQuery-native feature mart and persist cross-position overall draft-order scoring.
 3. Improve TE/WR features before another champion-selection attempt.
 4. Generate formula-driven candidate rankings only after owner approval.
+
+### Phase 32.27: Direct nflverse NGS metrics
+
+Phase 32.27 ingested public nflverse Next Gen Stats receiving, rushing, and passing data for 2016-2025, derived weekly NGS metrics, refreshed leakage-safe feature-mart predictors for target seasons 2017-2025, and ran a SQL-native summary-only diagnostic. It did not regenerate live rankings, activate champions, train BQML models, call Gemini, call Pigskin chat, call Sleeper, deploy, or write detail rows.
+
+Source coverage:
+
+| Source family | Raw rows | Derived use |
+|---|---:|---|
+| Receiving NGS | 14,716 | WR/TE receiving efficiency, separation, YAC over expected |
+| Rushing NGS | 6,052 | RB rushing efficiency, RYOE, box resilience |
+| Passing NGS | 5,925 | QB passing efficiency context |
+
+Derived table:
+
+- `player_week_ngs_metrics` contains 24,557 source-versioned player-week rows for `nflverse_ngs_direct_latest`.
+- Public nflverse receiving does not expose expected catch percentage or catch-over-expected. Those fields remain null and explicitly flagged.
+- Feature mart NGS predictors use only seasons before the target season.
+
+2017-2025 PPR diagnostic:
+
+| Candidate | Pairwise | Top-N | Captured | VOR captured | NDCG | Missing |
+|---|---:|---:|---:|---:|---:|---:|
+| `ngs_qb_passing_efficiency_v0` | 0.7299 | 0.5812 | 0.7905 | 0.6214 | 0.7517 | 0.0091 |
+| `ngs_rb_rushing_efficiency_v0` | 0.7512 | 0.6247 | 0.7627 | 0.6483 | 0.6989 | 0.1229 |
+| `ngs_te_receiving_efficiency_v0` | 0.6916 | 0.4837 | 0.6714 | 0.5557 | 0.6369 | 0.0916 |
+| `ngs_wr_receiving_efficiency_v0` | 0.7452 | 0.5159 | 0.7266 | 0.6106 | 0.6719 | 0.0627 |
+
+Decision:
+
+- Direct NGS is real and useful.
+- RB rushing NGS and WR/TE receiving NGS are owner-review component lanes, not standalone champions.
+- Current Pigskin remains the live baseline.
+- No champion formula is active.
+- Recommended next lane: BQML retrain with direct NGS features.

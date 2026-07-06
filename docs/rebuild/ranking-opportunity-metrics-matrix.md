@@ -416,3 +416,46 @@ Cutline decision:
 - WR availability modifier: `reject for owner-review`.
 
 Reason: RB and TE have useful examples, but neither passes the full owner-review challenger threshold. RB improves overall draft-board cuts while failing position validation cuts. TE improves TE6 and TE12 in the holdout but has unstable TE3 and 2024 TE12 behavior. This is a risk-adjustment signal, not a ranking model.
+
+## Phase 32.27 Direct nflverse NGS Metrics
+
+Phase 32.27 moved direct public nflverse Next Gen Stats from a source gap to an implemented research lane. The data is source-versioned, bounded by season, and consumed by the ranking feature mart with a strict target-season leakage guard.
+
+| Source | Fields ingested | Coverage/status | Use decision |
+|---|---|---|---|
+| `raw_nflverse_ngs_receiving` | `avg_cushion`, `avg_separation`, `avg_intended_air_yards`, `percent_share_of_intended_air_yards`, `receptions`, `targets`, `catch_percentage`, `yards`, `rec_touchdowns`, `avg_yac`, `avg_expected_yac`, `avg_yac_above_expectation` | 14,716 loaded rows for 2016-2025 | Use for WR/TE receiving efficiency, separation, and YAC over expected. |
+| `raw_nflverse_ngs_rushing` | `efficiency`, `percent_attempts_gte_eight_defenders`, `avg_time_to_los`, `rush_attempts`, `expected_yards`, `rush_yards_over_expected`, `rush_yards_over_expected_per_att`, `rush_pct_over_expected` | 6,052 loaded rows for 2016-2025 | Use for RB rushing efficiency, RYOE, and box resilience. |
+| `raw_nflverse_ngs_passing` | `avg_time_to_throw`, `avg_intended_air_yards`, `aggressiveness`, `expected_completion_percentage`, `completion_percentage_above_expectation` | 5,925 loaded rows for 2016-2025 | Use for QB passing efficiency context. |
+| Expected catch and catch-over-expected | Not present in the public nflverse receiving feed used here | Explicitly unavailable | Keep null with missing flags. Do not fabricate or zero-fill. |
+
+Derived table:
+
+| Object | Grain | Rows/status |
+|---|---|---:|
+| `player_week_ngs_metrics` | `source_version`, `season`, `week`, `player_id_internal`, `position` | 24,557 rows for `nflverse_ngs_direct_latest` |
+
+Feature mart columns:
+
+- `ngs_receiving_efficiency_score_3yr`
+- `ngs_yac_over_expected_score_3yr`
+- `ngs_separation_score_3yr`
+- `ngs_catch_over_expected_score_3yr`
+- `ngs_rushing_efficiency_score_3yr`
+- `ngs_rush_yards_over_expected_score_3yr`
+- `ngs_box_resilience_score_3yr`
+- `ngs_qb_passing_efficiency_score_3yr`
+- `ngs_missing_flags_json`
+
+Recent target-season coverage:
+
+| Target season | QB passing NGS | RB rushing NGS | TE receiving NGS | WR receiving NGS |
+|---:|---:|---:|---:|---:|
+| 2024 | 2,280 of 2,292 | 4,240 of 5,104 | 3,264 of 4,348 | 7,020 of 7,928 |
+| 2025 | 1,168 of 1,180 | 1,076 of 1,464 | 1,364 of 1,568 | 2,376 of 2,552 |
+
+Decision:
+
+- Direct NGS should feed the next BQML retrain.
+- The standalone NGS diagnostic lanes are useful for owner review and explainability, but not champion selection.
+- RB rushing NGS and WR/TE receiving NGS are the strongest component lanes.
+- Missing expected catch and catch-over-expected stay flagged.
