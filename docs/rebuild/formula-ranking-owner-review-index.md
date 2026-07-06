@@ -112,6 +112,7 @@ Current constraints:
 
 ## Latest Evidence
 
+- [Phase 32.37 emergency Formula Review owner-review enablement](validation/phase-32-37-v1-owner-review-enable-report.md)
 - [Phase 32.36 owner inspection checklist](validation/phase-32-36-owner-inspection-checklist.md)
 - [Phase 32.36 dashboard owner inspection support](validation/phase-32-36-dashboard-owner-inspection-support-report.md)
 - [Phase 32.35 Formula Review dashboard enablement](validation/phase-32-35-formula-review-dashboard-enable-report.md)
@@ -142,6 +143,39 @@ Owner action choices:
 - Select a review-only challenger separately by scoring profile.
 - Request review-only table persistence if Markdown-backed dashboard data is not enough.
 - Approve live ranking generation only after explicit champion selection.
+
+## Phase 32.37 Emergency Formula Review Packaging Fix
+
+The owner screenshot showed the `Formula Review` tab was visible in production, but the tab could not load the review boards because the deployed image did not contain:
+
+`/app/docs/rebuild/live-2026-ranking-review-boards.md`
+
+Emergency fix:
+
+- Commit: `428edf8 package formula review board source`.
+- New production revision: `nfl-studio-dashboard-00085-6v4`.
+- New image digest: `sha256:8bfaee3a2a1e54b5d78ed1ac676ebfeb4b9531e1078b08120f84d7f5b4fbaffb`.
+- `USE_FORMULA_COMPARISON_DASHBOARD=true` remains enabled.
+- Data Ops trigger flags remain false.
+- Trade Analyzer score flags remain false.
+- Production Pigskin historical packet tool remains unset.
+- Health endpoint returned `200 ok`.
+
+Owner decision choices:
+
+- Hold Current Pigskin for all scoring profiles.
+- Select a challenger by scoring profile in a separate Phase 32.38.
+- Request more review before any champion-selection or ranking-generation work.
+
+V1.0 default recommendation:
+
+- Current Pigskin for `standard`.
+- Current Pigskin for `half_ppr`.
+- Current Pigskin for `ppr`.
+- Current Pigskin for `gng_keeper`.
+- Enriched Logistic Elite remains review-only challenger.
+
+No formula champion was activated. No live ranking generation ran. No live ranking tables were written in the emergency packaging fix.
 
 ## Phase 32.37 Production Dashboard And TE35 Result
 
