@@ -16,11 +16,11 @@ No formula champion is active. No BigQuery ML, NGS, injury, PBP, or Stats02 lane
 
 Active ranking state:
 
-- `analytics_pigskin_rankings`: 1,140 active rows.
-- Positions per profile: QB 45, RB 80, WR 100, TE 60.
+- `analytics_pigskin_rankings`: 1,040 active rows.
+- Positions per profile: QB 45, RB 80, WR 100, TE 35.
 - Active scoring profiles: `ppr`, `half_ppr`, `standard`, `gng_keeper`.
 - Latest active generation timestamp: `2026-07-04T07:29:22.569631Z`.
-- Current live TE depth remains 60 rows per scoring profile. Keep that as read-only verification until an owner-approved live-ranking depth change exists.
+- Current live TE depth is now 35 rows per scoring profile after the owner-approved Phase 32.37 active-row update.
 
 ## Challenger Lanes
 
@@ -94,8 +94,7 @@ TE owner-review output rules:
 - Cap TE position boards, TE movement tables, display limits, and owner-facing summaries at TE35.
 - Still include TE6, TE12, and TE18 cutline crossings.
 - Do not generate owner-review TE tables beyond TE35 unless a missingness or debug note requires it.
-- Do not reduce active `analytics_pigskin_rankings` TE rows in the review-board phase.
-- Future owner-approved live-ranking depth change: reduce TE from 60 to 35.
+- Phase 32.37 reduced active `analytics_pigskin_rankings` TE rows from 60 to 35 per scoring profile.
 
 Current constraints:
 
@@ -113,6 +112,8 @@ Current constraints:
 
 ## Latest Evidence
 
+- [Phase 32.36 owner inspection checklist](validation/phase-32-36-owner-inspection-checklist.md)
+- [Phase 32.36 dashboard owner inspection support](validation/phase-32-36-dashboard-owner-inspection-support-report.md)
 - [Phase 32.35 Formula Review dashboard enablement](validation/phase-32-35-formula-review-dashboard-enable-report.md)
 - [Phase 32.32 non-PPR review candidate universe](validation/phase-32-32-non-ppr-review-candidate-universe-report.md)
 - [Phase 32.34 Formula Review dashboard smoke](validation/phase-32-34-formula-review-dashboard-smoke-report.md)
@@ -128,7 +129,7 @@ Current constraints:
 
 ## Recommended Next Action
 
-Recommended: Phase 32.36, owner selection by scoring profile or hold current Pigskin baseline.
+Recommended: Phase 32.38, owner inspection and hold current Pigskin baseline.
 
 The owner can now review the Formula Review tab. Any next phase should stay profile-specific and avoid one global winner across scoring systems.
 
@@ -140,7 +141,64 @@ Owner action choices:
 - Hold current Pigskin.
 - Select a review-only challenger separately by scoring profile.
 - Request review-only table persistence if Markdown-backed dashboard data is not enough.
-- Request production TE depth change as a separate owner-approved phase.
+- Approve live ranking generation only after explicit champion selection.
+
+## Phase 32.37 Production Dashboard And TE35 Result
+
+Phase 32.37 deployed a new production revision with the Formula Review dashboard code and applied the owner-approved TE35 production depth change.
+
+Runtime state:
+
+- Service: `nfl-studio-dashboard`.
+- Revision: `nfl-studio-dashboard-00084-9z5`.
+- URL: `https://nfl-studio-dashboard-inypcgbx7a-uc.a.run.app`.
+- Image digest: `sha256:d0af08ee49858ab6230fea9b0ab6504a12043cc7066d0f76c79fb84f8b723f7d`.
+- Flag: `USE_FORMULA_COMPARISON_DASHBOARD=true`.
+- Data Ops trigger flags remain false.
+- Trade Analyzer score flags remain false.
+- Production Pigskin historical packet tool remains unset.
+- Health endpoint returned `200 ok`.
+
+TE depth state:
+
+- Active total rows: 1,040.
+- Active shape per scoring profile: QB45, RB80, WR100, TE35.
+- TE ranks 36 through 60 were marked inactive for `standard`, `half_ppr`, `ppr`, and `gng_keeper`.
+- No rows were deleted.
+- No ranking generation ran.
+- No formula champion is active.
+
+Owner action choices:
+
+- Inspect the Formula Review tab.
+- Inspect TE35 Player Profiles depth for each scoring profile.
+- Hold Current Pigskin.
+- Select a challenger by scoring profile in a separate phase.
+- Request review-only table persistence.
+- Approve live ranking generation only after explicit champion selection.
+
+## Phase 32.36 Owner Inspection Support
+
+Phase 32.36 committed the Phase 32.35 enablement docs as `a6c3ae4 phase 32.35 enable formula review dashboard`.
+
+Read-only production verification:
+
+- Service: `nfl-studio-dashboard`.
+- Revision: `nfl-studio-dashboard-00083-tlr`.
+- URL: `https://nfl-studio-dashboard-inypcgbx7a-uc.a.run.app`.
+- Flag: `USE_FORMULA_COMPARISON_DASHBOARD=true`.
+- Data Ops trigger flags remain false.
+- Trade Analyzer score flags remain false.
+- Production Pigskin historical packet tool remains unset.
+- Health endpoint returned `200 ok`.
+
+Owner checklist:
+
+- [Phase 32.36 owner inspection checklist](validation/phase-32-36-owner-inspection-checklist.md)
+
+The owner should inspect the Formula Review tab while signed in, then choose one action per scoring profile: hold Current Pigskin, continue owner review, request challenger selection, request more evidence, or reject the BQML challenger for that profile.
+
+Separate decisions remain separate: review-only table persistence, production TE depth change from TE60 to TE35, and live ranking generation after explicit champion selection.
 
 ## Phase 32.35 Dashboard Enablement Result
 

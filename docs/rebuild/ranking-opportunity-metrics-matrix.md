@@ -107,6 +107,7 @@ PBP values are xFP-like component proxies, not official fantasy-point xFP column
 - Phase 32.14 writes summary-only backtest evidence. It does not write `ranking_backtest_results`, `ranking_formula_champions`, `analytics_pigskin_rankings`, or `analytics_pigskin_rankings_candidates`.
 - Phase 32.15 writes summary-only PBP diagnostic evidence. It does not write detail rows, live rankings, or champion rows.
 - Phase 32.32 confirms CTE-only live 2026 BQML review input is available for Standard, Half PPR, PPR, and GNG Keeper. The production candidate table remains PPR-only and was not overwritten.
+- Phase 32.37 deployed the read-only Formula Review dashboard code and reduced active live TE depth to 35 per scoring profile. It did not run live ranking generation, write champions, overwrite candidates, call Gemini, call Pigskin chat, call Sleeper, train BQML, or ingest source data.
 
 ## Phase 32.23 Owner-Review Status
 

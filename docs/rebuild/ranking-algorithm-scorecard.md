@@ -53,6 +53,8 @@ Phase 32.31 confirmed that active final rankings exist for all four scoring prof
 
 This is not a champion decision. Do not average review output across scoring systems. The production candidate table remains PPR-only and was not overwritten.
 
+Phase 32.37 changed active live ranking depth to QB45, RB80, WR100, and TE35 per scoring profile. Active live rows now total 1,040. No live ranking generation ran and no formula champion is active.
+
 ## Historical Seasons Covered
 
 Target seasons: 2017 through 2025.
@@ -118,6 +120,19 @@ Smoke status:
 - Enriched Linear Points stays context only.
 - TE output remains capped at TE35 for owner review.
 - No global winner is selected.
+
+### Phase 32.37: Formula Review production deploy and TE35 live depth
+
+Phase 32.37 deployed production revision `nfl-studio-dashboard-00084-9z5` with the Formula Review dashboard code and `USE_FORMULA_COMPARISON_DASHBOARD=true`.
+
+Production ranking depth:
+
+- Active total rows: 1,040.
+- Per scoring profile: QB45, RB80, WR100, TE35.
+- TE ranks 36 through 60 were marked inactive for `standard`, `half_ppr`, `ppr`, and `gng_keeper`.
+- Future owner-approved generation uses TE35 through `src.generate_pigskin_rankings.DEFAULT_POSITION_LIMITS`.
+
+No champion is active. Live ranking generation did not run.
 
 ### Phase 32.5: Rolling multi-year tournament
 
