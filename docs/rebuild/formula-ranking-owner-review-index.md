@@ -20,6 +20,7 @@ Active ranking state:
 - Positions per profile: QB 45, RB 80, WR 100, TE 60.
 - Active scoring profiles: `ppr`, `half_ppr`, `standard`, `gng_keeper`.
 - Latest active generation timestamp: `2026-07-04T07:29:22.569631Z`.
+- Current live TE depth remains 60 rows per scoring profile. Keep that as read-only verification until an owner-approved live-ranking depth change exists.
 
 ## Challenger Lanes
 
@@ -78,6 +79,23 @@ A safe live 2026 review board needs:
 - NGS feature signals where source-backed.
 - Sleeper current team, status, depth position, depth order, and freshness as display-only fields.
 - Source freshness and missing flags shown beside model outputs.
+
+Review-board target shape:
+
+| Position | Owner-review board depth |
+|---|---:|
+| QB | 45 |
+| RB | 80 |
+| WR | 100 |
+| TE | 35 |
+
+TE owner-review output rules:
+
+- Cap TE position boards, TE movement tables, display limits, and owner-facing summaries at TE35.
+- Still include TE6, TE12, and TE18 cutline crossings.
+- Do not generate owner-review TE tables beyond TE35 unless a missingness or debug note requires it.
+- Do not reduce active `analytics_pigskin_rankings` TE rows in the review-board phase.
+- Future owner-approved live-ranking depth change: reduce TE from 60 to 35.
 
 Current blockers:
 

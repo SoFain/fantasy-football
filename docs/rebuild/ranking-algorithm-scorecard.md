@@ -1222,3 +1222,5 @@ Live 2026 review-board readiness:
 - `ranking_backtest_feature_mart` has 2025 target slices, not 2026.
 - The current BQML prediction builder expects historical outcome labels and is not a live 2026 review input yet.
 - Next owner-approved technical step should build an outcome-free, review-only 2026 prediction path. It must not call Gemini, write live rankings, or activate champions.
+- Phase 32.30 owner-review board output should use QB45, RB80, WR100, and TE35. Current live ranking tables may still verify TE60 per scoring profile until a separate owner-approved live-ranking depth change exists.
+- Future owner-approved live-ranking depth change: reduce TE from 60 to 35.

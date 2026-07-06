@@ -88,6 +88,8 @@ Active ranking shape:
 | `standard` | 45 | 80 | 100 | 60 |
 | `gng_keeper` | 45 | 80 | 100 | 60 |
 
+The current live system still has 60 active TE rows per scoring profile. That remains read-only current-state verification for this phase.
+
 Latest active ranking versions:
 
 | Scoring profile | Ranking version |
@@ -136,6 +138,23 @@ Required fields:
 - Sleeper current team, status, depth position, and depth order as display-only fields.
 - Source freshness timestamps.
 - Missing flags.
+
+Review-board target shape:
+
+| Position | Owner-review board depth |
+|---|---:|
+| QB | 45 |
+| RB | 80 |
+| WR | 100 |
+| TE | 35 |
+
+TE review-board rule:
+
+- TE position board output, movement tables, display limits, and owner-facing summaries should stop at TE35.
+- TE6, TE12, and TE18 cutline crossings should still be included.
+- Do not generate owner-review TE tables past TE35 unless needed for a missingness or debug note.
+- Do not reduce active `analytics_pigskin_rankings` rows as part of Phase 32.30 review-board work.
+- Future owner-approved live-ranking depth change: reduce TE from 60 to 35.
 
 Required implementation work:
 
