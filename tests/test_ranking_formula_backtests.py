@@ -1188,6 +1188,24 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertNotIn("analytics_pigskin_rankings", lowered)
         self.assertNotIn("ranking_formula_champions", lowered)
 
+    def test_feature_mart_insert_sql_consumes_role_context_without_target_leakage(self):
+        sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")
+        lowered = sql.lower()
+
+        self.assertIn("player_week_role_context_metrics", sql)
+        self.assertIn("metrics.season < @target_season", sql)
+        self.assertIn("metrics.season = role_context.season", sql)
+        self.assertIn("metrics.week = role_context.week", sql)
+        self.assertIn("REGEXP_REPLACE(metrics.player_id_internal", sql)
+        self.assertIn("injury_status_score_3yr", sql)
+        self.assertIn("injury_burden_score_3yr", sql)
+        self.assertIn("missed_time_risk_score_3yr", sql)
+        self.assertIn("availability_score_3yr", sql)
+        self.assertIn("injury_context_missing_flags_json", sql)
+        self.assertNotIn("sleeper_player_context_current", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+
     def test_sql_native_scoring_keeps_missing_features_missing(self):
         sql = rfb.build_sql_native_scoring_prototype_sql(project_id="p", dataset_id="d")
 
@@ -1336,6 +1354,30 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         self.assertIn("receiving_role_dominance_score", sql)
         self.assertIn("team_environment_score", sql)
         self.assertNotIn("insert ", sql.lower())
+
+    def test_sql_native_tournament_supports_injury_context_diagnostic_candidates(self):
+        candidates = rfb.injury_context_diagnostic_tournament_candidates()
+        sql = rfb.build_sql_native_tournament_summary_sql(
+            project_id="p",
+            dataset_id="d",
+            target_seasons=(2024, 2025),
+            scoring_profile_ids=("ppr",),
+            candidate_rows=candidates,
+        )
+        lowered = sql.lower()
+
+        self.assertEqual(len(candidates), len(rfb.POSITIONS) * 3)
+        self.assertIn("injury_status_score_3yr", sql)
+        self.assertIn("injury_burden_score_3yr", sql)
+        self.assertIn("missed_time_risk_score_3yr", sql)
+        self.assertIn("availability_score_3yr", sql)
+        self.assertIn("100.0 - raw_feature_value", sql)
+        self.assertNotIn("insert ", lowered)
+        self.assertNotIn("analytics_pigskin_rankings", lowered)
+        self.assertNotIn("ranking_formula_champions", lowered)
+        for row in candidates:
+            formula = rfb.validate_formula(json.loads(row["formula_json"]))
+            self.assertFalse(set(formula["features"]) & set(rfb.BLOCKED_METRIC_FEATURES))
 
     def test_sql_native_tournament_missing_features_are_not_zero_filled(self):
         sql = rfb.build_sql_native_tournament_summary_sql(project_id="p", dataset_id="d")

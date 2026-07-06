@@ -39,10 +39,17 @@ INSERT INTO `{project}.{dataset}.player_week_role_context_metrics` (
   limited_practice_count,
   did_not_practice_count,
   injury_risk_score,
+  injury_status_score,
+  injury_burden_score,
+  missed_time_risk_score,
+  availability_score,
   depth_chart_role_score,
   missing_flags_json,
+  injury_context_missing_flags_json,
   source_freshness_json,
   source_provenance_json,
+  identity_mapping_method,
+  identity_mapping_confidence,
   role_context_run_id,
   created_at
 )
@@ -76,7 +83,7 @@ identity_bridge AS (
 SELECT
   injury_source.season,
   injury_source.week,
-  identity_bridge.player_id_internal,
+  COALESCE(identity_bridge.player_id_internal, CONCAT('gsis:', injury_source.gsis_id)) AS player_id_internal,
   injury_source.gsis_id,
   injury_source.player_name,
   injury_source.team,
@@ -94,11 +101,49 @@ SELECT
     + injury_source.did_not_practice_count * 25.0
     + injury_source.limited_practice_count * 10.0
   )) AS injury_risk_score,
+  -- Higher is healthier. This is the direct inverse of the current-week source-supported risk score.
+  100.0 - LEAST(100.0, GREATEST(0.0,
+    injury_source.out_status_count * 100.0
+    + injury_source.doubtful_status_count * 75.0
+    + injury_source.questionable_status_count * 45.0
+    + injury_source.did_not_practice_count * 25.0
+    + injury_source.limited_practice_count * 10.0
+  )) AS injury_status_score,
+  -- Higher means more historical burden. It uses only report/practice designations present in the source.
+  LEAST(100.0, GREATEST(0.0,
+    injury_source.injury_report_count * 8.0
+    + injury_source.questionable_status_count * 10.0
+    + injury_source.doubtful_status_count * 20.0
+    + injury_source.out_status_count * 30.0
+    + injury_source.did_not_practice_count * 10.0
+    + injury_source.limited_practice_count * 4.0
+  )) AS injury_burden_score,
+  -- Higher means missed-time concern. Only explicit Out and Doubtful report statuses are counted.
+  LEAST(100.0, GREATEST(0.0,
+    injury_source.out_status_count * 100.0
+    + injury_source.doubtful_status_count * 75.0
+  )) AS missed_time_risk_score,
+  -- Higher means more available. This avoids zero-fill by keeping source rows distinct from missing rows.
+  100.0 - LEAST(100.0, GREATEST(0.0,
+    injury_source.out_status_count * 100.0
+    + injury_source.doubtful_status_count * 75.0
+    + injury_source.questionable_status_count * 45.0
+    + injury_source.did_not_practice_count * 25.0
+    + injury_source.limited_practice_count * 10.0
+  )) AS availability_score,
   CAST(NULL AS FLOAT64) AS depth_chart_role_score,
   TO_JSON_STRING(ARRAY_CONCAT(
-    IF(identity_bridge.player_id_internal IS NULL, ['missing_identity_bridge_match'], []),
+    IF(identity_bridge.player_id_internal IS NULL, ['using_exact_gsis_fallback_identity'], []),
     ['historical_depth_chart_context_unavailable']
   )) AS missing_flags_json,
+  TO_JSON_STRING(STRUCT(
+    FALSE AS injury_source_row_missing,
+    injury_source.injury_report_count = 0 AS injury_report_count_missing,
+    injury_source.out_status_count = 0 AND injury_source.doubtful_status_count = 0 AND injury_source.questionable_status_count = 0 AS report_status_signal_missing,
+    injury_source.did_not_practice_count = 0 AND injury_source.limited_practice_count = 0 AS practice_status_signal_missing,
+    identity_bridge.player_id_internal IS NULL AS primary_identity_bridge_missing,
+    TRUE AS historical_depth_chart_context_unavailable
+  )) AS injury_context_missing_flags_json,
   TO_JSON_STRING(STRUCT(
     injury_source.source_updated_at AS raw_nflverse_injuries_loaded_at,
     CAST(NULL AS TIMESTAMP) AS raw_nflverse_depth_charts_loaded_at
@@ -108,6 +153,8 @@ SELECT
     'raw_nflverse_depth_charts' AS depth_source_table,
     'depth loader lacks historical season/week keys in current nflreadpy output' AS depth_source_status
   )) AS source_provenance_json,
+  IF(identity_bridge.player_id_internal IS NOT NULL, 'identity_bridge_gsis_exact', 'gsis_exact_fallback') AS identity_mapping_method,
+  IF(identity_bridge.player_id_internal IS NOT NULL, 1.0, 0.75) AS identity_mapping_confidence,
   @role_context_run_id AS role_context_run_id,
   CURRENT_TIMESTAMP() AS created_at
 FROM injury_source
@@ -126,7 +173,12 @@ SELECT
   MIN(injury_risk_score) AS min_injury_risk_score,
   MAX(injury_risk_score) AS max_injury_risk_score,
   AVG(injury_risk_score) AS avg_injury_risk_score,
+  AVG(injury_status_score) AS avg_injury_status_score,
+  AVG(injury_burden_score) AS avg_injury_burden_score,
+  AVG(missed_time_risk_score) AS avg_missed_time_risk_score,
+  AVG(availability_score) AS avg_availability_score,
   COUNTIF(player_id_internal IS NULL) AS missing_identity_count,
+  COUNTIF(identity_mapping_method = 'gsis_exact_fallback') AS gsis_fallback_identity_count,
   COUNTIF(depth_chart_role_score IS NULL) AS missing_depth_score_count
 FROM `{project}.{dataset}.player_week_role_context_metrics`
 WHERE season BETWEEN @season_start AND @season_end

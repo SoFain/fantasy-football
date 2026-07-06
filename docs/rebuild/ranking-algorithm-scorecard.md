@@ -772,6 +772,37 @@ Phase 32.19 added source and context lanes only. It did not run a new tournament
 
 The ranking read stays unchanged until a later phase refreshes `player_week_ideal_stats`, rebuilds `ranking_backtest_feature_mart`, and reruns SQL-native summaries with the injury risk field populated.
 
+### Phase 32.20: Injury context feature-mart refresh
+
+Phase 32.20 added deterministic injury context to the SQL-native ranking research path. It did not regenerate live rankings, activate champions, write detail rows, expose Pigskin chat, or use Sleeper current-team data as historical truth.
+
+| Object | Result |
+|---|---:|
+| Migration `0038__injury_context_feature_mart_columns.sql` | Applied |
+| `player_week_role_context_metrics` | 65,864 refreshed rows, 2014-2025 |
+| Missing role-context identity rows | 0 after exact-GSIS fallback |
+| `gsis_exact_fallback` identity rows | 32,405, mostly defense and offensive line |
+| Feature mart refresh | target seasons 2017-2025, four profiles, QB/RB/WR/TE |
+| SQL-native injury diagnostic | 40 PPR candidate summaries, zero detail rows |
+| Champion activation | 0 |
+
+2017-2025 aggregate, PPR:
+
+| Position | Current Pigskin pairwise | Best injury-context pairwise | Current Pigskin top-N | Best injury-context top-N | Read |
+|---|---:|---:|---:|---:|---|
+| QB | 0.6923 | 0.6870 | 0.5781 | 0.5728 | Availability blend is close, but not better. |
+| RB | 0.7495 | 0.7436 | 0.6226 | 0.6200 | Useful modifier. Current Pigskin still leads. |
+| WR | 0.7754 | 0.7590 | 0.5277 | 0.5058 | Injury context does not close the WR gap. |
+| TE | 0.7569 | 0.7364 | 0.4879 | 0.4731 | Useful context, not a champion. |
+
+Decision:
+
+- Keep `availability_score_3yr`, `injury_status_score_3yr`, `injury_burden_score_3yr`, and `missed_time_risk_score_3yr` in the feature mart.
+- Treat injury context as a secondary modifier, not a standalone ranking algorithm.
+- Do not activate a champion from this run.
+- Keep depth role context blocked until a real historical depth source exists.
+- Keep Sleeper current context out of historical feature marts. It remains a current-roster display aid only.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:

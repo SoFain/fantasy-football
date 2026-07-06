@@ -249,3 +249,40 @@ VOR baseline sensitivity:
 | `deep_vorp_qb15_rb36_wr55_te12` | QB15/RB36/WR55/TE12 | Lowest tested VOR captured: 0.6370, highest pick-band regret. |
 
 Decision: keep first-down proxies and the PPR RB weighted-opportunity diagnostic as component inputs. Injury/depth needs source remediation before scoring. Do not change the official stored VOR semantics yet.
+
+## Phase 32.20 Injury Context Feature Refresh
+
+Phase 32.20 moved historical injury context from source remediation into the ranking research feature mart. This did not regenerate live rankings, activate champions, expose Pigskin chat, or use Sleeper current team as historical truth.
+
+| Field | Source | Feature mart field | Coverage/status | Use decision |
+|---|---|---|---|---|
+| `injury_status_score` | `raw_nflverse_injuries`, grouped in `player_week_role_context_metrics` | `injury_status_score_3yr` | Populated in 2017-2025 target seasons from source seasons strictly before the target season. | Keep as a health-side modifier. |
+| `injury_burden_score` | Injury report count plus report/practice status counts | `injury_burden_score_3yr` | Bounded 0-100 and validated after feature-mart refresh. | Useful as a risk-side diagnostic, inverted by SQL-native scoring. |
+| `missed_time_risk_score` | Explicit Out and Doubtful injury statuses only | `missed_time_risk_score_3yr` | Bounded 0-100. Sparse missed-time signal by design. | Keep, but do not overweight. |
+| `availability_score` | Inverse of source-supported injury risk | `availability_score_3yr` | Best injury-context modifier in aggregate tests. | Candidate input for future RB/WR/TE blends. |
+| `identity_mapping_method` | `player_identity_bridge` exact GSIS, then `gsis:` fallback | role-context provenance only | `missing_identity_count = 0` after deterministic fallback. `gsis_exact_fallback` remains explicit. | Safe for research. Do not use fallback as current roster truth. |
+| `depth_chart_role_score` | Historical depth chart lane | `depth_chart_role_score_3yr` | Still unavailable because historical season/week depth rows remain absent. | Leave null and flagged. |
+
+Feature refresh and validation:
+
+- Migration `0038__injury_context_feature_mart_columns.sql` applied.
+- `player_week_role_context_metrics` refreshed for 2014-2025 with 65,864 rows.
+- `ranking_backtest_feature_mart` refreshed for target seasons 2017-2025, four profiles, QB/RB/WR/TE.
+- Focused validations 234 through 240 passed.
+- SQL-native PPR diagnostic wrote summary-only evidence: 40 candidate summaries, zero detail rows, no champion activation.
+
+2017-2025 PPR injury-context read:
+
+| Position | Best injury-context candidate | Pairwise | Top-N | Rank corr. | Missing |
+|---|---|---:|---:|---:|---:|
+| QB | `availability_adjusted_current_pigskin_v0` | 0.6870 | 0.5728 | 0.4343 | 0.0305 |
+| RB | `availability_adjusted_current_pigskin_v0` | 0.7436 | 0.6200 | 0.5476 | 0.0358 |
+| WR | `availability_adjusted_current_pigskin_v0` | 0.7590 | 0.5058 | 0.5586 | 0.0351 |
+| TE | `availability_adjusted_current_pigskin_v0` | 0.7364 | 0.4731 | 0.4941 | 0.0357 |
+
+Decision read:
+
+- Injury context is useful as a modifier, especially for RB, but it does not beat the current Pigskin baseline outright on aggregate.
+- The direct injury-only diagnostic is not a champion path.
+- Depth remains blocked and must stay null until a historical source with season/week truth exists.
+- Sleeper 2026 snapshot is live-current context only. It was not used in the historical feature mart.

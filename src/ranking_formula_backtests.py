@@ -228,6 +228,10 @@ IDEAL_STAT_FEATURES = {
     "high_value_xfp_score_3yr",
     "qb_ngs_efficiency_score_3yr",
     "injury_risk_score_3yr",
+    "injury_status_score_3yr",
+    "injury_burden_score_3yr",
+    "missed_time_risk_score_3yr",
+    "availability_score_3yr",
     "depth_chart_role_score_3yr",
 }
 PBP_XFP_FEATURES = {
@@ -332,6 +336,7 @@ ALLOWED_INPUT_TABLES = (
     "player_week_opportunity_metrics",
     "player_week_ideal_opportunity_metrics",
     "player_week_pbp_opportunity_metrics",
+    "player_week_role_context_metrics",
 )
 ALLOWED_CANDIDATE_STATUSES = ("draft", "reviewed", "approved")
 FEATURE_SOURCE_MAP = {
@@ -400,6 +405,10 @@ FEATURE_SOURCE_MAP = {
     "high_value_xfp_score_3yr": "high_value_xfp_score_3yr",
     "qb_ngs_efficiency_score_3yr": "qb_ngs_efficiency_score_3yr",
     "injury_risk_score_3yr": "injury_risk_score_3yr",
+    "injury_status_score_3yr": "injury_status_score_3yr",
+    "injury_burden_score_3yr": "injury_burden_score_3yr",
+    "missed_time_risk_score_3yr": "missed_time_risk_score_3yr",
+    "availability_score_3yr": "availability_score_3yr",
     "depth_chart_role_score_3yr": "depth_chart_role_score_3yr",
     "receiving_xfp_pbp_3yr": "receiving_xfp_pbp_3yr",
     "rushing_xfp_pbp_3yr": "rushing_xfp_pbp_3yr",
@@ -2474,6 +2483,7 @@ def build_feature_mart_insert_sql(*, project_id: str, dataset_id: str) -> str:
     opportunity_table = table_id(project_id, dataset_id, "player_week_opportunity_metrics")
     ideal_table = table_id(project_id, dataset_id, "player_week_ideal_opportunity_metrics")
     pbp_ideal_table = table_id(project_id, dataset_id, "player_week_pbp_opportunity_metrics")
+    role_context_table = table_id(project_id, dataset_id, "player_week_role_context_metrics")
     return f"""
 CREATE TEMP FUNCTION _slope(points ARRAY<STRUCT<season INT64, value FLOAT64>>)
 RETURNS FLOAT64
@@ -2565,6 +2575,11 @@ INSERT INTO `{mart_table}` (
     high_value_xfp_score_3yr,
     qb_ngs_efficiency_score_3yr,
     injury_risk_score_3yr,
+    injury_status_score_3yr,
+    injury_burden_score_3yr,
+    missed_time_risk_score_3yr,
+    availability_score_3yr,
+    injury_context_missing_flags_json,
     depth_chart_role_score_3yr,
     receiving_xfp_pbp_3yr,
     rushing_xfp_pbp_3yr,
@@ -2670,6 +2685,10 @@ season_features AS (
         AVG(ideal.high_value_xfp_score) AS high_value_xfp_score,
         AVG(ideal.qb_ngs_efficiency_score) AS qb_ngs_efficiency_score,
         AVG(ideal.injury_risk_score) AS injury_risk_score,
+        AVG(role_context.injury_status_score) AS injury_status_score,
+        AVG(role_context.injury_burden_score) AS injury_burden_score,
+        AVG(role_context.missed_time_risk_score) AS missed_time_risk_score,
+        AVG(role_context.availability_score) AS role_context_availability_score,
         AVG(ideal.depth_chart_role_score) AS depth_chart_role_score,
         AVG(pbp_ideal.receiving_xfp_pbp) AS receiving_xfp_pbp,
         AVG(pbp_ideal.rushing_xfp_pbp) AS rushing_xfp_pbp,
@@ -2699,6 +2718,8 @@ season_features AS (
         ANY_VALUE(opportunity.missing_flags_json) AS opportunity_missing_flags,
         ANY_VALUE(ideal.source_provenance_json) AS ideal_source_provenance_json,
         ANY_VALUE(ideal.missing_flags_json) AS ideal_missing_flags,
+        ANY_VALUE(role_context.source_provenance_json) AS role_context_source_provenance_json,
+        ANY_VALUE(role_context.injury_context_missing_flags_json) AS role_context_missing_flags,
         ANY_VALUE(pbp_ideal.source_provenance_json) AS pbp_source_provenance_json,
         ANY_VALUE(pbp_ideal.missing_flags_json) AS pbp_missing_flags
     FROM `{metrics_table}` metrics
@@ -2733,6 +2754,11 @@ season_features AS (
      AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(pbp_ideal.player_id_internal, r'^gsis:', '')
      AND metrics.position = pbp_ideal.position
      AND pbp_ideal.source_version = 'ffopportunity_pbp_latest'
+    LEFT JOIN `{role_context_table}` role_context
+      ON metrics.season = role_context.season
+     AND metrics.week = role_context.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(role_context.player_id_internal, r'^gsis:', '')
+     AND metrics.position = role_context.position
     WHERE metrics.season BETWEEN @source_window_start_season AND @source_window_end_season
       AND metrics.season < @target_season
       AND metrics.scoring_profile_id = 'ppr'
@@ -2792,6 +2818,10 @@ source_features AS (
         AVG(high_value_xfp_score) AS high_value_xfp_score_3yr,
         AVG(qb_ngs_efficiency_score) AS qb_ngs_efficiency_score_3yr,
         AVG(injury_risk_score) AS injury_risk_score_3yr,
+        AVG(injury_status_score) AS injury_status_score_3yr,
+        AVG(injury_burden_score) AS injury_burden_score_3yr,
+        AVG(missed_time_risk_score) AS missed_time_risk_score_3yr,
+        AVG(role_context_availability_score) AS availability_score_3yr,
         AVG(depth_chart_role_score) AS depth_chart_role_score_3yr,
         AVG(receiving_xfp_pbp) AS receiving_xfp_pbp_3yr,
         AVG(rushing_xfp_pbp) AS rushing_xfp_pbp_3yr,
@@ -2836,6 +2866,8 @@ source_features AS (
         ANY_VALUE(opportunity_missing_flags HAVING MAX season) AS opportunity_missing_flags,
         ANY_VALUE(ideal_source_provenance_json HAVING MAX season) AS ideal_source_provenance_json,
         ANY_VALUE(ideal_missing_flags HAVING MAX season) AS ideal_missing_flags,
+        ANY_VALUE(role_context_source_provenance_json HAVING MAX season) AS role_context_source_provenance_json,
+        ANY_VALUE(role_context_missing_flags HAVING MAX season) AS role_context_missing_flags,
         ANY_VALUE(pbp_source_provenance_json HAVING MAX season) AS pbp_source_provenance_json,
         ANY_VALUE(pbp_missing_flags HAVING MAX season) AS pbp_missing_flags
     FROM season_features
@@ -2955,6 +2987,17 @@ with_source AS (
         source.high_value_xfp_score_3yr,
         source.qb_ngs_efficiency_score_3yr,
         source.injury_risk_score_3yr,
+        source.injury_status_score_3yr,
+        source.injury_burden_score_3yr,
+        source.missed_time_risk_score_3yr,
+        source.availability_score_3yr,
+        COALESCE(source.role_context_missing_flags, TO_JSON_STRING(STRUCT(
+            source.injury_status_score_3yr IS NULL AS injury_status_score_3yr_missing,
+            source.injury_burden_score_3yr IS NULL AS injury_burden_score_3yr_missing,
+            source.missed_time_risk_score_3yr IS NULL AS missed_time_risk_score_3yr_missing,
+            source.availability_score_3yr IS NULL AS availability_score_3yr_missing,
+            TRUE AS aggregated_role_context_flags
+        ))) AS injury_context_missing_flags_json,
         source.depth_chart_role_score_3yr,
         source.receiving_xfp_pbp_3yr,
         source.rushing_xfp_pbp_3yr,
@@ -2979,6 +3022,8 @@ with_source AS (
         source.opportunity_missing_flags,
         source.ideal_source_provenance_json,
         source.ideal_missing_flags,
+        source.role_context_source_provenance_json,
+        source.role_context_missing_flags,
         source.pbp_source_provenance_json,
         source.pbp_missing_flags,
         packet.packet_source_freshness_json
@@ -3090,6 +3135,11 @@ SELECT
     high_value_xfp_score_3yr,
     qb_ngs_efficiency_score_3yr,
     injury_risk_score_3yr,
+    injury_status_score_3yr,
+    injury_burden_score_3yr,
+    missed_time_risk_score_3yr,
+    availability_score_3yr,
+    injury_context_missing_flags_json,
     depth_chart_role_score_3yr,
     receiving_xfp_pbp_3yr,
     rushing_xfp_pbp_3yr,
@@ -3144,6 +3194,10 @@ SELECT
         receiving_role_dominance_xfp_3yr IS NULL AS receiving_role_dominance_xfp_3yr_missing,
         qb_ngs_efficiency_score_3yr IS NULL AS qb_ngs_efficiency_score_3yr_missing,
         injury_risk_score_3yr IS NULL AS injury_risk_score_3yr_missing,
+        injury_status_score_3yr IS NULL AS injury_status_score_3yr_missing,
+        injury_burden_score_3yr IS NULL AS injury_burden_score_3yr_missing,
+        missed_time_risk_score_3yr IS NULL AS missed_time_risk_score_3yr_missing,
+        availability_score_3yr IS NULL AS availability_score_3yr_missing,
         depth_chart_role_score_3yr IS NULL AS depth_chart_role_score_3yr_missing,
         receiving_xfp_pbp_3yr IS NULL AS receiving_xfp_pbp_3yr_missing,
         rushing_xfp_pbp_3yr IS NULL AS rushing_xfp_pbp_3yr_missing,
@@ -3160,6 +3214,7 @@ SELECT
         metrics_missing_flags AS source_missing_flags,
         opportunity_missing_flags AS opportunity_missing_flags,
         ideal_missing_flags AS ideal_missing_flags,
+        injury_context_missing_flags_json AS injury_context_missing_flags_json,
         pbp_missing_flags AS pbp_missing_flags
     )) AS predictor_missing_flags_json,
     TO_JSON_STRING(STRUCT(
@@ -3170,6 +3225,7 @@ SELECT
         metrics_source_freshness_json AS metrics_source_freshness_json,
         opportunity_source_freshness_json AS opportunity_source_freshness_json,
         ideal_source_provenance_json AS ideal_source_provenance_json,
+        role_context_source_provenance_json AS role_context_source_provenance_json,
         pbp_source_provenance_json AS pbp_source_provenance_json,
         packet_source_freshness_json AS packet_source_freshness_json
     )) AS source_freshness_json,
@@ -3552,6 +3608,10 @@ feature_values AS (
       WHEN 'high_value_xfp_score_3yr' THEN high_value_xfp_score_3yr
       WHEN 'qb_ngs_efficiency_score_3yr' THEN qb_ngs_efficiency_score_3yr
       WHEN 'injury_risk_score_3yr' THEN injury_risk_score_3yr
+      WHEN 'injury_status_score_3yr' THEN injury_status_score_3yr
+      WHEN 'injury_burden_score_3yr' THEN injury_burden_score_3yr
+      WHEN 'missed_time_risk_score_3yr' THEN missed_time_risk_score_3yr
+      WHEN 'availability_score_3yr' THEN availability_score_3yr
       WHEN 'depth_chart_role_score_3yr' THEN depth_chart_role_score_3yr
       WHEN 'receiving_xfp_pbp_3yr' THEN receiving_xfp_pbp_3yr
       WHEN 'rushing_xfp_pbp_3yr' THEN rushing_xfp_pbp_3yr
@@ -3593,7 +3653,7 @@ scored_features AS (
       WHEN feature_name = 'weekly_volatility_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value * 10.0))
       WHEN feature_name IN ('xfp_share_3yr', 'offensive_snap_share_3yr', 'receiving_xfp_share_pbp_3yr', 'rushing_xfp_share_pbp_3yr') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
       WHEN feature_name = 'fantasy_points_over_expectation_3yr' THEN LEAST(100.0, GREATEST(0.0, 50.0 + raw_feature_value * 5.0))
-      WHEN feature_name = 'injury_risk_score_3yr' THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value))
+      WHEN feature_name IN ('injury_risk_score_3yr', 'injury_burden_score_3yr', 'missed_time_risk_score_3yr') THEN LEAST(100.0, GREATEST(0.0, 100.0 - raw_feature_value))
       WHEN feature_name IN ('improving_3yr', 'breakout_trajectory_3yr') THEN IF(raw_feature_value > 0, 100.0, 0.0)
       WHEN feature_name = 'declining_3yr' THEN IF(raw_feature_value > 0, 0.0, 100.0)
       WHEN feature_name IN ('success_rate', 'cpoe', 'snap_share_proxy') THEN LEAST(100.0, GREATEST(0.0, IF(raw_feature_value <= 1, raw_feature_value * 100.0, raw_feature_value)))
@@ -4062,6 +4122,74 @@ def sql_native_tournament_candidates() -> list[dict[str, Any]]:
         row
         for row in tournament_formula_candidates()
         if any(family in str(row["candidate_id"]) for family in selected_families)
+    ]
+
+
+def injury_context_diagnostic_tournament_candidates() -> list[dict[str, Any]]:
+    specs: list[tuple[str, str, dict[str, Any]]] = []
+    for position in POSITIONS:
+        position_lower = position.lower()
+        specs.extend(
+            [
+                (
+                    f"ranking_formula_{position_lower}_injury_status_only_diagnostic_v0_2026_001",
+                    f"{position} Injury Status Only Diagnostic",
+                    {
+                        "version": "injury_status_only_diagnostic_v0",
+                        "position": position,
+                        "features": ["injury_status_score_3yr"],
+                        "weights": {"injury_status_score_3yr": 1.0},
+                        "score_expression": "weighted_linear",
+                        "normalization": {"method": "position_percentile"},
+                    },
+                ),
+                (
+                    f"ranking_formula_{position_lower}_injury_burden_diagnostic_v0_2026_001",
+                    f"{position} Injury Burden Diagnostic",
+                    {
+                        "version": "injury_burden_diagnostic_v0",
+                        "position": position,
+                        "features": ["profile_points_score", "injury_burden_score_3yr", "missed_time_risk_score_3yr"],
+                        "weights": {
+                            "profile_points_score": 0.70,
+                            "injury_burden_score_3yr": 0.15,
+                            "missed_time_risk_score_3yr": 0.15,
+                        },
+                        "score_expression": "weighted_linear",
+                        "normalization": {"method": "position_percentile"},
+                    },
+                ),
+                (
+                    f"ranking_formula_{position_lower}_availability_adjusted_current_pigskin_v0_2026_001",
+                    f"{position} Availability Adjusted Current Pigskin",
+                    {
+                        "version": "availability_adjusted_current_pigskin_v0",
+                        "position": position,
+                        "features": [
+                            "analytical_grade_proxy",
+                            "opportunity_score_proxy",
+                            "efficiency_score_proxy",
+                            "role_stability_score",
+                            "profile_points_score",
+                            "availability_score_3yr",
+                        ],
+                        "weights": {
+                            "analytical_grade_proxy": 0.50,
+                            "opportunity_score_proxy": 0.13,
+                            "efficiency_score_proxy": 0.09,
+                            "role_stability_score": 0.09,
+                            "profile_points_score": 0.09,
+                            "availability_score_3yr": 0.10,
+                        },
+                        "score_expression": "weighted_linear",
+                        "normalization": {"method": "position_percentile"},
+                    },
+                ),
+            ]
+        )
+    return [
+        build_candidate_row(formula, formula_name=name, candidate_id=candidate_id, target_name="position_default_top_n")
+        for candidate_id, name, formula in specs
     ]
 
 
