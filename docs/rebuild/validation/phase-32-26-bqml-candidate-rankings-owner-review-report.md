@@ -14,7 +14,25 @@ No deploy occurred. No live rankings were regenerated. No champion formula was a
 - `docs/rebuild/ranking-algorithm-scorecard.md`
 - `docs/rebuild/ranking-opportunity-metrics-matrix.md`
 
-Commit hash: recorded after commit if committed.
+Initial package commit: `d8920db phase 32.26 document bqml review boards`.
+
+## Git State
+
+Before Phase 32.26:
+
+- Latest commit: `fe1f90f phase 32.25 document bqml owner review`.
+- Worktree: standing untracked historical validation backlog only.
+
+After initial Phase 32.26 package:
+
+- Latest commit: `d8920db phase 32.26 document bqml review boards`.
+- Worktree: standing untracked historical validation backlog only.
+
+Repeated-prompt review:
+
+- The second Phase 32.26 prompt matched the completed scope.
+- No additional BigQuery analysis, model training, ranking writes, or persistent review-table work was required.
+- This metadata addendum records the package commit and explicit git state.
 
 ## Evidence And Model Verification
 
