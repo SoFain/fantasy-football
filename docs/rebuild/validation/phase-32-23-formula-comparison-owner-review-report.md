@@ -47,6 +47,22 @@ After this phase:
 
 Latest stored SQL-native summary evidence, averaged across available profile-position rows. These are not new tournament writes.
 
+Metric sanity addendum:
+
+| Report metric | Extraction path used | Verification read |
+|---|---|---|
+| Pairwise win rate | `ranking_backtest_candidate_summaries.pairwise_win_rate` | Correct for the stored summary contract. For SQL-native Phase 32.21/32.23 rows, this top-level field is populated from the high-confidence pairwise calculation. |
+| High-confidence pairwise win rate | `JSON_VALUE(metric_json, '$.high_confidence_pairwise_win_rate')` | Correct. Identical values versus top-level pairwise are expected for the sampled SQL-native rows because both fields are sourced from the same pairwise CTE. |
+| Overall pairwise draft win rate | `JSON_VALUE(metric_json, '$.overall_pairwise_draft_win_rate')` | Correct. Present in sampled rows. |
+| Top-N hit rate | `ranking_backtest_candidate_summaries.top_n_hit_rate` | Correct top-level column. |
+| Captured points | `ranking_backtest_candidate_summaries.actual_points_captured_rate` | Correct top-level column. |
+| VOR captured | `JSON_VALUE(metric_json, '$.value_over_replacement_captured_rate')` | Correct. Present in sampled rows. |
+| NDCG@K | `JSON_VALUE(metric_json, '$.ndcg_at_k')` | Correct. Present in sampled rows. |
+| Bust rate | `JSON_VALUE(metric_json, '$.bust_rate')` | Correct. Present in sampled rows. |
+| Missing-input rate | `ranking_backtest_candidate_summaries.missing_input_rate` | Correct top-level column. |
+
+Read-only verification sampled the latest current Pigskin, Stats02, RB availability, and TE availability summary rows. Result: 40 of 40 sampled rows had top-level `pairwise_win_rate` equal to `metric_json.high_confidence_pairwise_win_rate`, and all sampled rows had overall pairwise, VOR captured, NDCG@K, and bust rate populated. That means the Phase 32.23 table paths are valid, but top-level pairwise and high-confidence pairwise should not be treated as independent signals for these SQL-native stored summaries.
+
 | Candidate | Status | Evidence rows | Positions | Profiles | Pairwise | High-conf | Overall pairwise | Top-N | Captured | VOR captured | NDCG | Tier acc | Bust | Missing |
 |---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Current Pigskin | live baseline | 16 | QB/RB/TE/WR | all four | 0.7385 | 0.7385 | 0.7455 | 0.5411 | 0.7132 | 0.6007 | 0.6578 | 0.4307 | 0.1592 | 0.0050 |
@@ -195,6 +211,7 @@ No champion activation is supported by this phase.
 ## Checks Run
 
 - Read-only BigQuery summary query over `ranking_backtest_candidate_summaries`.
+- Read-only metric-path sanity query over sampled latest summary rows.
 - Read-only BigQuery confirmation:
   - `ranking_formula_champions`: 0 rows.
   - active `analytics_pigskin_rankings`: 1,140 rows.

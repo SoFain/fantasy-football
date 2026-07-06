@@ -961,6 +961,14 @@ Owner-review conclusion:
 - No champion formula is active.
 - Recommended next technical lane: BQML retrain with ideal, PBP, injury, and role context, or direct NGS ingest if the owner wants source expansion first.
 
+Metric sanity note:
+
+- Phase 32.23 verified the comparison extraction paths before future BQML comparison work.
+- Top-level `pairwise_win_rate` comes from `ranking_backtest_candidate_summaries.pairwise_win_rate`.
+- High-confidence pairwise comes from `metric_json.high_confidence_pairwise_win_rate`.
+- For the sampled SQL-native summary rows, those two values are identical by construction because the SQL-native summary currently stores the high-confidence pairwise CTE result in both places.
+- Treat them as a contract caveat, not as two independent evidence columns, until the summary contract adds a separate all-pairwise metric.
+
 ## Current Baseline Score
 
 Family-level current Pigskin candidate score:
