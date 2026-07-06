@@ -66,6 +66,13 @@ class FakeLoadClient:
 
 
 class PigskinRankingModelRunTests(unittest.TestCase):
+    def test_default_position_limits_use_owner_approved_te35_depth(self):
+        self.assertEqual(rankings.DEFAULT_POSITION_LIMITS["QB"], 45)
+        self.assertEqual(rankings.DEFAULT_POSITION_LIMITS["RB"], 80)
+        self.assertEqual(rankings.DEFAULT_POSITION_LIMITS["WR"], 100)
+        self.assertEqual(rankings.DEFAULT_POSITION_LIMITS["TE"], 35)
+        self.assertEqual(rankings.get_position_limit("TE", None), 35)
+
     def test_successful_generation_creates_complete_model_run_and_writes_metadata(self):
         fake_client = FakeClient()
         candidates = pd.DataFrame([{"player_id": "p1"}])

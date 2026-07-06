@@ -13,6 +13,12 @@ PLAYER_PROFILE_SCORING_PROFILE_OPTIONS = (
 )
 PLAYER_PROFILE_SCORING_PROFILE_DEFAULT = "ppr"
 PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE = "Rankings for this scoring system have not been generated yet."
+PLAYER_PROFILE_POSITION_DEPTH_LIMITS = {
+    "QB": 45,
+    "RB": 80,
+    "WR": 100,
+    "TE": 35,
+}
 
 
 def get_player_profile_scoring_profile_options():
@@ -73,6 +79,13 @@ def build_pigskin_rankings_query(project_id, dataset_id, scoring_profile_id):
     FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings`
     WHERE is_active = TRUE
       AND scoring_profile_id = @scoring_profile_id
+      AND rank <= CASE position
+        WHEN 'QB' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["QB"]}
+        WHEN 'RB' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["RB"]}
+        WHEN 'WR' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["WR"]}
+        WHEN 'TE' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["TE"]}
+        ELSE 0
+      END
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[

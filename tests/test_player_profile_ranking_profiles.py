@@ -42,6 +42,19 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
         params = {param.name: param.value for param in job_config.query_parameters}
         self.assertEqual(params["scoring_profile_id"], "standard")
 
+    def test_rankings_query_caps_position_depths_for_player_profiles(self):
+        sql, _ = profiles.build_pigskin_rankings_query(
+            "test-project",
+            "test_dataset",
+            "ppr",
+        )
+
+        self.assertIn("WHEN 'QB' THEN 45", sql)
+        self.assertIn("WHEN 'RB' THEN 80", sql)
+        self.assertIn("WHEN 'WR' THEN 100", sql)
+        self.assertIn("WHEN 'TE' THEN 35", sql)
+        self.assertNotIn("WHEN 'TE' THEN 60", sql)
+
     def test_rankings_query_filters_half_ppr_without_fallback(self):
         sql, job_config = profiles.build_pigskin_rankings_query(
             "test-project",
