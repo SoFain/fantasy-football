@@ -21,6 +21,7 @@ from src.llm_context_packets import (
     search_player_context_packets,
 )
 from src.load import get_bigquery_client
+from src import player_profile_ranking_profiles as profile_rankings
 from src import pigskin_packet_guardrails
 from src.trade_history import get_trade_player_history as load_trade_player_history
 
@@ -31,7 +32,7 @@ DEFAULT_MAX_BYTES_BILLED = int(
     os.environ.get("PIGSKIN_CONTEXT_MAX_BYTES_BILLED", "1000000000")
 )
 MAX_SEARCH_LIMIT = 25
-MAX_RANKINGS_LIMIT = 100
+MAX_RANKINGS_LIMIT = 50
 MAX_FRAUD_LIMIT = 50
 MAX_HISTORY_LIMIT = 64
 MAX_COMPARE_PLAYERS = 6
@@ -85,6 +86,7 @@ def get_pigskin_context_tool_declarations() -> list[dict[str, Any]]:
                 "type": "object",
                 "properties": {
                     "scoring_profile_id": {"type": "string"},
+                    "board": {"type": "string"},
                     "position": {"type": "string"},
                     "season": {"type": "integer"},
                     "ranking_phase": {"type": "string"},
@@ -304,6 +306,7 @@ def search_players_tool(
 def get_rankings_slice_tool(
     *,
     scoring_profile_id: str | None = None,
+    board: str | None = None,
     position: str | None = None,
     season: int | str | None = None,
     ranking_phase: str | None = None,
@@ -315,72 +318,32 @@ def get_rankings_slice_tool(
     safe_limit = _clamp_limit(limit, 1, MAX_RANKINGS_LIMIT, 50)
     query_client = _client(client)
     dataset = _dataset(dataset_id)
-    sql = f"""
-    SELECT
-        model_run_id,
-        ranking_version,
-        scoring_profile_id,
-        generated_at,
-        adjudicated_at,
-        season,
-        ranking_phase,
-        format,
-        position,
-        `rank` AS pigskin_rank,
-        tier,
-        player_id,
-        player_name,
-        current_team,
-        roster_status,
-        sleeper_player_id,
-        sleeper_team,
-        sleeper_active,
-        sleeper_status,
-        ranking_eligibility,
-        rank_source,
-        confidence_score,
-        avg_ppr,
-        avg_opportunity,
-        avg_efficiency,
-        avg_total_epa,
-        avg_passing_epa,
-        avg_rushing_epa,
-        avg_receiving_epa,
-        avg_wopr,
-        latest_season_wopr,
-        previous_season_wopr,
-        pigskin_verdict,
-        rank_rationale,
-        risk_flags,
-        what_would_change_mind,
-        data_snapshot_label
-    FROM `{_table_id(query_client.project, dataset, "analytics_pigskin_rankings")}`
-    WHERE is_active = TRUE
-        AND scoring_profile_id = @scoring_profile_id
-        AND (@position IS NULL OR position = @position)
-        AND (@season IS NULL OR season = @season)
-        AND (@ranking_phase IS NULL OR ranking_phase = @ranking_phase)
-        AND (@format IS NULL OR format = @format)
-    ORDER BY
-        CASE WHEN @position IS NULL THEN ranking_score END DESC,
-        position,
-        `rank`
-    LIMIT @limit
-    """
+    ranking_board = profile_rankings.normalize_player_profile_board(board or position)
+    sql, job_config = profile_rankings.build_live_ranking_context_query(
+        query_client.project,
+        dataset,
+        scoring_profile_id=_clean_optional(scoring_profile_id) or profile_rankings.PLAYER_PROFILE_SCORING_PROFILE_DEFAULT,
+        board=ranking_board,
+        limit=safe_limit,
+    )
     rows = _query_records(
         sql,
         [
-            ("scoring_profile_id", "STRING", _clean_optional(scoring_profile_id) or "standard"),
-            ("position", "STRING", _clean_optional(position)),
-            ("season", "INT64", _clean_int_optional(season)),
-            ("ranking_phase", "STRING", _clean_optional(ranking_phase)),
-            ("format", "STRING", _clean_optional(format)),
-            ("limit", "INT64", safe_limit),
+            (param.name, param.type_, param.value)
+            for param in job_config.query_parameters
         ],
         client=query_client,
         query_name="get_rankings_slice",
     )
-    return {"rankings": rows, "row_count": len(rows), "limit": safe_limit}
+    return {
+        "rankings": rows,
+        "row_count": len(rows),
+        "limit": safe_limit,
+        "scoring_profile_id": _clean_optional(scoring_profile_id) or profile_rankings.PLAYER_PROFILE_SCORING_PROFILE_DEFAULT,
+        "board": ranking_board,
+        "source_table": "analytics_pigskin_rankings",
+        "formula_policy_label": "Current Pigskin live baseline",
+    }
 
 
 def get_fraud_watch_candidates_tool(

@@ -48,12 +48,14 @@ class PigskinContextToolTests(unittest.TestCase):
                 {
                     "player_name": "Brock Purdy",
                     "position": "QB",
-                    "pigskin_rank": 2,
+                    "position_rank": 2,
+                    "board_rank": 1,
                     "model_run_id": "run_123",
                 }
             ]
         )
         result = tools.get_rankings_slice_tool(
+            board="QB",
             position="QB'; DROP TABLE nope",
             season=2026,
             limit=250,
@@ -64,27 +66,48 @@ class PigskinContextToolTests(unittest.TestCase):
         sql, job_config = client.calls[0]
         self.assertIn("analytics_pigskin_rankings", sql)
         self.assertIn("scoring_profile_id = @scoring_profile_id", sql)
+        self.assertIn("ROW_NUMBER() OVER", sql)
+        self.assertIn("CASE WHEN @position IS NULL THEN pigskin_score END DESC", sql)
+        self.assertIn("WHEN 'TE' THEN 35", sql)
+        self.assertNotIn("analytics_pigskin_rankings_candidates", sql)
+        self.assertNotIn("ranking_formula_champions", sql)
+        self.assertNotIn("pigskin_context_score", sql)
         self.assertNotIn("DROP TABLE", sql)
         self.assertEqual(job_config.maximum_bytes_billed, tools.DEFAULT_MAX_BYTES_BILLED)
         params = {param.name: param.value for param in job_config.query_parameters}
         self.assertEqual(params["limit"], tools.MAX_RANKINGS_LIMIT)
         self.assertEqual(params["scoring_profile_id"], "standard")
+        self.assertEqual(params["position"], "QB")
         self.assertEqual(result["row_count"], 1)
+        self.assertEqual(result["board"], "QB")
+        self.assertEqual(result["source_table"], "analytics_pigskin_rankings")
+        self.assertEqual(result["formula_policy_label"], "Current Pigskin live baseline")
 
     def test_rankings_slice_accepts_scoring_profile_without_mixing_profiles(self):
         client = FakeClient(rows=[])
 
         tools.get_rankings_slice_tool(
             scoring_profile_id="half_ppr",
+            board="ALL",
             limit=10,
             client=client,
             dataset_id="fantasy_football_brain",
         )
 
         sql, job_config = client.calls[0]
-        self.assertIn("CASE WHEN @position IS NULL THEN ranking_score END DESC", sql)
+        self.assertIn("CASE WHEN @position IS NULL THEN pigskin_score END DESC", sql)
         params = {param.name: param.value for param in job_config.query_parameters}
         self.assertEqual(params["scoring_profile_id"], "half_ppr")
+        self.assertIsNone(params["position"])
+
+    def test_rankings_slice_declaration_accepts_board(self):
+        declarations = tools.get_pigskin_context_tool_declarations()
+        ranking_tool = next(item for item in declarations if item["name"] == "get_rankings_slice")
+
+        properties = ranking_tool["parameters"]["properties"]
+
+        self.assertIn("board", properties)
+        self.assertIn("position", properties)
 
     def test_bad_dataset_identifier_is_rejected(self):
         client = FakeClient()

@@ -15,7 +15,8 @@ Phase 32.38 v1.0 studio defaults:
 - Live ranking source: `analytics_pigskin_rankings` active Current Pigskin rows.
 - Live depth: QB45, RB80, WR100, TE35 per scoring profile.
 - Formula Review remains read-only owner-review evidence.
-- Pigskin chat has static read-only formula context for defending Current Pigskin ranks.
+- Pigskin chat has static read-only formula context for defending Current Pigskin ranks plus live row grounding for current ranking questions.
+- Phase 32.39 bugfix: top-N and rank-defense chat answers must preload the same active Current Pigskin rows and `ALL` board order used by Player Profiles. Formula policy explains those rows, but it does not replace them.
 
 ## Live Baseline
 
@@ -148,6 +149,7 @@ Alternate: create review-only table persistence if sortable, durable dashboard d
 Owner action choices:
 
 - Inspect the Formula Review tab after enabling `USE_FORMULA_COMPARISON_DASHBOARD=true`.
+- Smoke Pigskin chat with: `Can you go thru your top 10 overall players for the 2026 season in Standard Scoring? Based on your ranking system and current ranks. Back up your ranks and claims as some are very different than what we are seeing in mainstream sports media.`
 - Hold current Pigskin.
 - Select a review-only challenger separately by scoring profile.
 - Request review-only table persistence if Markdown-backed dashboard data is not enough.

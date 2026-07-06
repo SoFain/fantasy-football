@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 from src import player_profile_ranking_profiles as profiles
 
 
@@ -82,6 +84,61 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
         self.assertIn('if selected_pos == "ALL":', app_source)
         self.assertIn('by=["display_score_sort", "display_rank_sort", "position", "player_display_name"]', app_source)
         self.assertNotIn('by=["position", "display_rank_sort", "display_score_sort"]', app_source)
+
+    def test_all_board_sort_preserves_observed_standard_top_ten_order(self):
+        observed_rows = [
+            ("Jaxon Smith-Njigba", "WR", 1, 99.8),
+            ("Puka Nacua", "WR", 2, 98.7),
+            ("Josh Allen", "QB", 1, 97.6),
+            ("Christian McCaffrey", "RB", 1, 96.5),
+            ("Trey McBride", "TE", 1, 95.4),
+            ("Amon-Ra St. Brown", "WR", 3, 94.3),
+            ("Ja'Marr Chase", "WR", 4, 93.2),
+            ("Drake London", "WR", 5, 92.1),
+            ("Drake Maye", "QB", 2, 91.0),
+            ("Bijan Robinson", "RB", 2, 90.0),
+        ]
+        df = pd.DataFrame(
+            [
+                {
+                    "player_display_name": name,
+                    "position": position,
+                    "display_rank": rank,
+                    "display_score": score,
+                }
+                for name, position, rank, score in reversed(observed_rows)
+            ]
+        )
+
+        sorted_df = profiles.sort_player_profile_board(df, "ALL")
+
+        self.assertEqual(
+            sorted_df["player_display_name"].tolist(),
+            [name for name, _, _, _ in observed_rows],
+        )
+        self.assertEqual(sorted_df["board_rank"].tolist(), list(range(1, 11)))
+
+    def test_live_ranking_context_query_uses_player_profile_source_and_depths(self):
+        sql, job_config = profiles.build_live_ranking_context_query(
+            "test-project",
+            "test_dataset",
+            scoring_profile_id="standard",
+            board="ALL",
+            limit=10,
+        )
+
+        self.assertIn("analytics_pigskin_rankings", sql)
+        self.assertIn("ROW_NUMBER() OVER", sql)
+        self.assertIn("CASE WHEN @position IS NULL THEN pigskin_score END DESC", sql)
+        self.assertIn("WHEN 'TE' THEN 35", sql)
+        self.assertNotIn("Formula Review", sql)
+        self.assertNotIn("analytics_pigskin_rankings_candidates", sql)
+        self.assertNotIn("ranking_formula_champions", sql)
+        self.assertNotIn("pigskin_context_score", sql)
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["scoring_profile_id"], "standard")
+        self.assertIsNone(params["position"])
+        self.assertEqual(params["limit"], 10)
 
 
 if __name__ == "__main__":

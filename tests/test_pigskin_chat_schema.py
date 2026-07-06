@@ -65,6 +65,16 @@ class PigskinChatSchemaTests(unittest.TestCase):
         for table_name in PIGSKIN_CHAT_BLOCKED_TABLES + EXTRA_FORBIDDEN_SCHEMA_TERMS:
             self.assertNotIn(table_name, prompt_segment)
 
+    def test_app_prompt_preserves_live_ranking_board_context(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn("Live Ranking Board Context", app_source)
+        self.assertIn("Preserve its exact board order", app_source)
+        self.assertIn("If live-ranking rows are not loaded, say the live board was unavailable", app_source)
+        self.assertIn("do not use bracketed stage directions", app_source)
+        self.assertIn("build_live_ranking_context_request(prompt)", app_source)
+        self.assertIn('execute_pigskin_context_tool(\n                                "get_rankings_slice"', app_source)
+
     def test_context_tool_declarations_replace_sql_tool(self):
         declarations = get_pigskin_context_tool_declarations()
         names = {declaration["name"] for declaration in declarations}

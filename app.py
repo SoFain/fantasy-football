@@ -44,6 +44,10 @@ from src.pigskin_context_tools import (
     execute_pigskin_context_tool,
     get_pigskin_context_tool_declarations,
 )
+from src.pigskin_live_ranking_context import (
+    build_live_ranking_context_request,
+    format_live_ranking_context_for_prompt,
+)
 from src.pigskin_live_formula_context import load_pigskin_live_formula_context
 from src.pigskin_packet_guardrails import PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL
 from src.pigskin_packet_qa_ui import run_pigskin_packet_qa_lookup
@@ -4202,6 +4206,9 @@ def render_ai_cohost():
     ### The Analytical Filter Protocol ###
     You are mandated to use curated context tools before making player, ranking, trade, projection, roster, or causal claims.
     For any question about rankings, positional rank, projections, draft price, Player Profiles, "why did you rank", "defend your ranking", or rank disagreements, call `get_rankings_slice`, `get_player_context_packet`, or `search_players` first.
+    When the app supplies a `Live Ranking Board Context` block, use that block as the source of truth. Preserve its exact board order. Do not infer, synthesize, or reorder current ranks from formula weights, media consensus, BQML review output, or static formula policy.
+    If live-ranking rows are not loaded, say the live board was unavailable instead of guessing.
+    For factual rank-defense answers, do not use bracketed stage directions such as `[mocking]`, `[laughs]`, `[deadpan]`, or `[sarcastic]`.
     If active ranking context contains the player, acknowledge the rank directly. Never say "I did not rank him there" when the curated Pigskin ranking context says Pigskin did.
     For non-ranking player analysis, prefer `get_player_context_packet`, `compare_players`, and `get_trade_player_history`.
     For Fraud Watch analysis, use `get_fraud_watch_candidates` before making the take.
@@ -4259,8 +4266,31 @@ def render_ai_cohost():
 
             with st.chat_message("assistant"):
                 try:
+                    outbound_prompt = prompt
+                    ranking_context_request = build_live_ranking_context_request(prompt)
+                    if ranking_context_request:
+                        try:
+                            ranking_tool_payload = execute_pigskin_context_tool(
+                                "get_rankings_slice",
+                                ranking_context_request,
+                            )
+                            ranking_result = ranking_tool_payload.get("result", {})
+                            live_ranking_context = format_live_ranking_context_for_prompt(
+                                ranking_result.get("rankings", []),
+                                scoring_profile_id=ranking_result.get("scoring_profile_id") or ranking_context_request["scoring_profile_id"],
+                                board=ranking_result.get("board") or ranking_context_request["board"],
+                                requested_limit=ranking_result.get("limit") or ranking_context_request["limit"],
+                            )
+                        except Exception as ranking_ex:
+                            live_ranking_context = (
+                                "### Live Ranking Board Context ###\n"
+                                f"The live Current Pigskin ranking rows could not be loaded: {ranking_ex}\n"
+                                "Tell the user the live board was unavailable. Do not guess, infer, or synthesize current ranks."
+                            )
+                        outbound_prompt = f"{live_ranking_context}\n\nUser question:\n{prompt}"
+
                     # Initial request (might be a tool call)
-                    response = st.session_state.chat_session.send_message(prompt)
+                    response = st.session_state.chat_session.send_message(outbound_prompt)
 
                     def get_fc(resp):
                         if getattr(resp, "function_calls", None):
