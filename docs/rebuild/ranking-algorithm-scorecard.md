@@ -1339,3 +1339,50 @@ Decision:
 - Standard, Half PPR, and GNG Keeper review boards are blocked until 2026 candidate input exists for those profiles.
 - Do not average all four scoring systems into one global challenger. Select or reject challengers separately by scoring profile. All-profile aggregate is stability/context only.
 - Recommended next step: read-only formula comparison dashboard if the owner wants UI review. Otherwise hold current Pigskin.
+
+## Phase 33.2 BQML V2 Feature Contract
+
+Phase 33.2 added a Standard-first BQML v2 contract and dry-run dataset query. No model was trained. No live ranking row changed. No formula champion is active.
+
+Contract status:
+
+| Area | Decision |
+|---|---|
+| Live baseline | Current Pigskin remains live. |
+| Champion state | `ranking_formula_champions` remains inactive for this lane. |
+| First research profile | `standard` |
+| Profile policy | Evaluate `standard`, `half_ppr`, `ppr`, and `gng_keeper` separately. No global all-profile winner. |
+| Model families | QB/RB/WR/TE profile-points and elite/bust families. |
+| Initial model types | `LINEAR_REG`, `LOGISTIC_REG` |
+| Deferred | Boosted tree models until Standard baseline cost and sanity pass. |
+| Blocked | DNN, AutoML, remote models, Gemini-backed models, broad hyperparameter tuning. |
+
+Standard dry-run dataset version:
+
+- `bqml_v2_standard_training_dataset_v0`
+
+Read-only coverage result:
+
+| Split | Standard rows |
+|---|---:|
+| train | 32,452 |
+| validation | 4,918 |
+| holdout | 1,691 |
+
+Position coverage:
+
+| Position | Standard rows |
+|---|---:|
+| QB | 4,646 |
+| RB | 9,969 |
+| WR | 15,988 |
+| TE | 8,458 |
+
+Blocked feature result:
+
+- `pigskin_context_score` is rejected.
+- Route-derived metrics remain blocked.
+- Historical depth remains blocked, with 0 non-null Standard rows in the current feature mart probe.
+- Current Sleeper context remains display-only and is rejected as a historical predictor.
+
+Next research step: Standard-only BQML v2 training dataset dry run, still with no model training unless owner-approved in a later phase.

@@ -599,3 +599,43 @@ The review input uses source-backed candidate and historical feature fields only
 The dashboard does not use `pigskin_context_score`, does not query BigQuery at runtime, and does not use Sleeper current context as historical input.
 
 Phase 32.34 smoke confirmed the dashboard source remains read-only, feature missingness remains visible, BQML outputs stay review-only, and no production ranking/champion path is exposed by the tab.
+
+## Phase 33.2 BQML V2 Feature Contract Status
+
+Phase 33.2 added a source-backed BQML v2 contract for the Standard-first research lane. It does not train models, write live rankings, or activate a champion.
+
+Standard dry-run dataset:
+
+- Version: `bqml_v2_standard_training_dataset_v0`
+- Source: `ranking_backtest_feature_mart`
+- Scope: `standard`, QB/RB/WR/TE, target seasons 2017-2025
+- Split: train 2017-2023, validation 2024, holdout 2025
+- Leakage rule: `source_window_end_season < target_season`
+
+Feature status:
+
+| Family | Status | Contract decision |
+|---|---|---|
+| Baseline Pigskin proxies | available now | Allowed when source-backed fields are present, for example `profile_points_score` and `recent_points_avg`. |
+| Opportunity | available now | RB carries, targets, red-zone opportunities, goal-line opportunities, and high-value opportunity fields are allowed by position. |
+| Ideal xFP | available now | `xfp_score_3yr`, `xfp_share_3yr`, and high-value xFP fields are allowed where position-specific. |
+| PBP xFP | available now | Passing, rushing, and receiving xFP fields are allowed by position. |
+| First-down proxies | proxy | `receiving_first_down_exp_pbp_3yr` is a chain-mover proxy. Do not call it `1D/RR`. |
+| NGS | available as source-backed fields | Position-specific NGS passing, rushing, and receiving fields are allowed where present. |
+| Role history | available now | Carry share, target share, WOPR, offensive snap share, and snap stability are allowed by position. |
+| Injury and availability | source columns present, 0 Standard non-null rows in probe | Do not require for Standard v2. Keep as source gap until coverage exists. |
+| Route metrics | blocked | Do not use YPRR, TPRR, route share, first-read share, pressure EPA, or covered-receiver EPA. |
+| Historical depth | blocked | `depth_chart_role_score_3yr` had 0 non-null Standard rows in the Phase 33.2 probe and remains blocked. |
+| Sleeper current context | display only | Not a historical predictor. |
+
+Coverage summary:
+
+| Feature family | Populated Standard rows | Possible Standard rows |
+|---|---:|---:|
+| Baseline | 39,033 | 39,061 |
+| Opportunity | 39,061 | 39,061 |
+| Ideal xFP | 38,321 | 39,061 |
+| PBP xFP | 38,321 | 39,061 |
+| First-down proxy | 38,321 | 39,061 |
+| NGS | 32,436 | 39,061 |
+| Role history | 38,650 | 39,061 |
