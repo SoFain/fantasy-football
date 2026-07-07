@@ -487,3 +487,31 @@ Calibration read:
 - WR/TE current top-24 exits fell from 7 to 4.
 
 Architecture decision: Standard can move to a safer owner-review board, but not champion selection. Historical proxy evaluation still needs a stronger live-like baseline before activation. Current Pigskin remains live.
+
+## Phase 33.13 Profile-Specific Positional Formula Expansion
+
+Phase 33.13 extended the BQML v2 positional architecture to Half PPR, PPR, and GNG Keeper. It trained 48 bounded profile-position models:
+
+- 3 scoring profiles.
+- 4 positions.
+- 4 model families per profile-position: linear points, linear VOR, logistic elite, logistic bust.
+
+Summary-only evidence was written as `ranking_backtest_sql_native_bqml_v2_profile_positional_v0`.
+
+Write targets:
+
+- `ranking_backtest_runs`: 3 rows.
+- `ranking_backtest_candidate_summaries`: 144 rows.
+- `ranking_backtest_results`: 0 rows.
+- `ranking_formula_champions`: 0 rows.
+- `analytics_pigskin_rankings`: 0 rows.
+
+First-pass profile-specific finalists:
+
+| Profile | QB | RB | WR | TE |
+|---|---|---|---|---|
+| half_ppr | `bqml_v2_half_ppr_qb_linear_points_v0` | `bqml_v2_half_ppr_rb_linear_points_v0` | `bqml_v2_half_ppr_wr_logistic_bust_inverse_v0` | `bqml_v2_half_ppr_te_linear_vor_v0` |
+| ppr | `bqml_v2_ppr_qb_linear_points_v0` | `bqml_v2_ppr_rb_linear_points_v0` | `bqml_v2_ppr_wr_logistic_elite_v0` | `bqml_v2_ppr_te_linear_points_v0` |
+| gng_keeper | `bqml_v2_gng_keeper_qb_linear_points_v0` | `bqml_v2_gng_keeper_rb_logistic_elite_v0` | `bqml_v2_gng_keeper_wr_linear_points_v0` | `bqml_v2_gng_keeper_te_linear_points_v0` |
+
+Architecture decision: BQML v2 positional formulas are ready for owner-review boards with warnings. Top-100 work is deferred. The future top-100 builder must use position-locked queues and must not reorder players inside a position.

@@ -173,6 +173,55 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         self.assertIn("red_zone_targets", templates["standard_te_linear_points"])
         self.assertNotIn("ngs_catch_over_expected_score_3yr", "\n".join(templates.values()))
 
+    def test_profile_training_queries_are_profile_specific(self):
+        for profile in ("half_ppr", "ppr", "gng_keeper"):
+            with self.subTest(profile=profile):
+                sql = contract.build_profile_training_dataset_query("project", "dataset", scoring_profile_id=profile)
+
+                self.assertIn(f"scoring_profile_id = '{profile}'", sql)
+                self.assertIn(f"bqml_v2_{profile}_training_dataset_v0", sql)
+                self.assertIn("source_window_end_season < target_season", sql)
+                self.assertIn("WHEN target_season BETWEEN 2017 AND 2023 THEN 'train'", sql)
+                self.assertIn("WHEN target_season = 2024 THEN 'validation'", sql)
+                self.assertIn("WHEN target_season = 2025 THEN 'holdout'", sql)
+                self.assertNotIn("scoring_profile_id = 'standard'", sql)
+                self.assertNotIn("2026", sql)
+
+    def test_profile_model_templates_are_deterministic_and_safe(self):
+        templates = contract.build_profile_model_sql_templates("project", "dataset", scoring_profile_id="half_ppr")
+        joined = "\n".join(templates.values())
+
+        self.assertEqual(len(templates), 16)
+        self.assertIn("half_ppr_qb_linear_points", templates)
+        self.assertIn("ranking_bqml_v2_half_ppr_qb_linear_points_v0", templates["half_ppr_qb_linear_points"])
+        self.assertIn("scoring_profile_id = 'half_ppr'", joined)
+        self.assertIn("split = 'train'", joined)
+        self.assertIn("model_type = 'LINEAR_REG'", joined)
+        self.assertIn("model_type = 'LOGISTIC_REG'", joined)
+        self.assertNotIn("scoring_profile_id = 'standard'", joined)
+        self.assertNotIn("BOOSTED_TREE", joined)
+        self.assertNotIn("pigskin_context_score", joined)
+        self.assertNotIn("depth_chart_role_score_3yr", joined)
+        self.assertNotIn("ngs_catch_over_expected_score_3yr", joined)
+
+    def test_profile_model_specs_are_profile_position_specific_and_bust_inverse(self):
+        specs = contract.profile_model_specs(scoring_profile_id="gng_keeper")
+        model_names = {spec["model_name"] for spec in specs}
+        candidate_ids = {spec["candidate_id"] for spec in specs}
+
+        self.assertEqual(len(specs), 16)
+        self.assertIn("ranking_bqml_v2_gng_keeper_qb_linear_points_v0", model_names)
+        self.assertIn("ranking_bqml_v2_gng_keeper_wr_logistic_elite_v0", model_names)
+        self.assertIn("bqml_v2_gng_keeper_te_logistic_bust_inverse_v0", candidate_ids)
+        for spec in specs:
+            self.assertEqual(spec["scoring_profile_id"], "gng_keeper")
+        bust_specs = [spec for spec in specs if spec["candidate_family"] == "bqml_v2_gng_keeper_logistic_bust_inverse"]
+        self.assertEqual(len(bust_specs), 4)
+        for spec in bust_specs:
+            self.assertEqual(spec["label_field"], "bust_label")
+            self.assertEqual(spec["higher_is_better"], "false")
+            self.assertEqual(spec["prediction_column"], "predicted_bust_label_probs")
+
     def test_standard_model_specs_are_position_specific_and_bust_is_inverse(self):
         specs = contract.standard_model_specs()
         model_names = {spec["model_name"] for spec in specs}

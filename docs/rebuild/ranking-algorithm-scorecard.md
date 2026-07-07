@@ -1692,3 +1692,24 @@ Owner-review calibration result:
 Phase 33.12 decision: `STANDARD OVERLAY CONSERVATIVE ANCHOR READY`.
 
 This does not change the live default. Current Pigskin should hold for Standard until a separate owner-approved champion-selection phase has stronger historical proof and missingness guardrails.
+
+## Phase 33.13 Profile-Specific BQML V2 Positional Results
+
+Live status: Current Pigskin remains live. No champion is active. No live ranking row changed.
+
+Summary persistence:
+
+| Formula version | Runs | Summaries | Detail rows | Champions |
+|---|---:|---:|---:|---:|
+| `ranking_backtest_sql_native_bqml_v2_profile_positional_v0` | 3 | 144 | 0 | 0 |
+
+Owner-review finalists:
+
+| Profile | QB | RB | WR | TE |
+|---|---|---|---|---|
+| standard | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | `bqml_v2_standard_wr_logistic_elite_v0` | `bqml_v2_standard_te_logistic_bust_inverse_v0` |
+| half_ppr | `bqml_v2_half_ppr_qb_linear_points_v0` | `bqml_v2_half_ppr_rb_linear_points_v0` | `bqml_v2_half_ppr_wr_logistic_bust_inverse_v0` | `bqml_v2_half_ppr_te_linear_vor_v0` |
+| ppr | `bqml_v2_ppr_qb_linear_points_v0` | `bqml_v2_ppr_rb_linear_points_v0` | `bqml_v2_ppr_wr_logistic_elite_v0` | `bqml_v2_ppr_te_linear_points_v0` |
+| gng_keeper | `bqml_v2_gng_keeper_qb_linear_points_v0` | `bqml_v2_gng_keeper_rb_logistic_elite_v0` | `bqml_v2_gng_keeper_wr_linear_points_v0` | `bqml_v2_gng_keeper_te_linear_points_v0` |
+
+Scorecard decision: profile-specific BQML v2 positional formulas are ready for owner-review boards with warnings. Do not resume top-100 interleaver work until the owner accepts positional boards by profile.

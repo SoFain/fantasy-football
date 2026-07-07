@@ -892,3 +892,32 @@ Guardrail status:
 - Missingness gate: required before champion-selection review.
 - VOR percentile calibration: needs more work because the first pass overcorrected position balance.
 - Current Pigskin remains live for Standard.
+
+## Phase 33.13 Scoring-Profile Positional Formula Status
+
+Phase 33.13 reused the source-backed BQML v2 feature contract for Half PPR, PPR, and GNG Keeper. No new source was ingested.
+
+Dataset readiness:
+
+| Profile | Readiness | Notes |
+|---|---|---|
+| `half_ppr` | ready with warnings | Labels are profile-specific. Missing-input rates remain material. |
+| `ppr` | ready with warnings | Labels are profile-specific. Missing-input rates remain material. |
+| `gng_keeper` | ready with warnings | Labels are profile-specific. RB model family differs from PPR/Half PPR. |
+
+Source policy remains unchanged:
+
+- Patched EPA, receiving, red-zone, and goal-line fields are available.
+- `ngs_catch_over_expected_score_3yr` remains blocked.
+- Route share, YPRR, TPRR, first-read share, pressure EPA, covered-receiver EPA, historical depth, and `pigskin_context_score` remain blocked.
+- Sleeper current context is not a historical predictor.
+
+Profile-specific positional formula status:
+
+| Profile | QB | RB | WR | TE |
+|---|---|---|---|---|
+| `half_ppr` | linear points | linear points | logistic bust inverse | linear VOR |
+| `ppr` | linear points | linear points | logistic elite | linear points |
+| `gng_keeper` | linear points | logistic elite | linear points | linear points |
+
+These are owner-review positional finalists, not live formulas.

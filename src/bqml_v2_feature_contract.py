@@ -16,6 +16,7 @@ STANDARD_MODEL_VERSION = "bqml_v2_standard_v0"
 STANDARD_SUMMARY_VERSION = "ranking_backtest_sql_native_bqml_v2_standard_v0"
 STANDARD_SCORING_PROFILE = "standard"
 SCORING_PROFILE_ORDER = ("standard", "half_ppr", "ppr", "gng_keeper")
+PROFILE_EXPANSION_SCORING_PROFILES = ("half_ppr", "ppr", "gng_keeper")
 POSITIONS = ("QB", "RB", "WR", "TE")
 TRAIN_SEASONS = tuple(range(2017, 2024))
 VALIDATION_SEASON = 2024
@@ -383,24 +384,36 @@ def _json_missing_flags_expression() -> str:
     )) AS bqml_v2_missing_flags_json"""
 
 
-def build_standard_training_dataset_query(
+def _validate_scoring_profile(scoring_profile_id: str) -> str:
+    if scoring_profile_id not in SCORING_PROFILE_ORDER:
+        raise ValueError(f"Unknown BQML v2 scoring profile: {scoring_profile_id}")
+    return scoring_profile_id
+
+
+def _profile_dataset_version(scoring_profile_id: str) -> str:
+    return f"bqml_v2_{scoring_profile_id}_training_dataset_v0"
+
+
+def build_profile_training_dataset_query(
     project_id: str = "fantasy-football-498121",
     dataset_id: str = "fantasy_football_brain",
     *,
+    scoring_profile_id: str = STANDARD_SCORING_PROFILE,
     include_order_by: bool = True,
 ) -> str:
-    """Build the Standard-only BQML v2 training dataset query.
+    """Build a scoring-profile-specific BQML v2 training dataset query.
 
     The query selects labels and predictors into separate fields. It does not
     train a model and does not write data.
     """
 
+    scoring_profile_id = _validate_scoring_profile(scoring_profile_id)
     mart_table = _quote_table(project_id, dataset_id, "ranking_backtest_feature_mart")
     predictors = _select_predictor_columns()
     missing_flags = _json_missing_flags_expression()
     order_by = "\nORDER BY target_season, target_week, position, player_id_internal" if include_order_by else ""
     return f"""SELECT
-    '{BQML_V2_DATASET_VERSION}' AS dataset_version,
+    '{_profile_dataset_version(scoring_profile_id)}' AS dataset_version,
     CASE
       WHEN target_season BETWEEN 2017 AND 2023 THEN 'train'
       WHEN target_season = 2024 THEN 'validation'
@@ -436,12 +449,26 @@ def build_standard_training_dataset_query(
     provenance_json,
     {missing_flags}
 FROM {mart_table}
-WHERE scoring_profile_id = '{STANDARD_SCORING_PROFILE}'
+WHERE scoring_profile_id = '{scoring_profile_id}'
   AND position IN ('QB', 'RB', 'WR', 'TE')
   AND target_season BETWEEN 2017 AND 2025
   AND source_window_end_season < target_season
   AND league_type_id = '{LEAGUE_TYPE_ID}'
   AND roster_format_id = '{ROSTER_FORMAT_ID}'{order_by}"""
+
+
+def build_standard_training_dataset_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    include_order_by: bool = True,
+) -> str:
+    return build_profile_training_dataset_query(
+        project_id,
+        dataset_id,
+        scoring_profile_id=STANDARD_SCORING_PROFILE,
+        include_order_by=include_order_by,
+    )
 
 
 def build_standard_coverage_query(
@@ -569,48 +596,57 @@ WHERE position_sample_rank <= {per_position_limit}
 ORDER BY position, target_season DESC, target_week DESC, player_id_internal"""
 
 
-def build_standard_model_sql_templates(
+def build_profile_model_sql_templates(
     project_id: str = "fantasy-football-498121",
     dataset_id: str = "fantasy_football_brain",
     *,
+    scoring_profile_id: str = STANDARD_SCORING_PROFILE,
     model_suffix: str = STANDARD_MODEL_SUFFIX,
 ) -> dict[str, str]:
-    dataset_query = build_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
+    scoring_profile_id = _validate_scoring_profile(scoring_profile_id)
+    dataset_query = build_profile_training_dataset_query(
+        project_id,
+        dataset_id,
+        scoring_profile_id=scoring_profile_id,
+        include_order_by=False,
+    )
     templates: dict[str, str] = {}
     for position in POSITIONS:
         predictor_list = ",\n    ".join(standard_training_predictor_fields_for_position(position))
         position_lower = position.lower()
-        base_select = f"""WITH standard_dataset AS (
+        template_prefix = f"{scoring_profile_id}_{position_lower}"
+        model_prefix = f"ranking_bqml_v2_{scoring_profile_id}_{position_lower}"
+        base_select = f"""WITH profile_dataset AS (
 {dataset_query}
 )
 SELECT
     {predictor_list},
     {{label_field}}
-FROM standard_dataset
+FROM profile_dataset
 WHERE split = 'train'
   AND position = '{position}'"""
-        templates[f"standard_{position_lower}_linear_points"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_linear_points_{model_suffix}`
+        templates[f"{template_prefix}_linear_points"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_linear_points_{model_suffix}`
 OPTIONS(
   model_type = 'LINEAR_REG',
   input_label_cols = ['target_fantasy_points'],
   data_split_method = 'NO_SPLIT'
 ) AS
 {base_select.format(label_field='target_fantasy_points')}"""
-        templates[f"standard_{position_lower}_linear_vor"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_linear_vor_{model_suffix}`
+        templates[f"{template_prefix}_linear_vor"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_linear_vor_{model_suffix}`
 OPTIONS(
   model_type = 'LINEAR_REG',
   input_label_cols = ['value_over_replacement'],
   data_split_method = 'NO_SPLIT'
 ) AS
 {base_select.format(label_field='value_over_replacement')}"""
-        templates[f"standard_{position_lower}_logistic_elite"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_logistic_elite_{model_suffix}`
+        templates[f"{template_prefix}_logistic_elite"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_logistic_elite_{model_suffix}`
 OPTIONS(
   model_type = 'LOGISTIC_REG',
   input_label_cols = ['elite_finish_label'],
   data_split_method = 'NO_SPLIT'
 ) AS
 {base_select.format(label_field='elite_finish_label')}"""
-        templates[f"standard_{position_lower}_logistic_bust"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_logistic_bust_{model_suffix}`
+        templates[f"{template_prefix}_logistic_bust"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_logistic_bust_{model_suffix}`
 OPTIONS(
   model_type = 'LOGISTIC_REG',
   input_label_cols = ['bust_label'],
@@ -620,16 +656,31 @@ OPTIONS(
     return templates
 
 
-def standard_model_specs(*, model_suffix: str = STANDARD_MODEL_SUFFIX) -> tuple[dict[str, str], ...]:
+def build_standard_model_sql_templates(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    model_suffix: str = STANDARD_MODEL_SUFFIX,
+) -> dict[str, str]:
+    return build_profile_model_sql_templates(project_id, dataset_id, scoring_profile_id=STANDARD_SCORING_PROFILE, model_suffix=model_suffix)
+
+
+def profile_model_specs(
+    *,
+    scoring_profile_id: str = STANDARD_SCORING_PROFILE,
+    model_suffix: str = STANDARD_MODEL_SUFFIX,
+) -> tuple[dict[str, str], ...]:
+    scoring_profile_id = _validate_scoring_profile(scoring_profile_id)
     specs: list[dict[str, str]] = []
     for position in POSITIONS:
         position_lower = position.lower()
         specs.extend(
             [
                 {
-                    "candidate_id": f"bqml_v2_standard_{position_lower}_linear_points_{model_suffix}",
-                    "candidate_family": "bqml_v2_standard_linear_points",
-                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_linear_points_{model_suffix}",
+                    "candidate_id": f"bqml_v2_{scoring_profile_id}_{position_lower}_linear_points_{model_suffix}",
+                    "candidate_family": f"bqml_v2_{scoring_profile_id}_linear_points",
+                    "model_name": f"ranking_bqml_v2_{scoring_profile_id}_{position_lower}_linear_points_{model_suffix}",
+                    "scoring_profile_id": scoring_profile_id,
                     "position": position,
                     "model_type": "LINEAR_REG",
                     "label_field": "target_fantasy_points",
@@ -637,9 +688,10 @@ def standard_model_specs(*, model_suffix: str = STANDARD_MODEL_SUFFIX) -> tuple[
                     "higher_is_better": "true",
                 },
                 {
-                    "candidate_id": f"bqml_v2_standard_{position_lower}_linear_vor_{model_suffix}",
-                    "candidate_family": "bqml_v2_standard_linear_vor",
-                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_linear_vor_{model_suffix}",
+                    "candidate_id": f"bqml_v2_{scoring_profile_id}_{position_lower}_linear_vor_{model_suffix}",
+                    "candidate_family": f"bqml_v2_{scoring_profile_id}_linear_vor",
+                    "model_name": f"ranking_bqml_v2_{scoring_profile_id}_{position_lower}_linear_vor_{model_suffix}",
+                    "scoring_profile_id": scoring_profile_id,
                     "position": position,
                     "model_type": "LINEAR_REG",
                     "label_field": "value_over_replacement",
@@ -647,9 +699,10 @@ def standard_model_specs(*, model_suffix: str = STANDARD_MODEL_SUFFIX) -> tuple[
                     "higher_is_better": "true",
                 },
                 {
-                    "candidate_id": f"bqml_v2_standard_{position_lower}_logistic_elite_{model_suffix}",
-                    "candidate_family": "bqml_v2_standard_logistic_elite",
-                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_logistic_elite_{model_suffix}",
+                    "candidate_id": f"bqml_v2_{scoring_profile_id}_{position_lower}_logistic_elite_{model_suffix}",
+                    "candidate_family": f"bqml_v2_{scoring_profile_id}_logistic_elite",
+                    "model_name": f"ranking_bqml_v2_{scoring_profile_id}_{position_lower}_logistic_elite_{model_suffix}",
+                    "scoring_profile_id": scoring_profile_id,
                     "position": position,
                     "model_type": "LOGISTIC_REG",
                     "label_field": "elite_finish_label",
@@ -657,9 +710,10 @@ def standard_model_specs(*, model_suffix: str = STANDARD_MODEL_SUFFIX) -> tuple[
                     "higher_is_better": "true",
                 },
                 {
-                    "candidate_id": f"bqml_v2_standard_{position_lower}_logistic_bust_inverse_{model_suffix}",
-                    "candidate_family": "bqml_v2_standard_logistic_bust_inverse",
-                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_logistic_bust_{model_suffix}",
+                    "candidate_id": f"bqml_v2_{scoring_profile_id}_{position_lower}_logistic_bust_inverse_{model_suffix}",
+                    "candidate_family": f"bqml_v2_{scoring_profile_id}_logistic_bust_inverse",
+                    "model_name": f"ranking_bqml_v2_{scoring_profile_id}_{position_lower}_logistic_bust_{model_suffix}",
+                    "scoring_profile_id": scoring_profile_id,
                     "position": position,
                     "model_type": "LOGISTIC_REG",
                     "label_field": "bust_label",
@@ -669,6 +723,10 @@ def standard_model_specs(*, model_suffix: str = STANDARD_MODEL_SUFFIX) -> tuple[
             ]
         )
     return tuple(specs)
+
+
+def standard_model_specs(*, model_suffix: str = STANDARD_MODEL_SUFFIX) -> tuple[dict[str, str], ...]:
+    return profile_model_specs(scoring_profile_id=STANDARD_SCORING_PROFILE, model_suffix=model_suffix)
 
 
 def assert_standard_query_leakage_safe(sql: str) -> None:
