@@ -4,6 +4,8 @@ Warning: owner-review only. This board is not live, is not a champion activation
 
 Current Pigskin remains the live Standard ranking source. No formula champion is active.
 
+Phase 33.12 calibration note: this Phase 33.11 original overlay is too aggressive for activation. It overweights uncalibrated cross-position BQML VOR, pushes QBs and RBs up too hard, and suppresses several WR/TE anchors. Use `docs/rebuild/standard-bqml-v2-overlay-calibration.md` for the safer 80/15/5 owner-review anchor. Current Pigskin still holds for Standard.
+
 Review version: `phase33_11_standard_2026_overlay_review`.
 
 Rule formula:

@@ -871,3 +871,24 @@ Still blocked:
 - Sleeper current context as a historical predictor
 
 Policy: patched fields may support explainability and component review. They do not activate a champion.
+
+## Phase 33.12 Overlay Calibration Source Status
+
+Phase 33.12 used existing source-backed Standard BQML v2 predictions and active Current Pigskin rows to calibrate the 2026 owner-review overlay. No new source was ingested and no live ranking rows changed.
+
+Source status:
+
+| Area | Status | Phase 33.12 read |
+|---|---|---|
+| BQML VOR | Available, but not cross-position calibrated | QB and RB VOR normalized higher than WR and TE, causing early-board movement. |
+| Finalist safety or elite signal | Available | Useful as a small overlay component, not a primary cross-position ranker. |
+| Missingness flags | Available | Required for future guardrails because many active 2026 rows have sparse pre-2026 feature context. |
+| Sleeper current context | Display only | Not used as a predictor. |
+| `pigskin_context_score` | Blocked | Not used. |
+
+Guardrail status:
+
+- Preferred owner-review anchor: `overlay_80_15_5_anchor_v0`.
+- Missingness gate: required before champion-selection review.
+- VOR percentile calibration: needs more work because the first pass overcorrected position balance.
+- Current Pigskin remains live for Standard.

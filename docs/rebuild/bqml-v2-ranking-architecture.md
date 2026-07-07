@@ -467,3 +467,23 @@ Result:
 - Top 24 shifted to QB9, RB8, WR5, TE2.
 
 Architecture decision: the conservative overlay is useful, but not ready for champion selection without rule refinement. Current Pigskin should hold for Standard.
+
+## Phase 33.12 Standard Overlay Calibration
+
+Phase 33.12 calibrated the Standard 2026 overlay without training models or changing live rankings.
+
+Selected owner-review calibration:
+
+- `overlay_80_15_5_anchor_v0`
+- 80 percent Current Pigskin normalized score.
+- 15 percent BQML VOR normalized score.
+- 5 percent finalist safety or elite signal.
+
+Calibration read:
+
+- Phase 33.11 movement was mainly caused by uncalibrated cross-position BQML VOR. QB and RB VOR values sit higher on the global normalized scale than WR and TE.
+- The 80/15/5 anchor reduced rank deltas over 20 from 58 to 21 in the rerun comparison.
+- QB top-24 count fell from 8 to 6.
+- WR/TE current top-24 exits fell from 7 to 4.
+
+Architecture decision: Standard can move to a safer owner-review board, but not champion selection. Historical proxy evaluation still needs a stronger live-like baseline before activation. Current Pigskin remains live.

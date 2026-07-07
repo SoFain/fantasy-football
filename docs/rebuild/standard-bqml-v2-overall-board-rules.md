@@ -89,3 +89,25 @@ The board is inspectable, but movement is too aggressive for direct activation:
 - 82 rows lacked a pre-2026 feature-mart match.
 
 Current Pigskin should hold for Standard until the owner approves a separate refinement or champion-selection phase.
+
+## Phase 33.12 Calibration
+
+Phase 33.12 tested a small calibration family against the Phase 33.11 2026 review board.
+
+Selected owner-review rule: `overlay_80_15_5_anchor_v0`.
+
+Formula:
+
+- 80 percent Current Pigskin normalized score.
+- 15 percent BQML VOR normalized score.
+- 5 percent finalist safety or elite signal.
+
+Result: `STANDARD OVERLAY CONSERVATIVE ANCHOR READY`.
+
+The 80/15/5 anchor reduced the 2026 movement problem:
+
+- Rank deltas over 20 fell from 58 to 21 in the rerun comparison.
+- QB top-24 count fell from 8 to 6.
+- WR/TE current top-24 exits fell from 7 to 4.
+
+This is still owner-review evidence only. Historical proxy evaluation is not strong enough for champion activation because the available Current Pigskin-like proxy is too QB-heavy in 2024 and 2025. Current Pigskin remains live for Standard.

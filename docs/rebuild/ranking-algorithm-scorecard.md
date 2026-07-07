@@ -1670,3 +1670,25 @@ Patched Standard v2 remains useful as component evidence:
 - QB patched models: not better enough to carry forward as finalists.
 
 Scorecard decision: Standard BQML v2 position finalists are ready for owner-review planning, but the next blocker is an overall-board rule. Current Pigskin remains live.
+
+## Phase 33.12 Standard Overlay Calibration
+
+Current live baseline: Current Pigskin Standard.
+
+Champion status: no champion active.
+
+Live ranking status: no live ranking table changed.
+
+Owner-review calibration result:
+
+| Rule | Status | Evidence |
+|---|---|---|
+| `overlay_70_20_10_original_v0` | Rejected for activation | Too much QB/RB movement and WR/TE suppression. |
+| `overlay_80_15_5_anchor_v0` | Preferred owner-review anchor | Reduces movement while preserving a small BQML/VOR signal. |
+| `overlay_85_10_5_anchor_v0` | Conservative fallback | Safer, but close to a pure Current Pigskin hold. |
+| `overlay_missingness_gate_v0` | Required future guardrail | Helpful, but needs cleaner owner-facing implementation. |
+| `overlay_vor_percentile_calibrated_v0` | Needs more work | Fixes QB overload but overcorrects toward WR. |
+
+Phase 33.12 decision: `STANDARD OVERLAY CONSERVATIVE ANCHOR READY`.
+
+This does not change the live default. Current Pigskin should hold for Standard until a separate owner-approved champion-selection phase has stronger historical proof and missingness guardrails.
