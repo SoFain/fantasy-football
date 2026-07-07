@@ -702,3 +702,28 @@ Source caution:
 - `red_zone_flag` and `inside_5_flag` currently have 0 true rows in raw/staging checks. Yardline-derived logic is the recoverable path.
 - Public NGS receiving in this lane supports YAC and separation style context, not expected catch or CPOE-style receiving catch-over-expected.
 - These fields should remain out of the Standard training predictor set until a later additive feature-mart patch proves coverage and leakage safety.
+
+## Phase 33.5 Standard V2 Feature Signal
+
+Phase 33.5 trained the first Standard-only BQML v2 model set with the 41 Phase 33.3 predictors. The seven zero-coverage fields stayed excluded.
+
+Observed model-weight signal:
+
+| Position | Helpful or high-magnitude fields | Interpretation |
+|---|---|---|
+| QB | `rushing_xfp_share_pbp_3yr`, `rushing_attempts`, `qb_rushing_leverage_index`, `weekly_volatility_3yr` | QB v2 signal exists but is less stable than RB/WR/TE and trails prior BQML linear points in combined comparison. |
+| RB | `target_share_slope_3yr`, `xfp_share_3yr`, `carry_share_slope_3yr` | Role and opportunity share are useful Standard RB signals. |
+| WR | `target_share_slope_3yr`, `wopr_slope_3yr`, `air_yards`, `receiving_first_down_exp_pbp_3yr`, `receiving_xfp_share_pbp_3yr` | Target role, air-yard context, and chain-mover proxy are useful Standard WR signals. |
+| TE | `target_share_slope_3yr`, `wopr_slope_3yr`, `air_yards`, `receiving_xfp_share_pbp_3yr`, `offensive_snap_share_3yr` | TE benefits from role-history and receiving-opportunity context. |
+
+Deferred after training:
+
+- `passing_epa_per_play`
+- `receiving_yards`
+- `receiving_epa`
+- `red_zone_targets`
+- `red_zone_opportunities`
+- `goal_line_opportunities`
+- `ngs_catch_over_expected_score_3yr`
+
+The first six remain feature-mart patch candidates. `ngs_catch_over_expected_score_3yr` remains blocked by source availability.

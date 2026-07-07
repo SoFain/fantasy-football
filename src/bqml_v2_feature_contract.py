@@ -11,6 +11,9 @@ from dataclasses import dataclass
 
 
 BQML_V2_DATASET_VERSION = "bqml_v2_standard_training_dataset_v0"
+STANDARD_MODEL_SUFFIX = "v0"
+STANDARD_MODEL_VERSION = "bqml_v2_standard_v0"
+STANDARD_SUMMARY_VERSION = "ranking_backtest_sql_native_bqml_v2_standard_v0"
 STANDARD_SCORING_PROFILE = "standard"
 SCORING_PROFILE_ORDER = ("standard", "half_ppr", "ppr", "gng_keeper")
 POSITIONS = ("QB", "RB", "WR", "TE")
@@ -576,7 +579,7 @@ def build_standard_model_sql_templates(
     project_id: str = "fantasy-football-498121",
     dataset_id: str = "fantasy_football_brain",
     *,
-    model_suffix: str = "bqml_v2_standard_v0",
+    model_suffix: str = STANDARD_MODEL_SUFFIX,
 ) -> dict[str, str]:
     dataset_query = build_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
     templates: dict[str, str] = {}
@@ -592,28 +595,28 @@ SELECT
 FROM standard_dataset
 WHERE split = 'train'
   AND position = '{position}'"""
-        templates[f"standard_{position_lower}_linear_points"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_linear_points_{model_suffix}`
+        templates[f"standard_{position_lower}_linear_points"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_linear_points_{model_suffix}`
 OPTIONS(
   model_type = 'LINEAR_REG',
   input_label_cols = ['target_fantasy_points'],
   data_split_method = 'NO_SPLIT'
 ) AS
 {base_select.format(label_field='target_fantasy_points')}"""
-        templates[f"standard_{position_lower}_linear_vor"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_linear_vor_{model_suffix}`
+        templates[f"standard_{position_lower}_linear_vor"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_linear_vor_{model_suffix}`
 OPTIONS(
   model_type = 'LINEAR_REG',
   input_label_cols = ['value_over_replacement'],
   data_split_method = 'NO_SPLIT'
 ) AS
 {base_select.format(label_field='value_over_replacement')}"""
-        templates[f"standard_{position_lower}_logistic_elite"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_logistic_elite_{model_suffix}`
+        templates[f"standard_{position_lower}_logistic_elite"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_logistic_elite_{model_suffix}`
 OPTIONS(
   model_type = 'LOGISTIC_REG',
   input_label_cols = ['elite_finish_label'],
   data_split_method = 'NO_SPLIT'
 ) AS
 {base_select.format(label_field='elite_finish_label')}"""
-        templates[f"standard_{position_lower}_logistic_bust"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_logistic_bust_{model_suffix}`
+        templates[f"standard_{position_lower}_logistic_bust"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.ranking_bqml_v2_standard_{position_lower}_logistic_bust_{model_suffix}`
 OPTIONS(
   model_type = 'LOGISTIC_REG',
   input_label_cols = ['bust_label'],
@@ -621,6 +624,57 @@ OPTIONS(
 ) AS
 {base_select.format(label_field='bust_label')}"""
     return templates
+
+
+def standard_model_specs(*, model_suffix: str = STANDARD_MODEL_SUFFIX) -> tuple[dict[str, str], ...]:
+    specs: list[dict[str, str]] = []
+    for position in POSITIONS:
+        position_lower = position.lower()
+        specs.extend(
+            [
+                {
+                    "candidate_id": f"bqml_v2_standard_{position_lower}_linear_points_{model_suffix}",
+                    "candidate_family": "bqml_v2_standard_linear_points",
+                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_linear_points_{model_suffix}",
+                    "position": position,
+                    "model_type": "LINEAR_REG",
+                    "label_field": "target_fantasy_points",
+                    "prediction_column": "predicted_target_fantasy_points",
+                    "higher_is_better": "true",
+                },
+                {
+                    "candidate_id": f"bqml_v2_standard_{position_lower}_linear_vor_{model_suffix}",
+                    "candidate_family": "bqml_v2_standard_linear_vor",
+                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_linear_vor_{model_suffix}",
+                    "position": position,
+                    "model_type": "LINEAR_REG",
+                    "label_field": "value_over_replacement",
+                    "prediction_column": "predicted_value_over_replacement",
+                    "higher_is_better": "true",
+                },
+                {
+                    "candidate_id": f"bqml_v2_standard_{position_lower}_logistic_elite_{model_suffix}",
+                    "candidate_family": "bqml_v2_standard_logistic_elite",
+                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_logistic_elite_{model_suffix}",
+                    "position": position,
+                    "model_type": "LOGISTIC_REG",
+                    "label_field": "elite_finish_label",
+                    "prediction_column": "predicted_elite_finish_label_probs",
+                    "higher_is_better": "true",
+                },
+                {
+                    "candidate_id": f"bqml_v2_standard_{position_lower}_logistic_bust_inverse_{model_suffix}",
+                    "candidate_family": "bqml_v2_standard_logistic_bust_inverse",
+                    "model_name": f"ranking_bqml_v2_standard_{position_lower}_logistic_bust_{model_suffix}",
+                    "position": position,
+                    "model_type": "LOGISTIC_REG",
+                    "label_field": "bust_label",
+                    "prediction_column": "predicted_bust_label_probs",
+                    "higher_is_better": "false",
+                },
+            ]
+        )
+    return tuple(specs)
 
 
 def assert_standard_query_leakage_safe(sql: str) -> None:

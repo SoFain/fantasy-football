@@ -245,3 +245,28 @@ Field decisions:
 | `ngs_catch_over_expected_score_3yr` | unavailable in public loaded NGS lane | Keep deferred. Public receiving NGS loaded here has catch percentage and expected YAC fields, not expected catch or catch-over-expected. |
 
 The Standard training SQL remains unchanged for Phase 33.4: zero-coverage fields stay excluded until an additive, leakage-safe feature-mart patch proves coverage.
+
+## Phase 33.5 Standard Training Result
+
+Phase 33.5 trained the first Standard-only BQML v2 model set. No live ranking table changed and no champion was activated.
+
+Model set:
+
+- `ranking_bqml_v2_standard_qb_linear_points_v0`
+- `ranking_bqml_v2_standard_qb_linear_vor_v0`
+- `ranking_bqml_v2_standard_qb_logistic_elite_v0`
+- `ranking_bqml_v2_standard_qb_logistic_bust_v0`
+- Same four families for RB, WR, and TE.
+
+Summary evidence was written only to `ranking_backtest_runs` and `ranking_backtest_candidate_summaries` as `ranking_backtest_sql_native_bqml_v2_standard_v0`. No detail rows were written.
+
+Position labels:
+
+| Position | Best Standard v2 lane | Label | Notes |
+|---|---|---|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | owner-review challenger | Beats Current Pigskin but trails prior enriched/NGS BQML linear points on combined 2024-2025 VOR. |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | owner-review challenger | Best Standard comparison by combined VOR capture and points capture. |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | owner-review challenger | Best Standard comparison by combined VOR capture. |
+| TE | `bqml_v2_standard_te_linear_points_v0` | owner-review challenger | Best TE comparison and clear lift over Current Pigskin. |
+
+Next recommended step: generate Standard owner-review boards for the four selected challenger lanes, while separately planning the EPA/red-zone/receiving feature-mart patch.

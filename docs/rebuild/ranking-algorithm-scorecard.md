@@ -1451,3 +1451,41 @@ Training implication:
 - Standard BQML v2 remains ready for first training with the 41 predictors proven in Phase 33.3.
 - The six recoverable fields are future feature-mart work, not blockers for first Standard training.
 - `ngs_catch_over_expected_score_3yr` remains blocked unless a real source field is added.
+
+## Phase 33.5 Standard BQML V2 Training
+
+Phase 33.5 trained 16 Standard-only BQML v2 models: linear points, linear VOR, logistic elite, and logistic bust for QB/RB/WR/TE. Training used seasons 2017-2023 only. Evaluation used 2024 validation and 2025 holdout. No live rankings changed. No champion is active.
+
+Summary evidence:
+
+- Formula version: `ranking_backtest_sql_native_bqml_v2_standard_v0`
+- Runs written: 2
+- Candidate summary rows written: 32
+- Detail rows written: 0
+- Live ranking rows written: 0
+- Champion rows written: 0
+
+Best combined 2024-2025 Standard v2 lanes:
+
+| Position | Candidate | Top-N hit | Points captured | VOR captured | Label |
+|---|---|---:|---:|---:|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | 0.688 | 0.822 | 0.712 | owner-review challenger |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | 0.817 | 0.898 | 0.736 | owner-review challenger |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | 0.631 | 0.756 | 0.696 | owner-review challenger |
+| TE | `bqml_v2_standard_te_linear_points_v0` | 0.611 | 0.742 | 0.687 | owner-review challenger |
+
+Baseline comparison:
+
+- Standard v2 beats Current Pigskin on combined VOR capture for QB, RB, WR, and TE.
+- Standard v2 beats Current Pigskin on combined captured points for QB, RB, WR, and TE.
+- QB Standard v2 does not beat the prior enriched/NGS BQML linear-points lanes on combined VOR capture.
+- RB, WR, and TE Standard v2 produce the strongest or near-strongest Standard comparison lanes in the current summary table.
+
+Feature signal:
+
+- RB models leaned heavily on `target_share_slope_3yr`, `xfp_share_3yr`, and `carry_share_slope_3yr`.
+- WR and TE models showed signal in target-share/WOPR slopes, air yards, and chain-mover or receiving xFP proxies.
+- QB signal remains noisier, with rushing share terms dominating several model weights.
+- The deferred EPA, receiving-yardage, red-zone, goal-line, and CPOE fields remain out of the model set.
+
+Decision: Standard BQML v2 beats Current Pigskin and deserves owner-review boards, but it is not a champion-selection result.

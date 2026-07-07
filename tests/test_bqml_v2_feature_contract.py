@@ -152,6 +152,8 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         self.assertEqual(len(templates), 16)
         self.assertIn("standard_qb_linear_points", templates)
         self.assertIn("standard_te_logistic_bust", templates)
+        self.assertIn("ranking_bqml_v2_standard_qb_linear_points_v0", templates["standard_qb_linear_points"])
+        self.assertIn("ranking_bqml_v2_standard_te_logistic_bust_v0", templates["standard_te_logistic_bust"])
         self.assertIn("data_split_method = 'NO_SPLIT'", templates["standard_qb_linear_points"])
         self.assertIn("split = 'train'", templates["standard_qb_linear_points"])
         self.assertIn("model_type = 'LINEAR_REG'", templates["standard_qb_linear_points"])
@@ -161,6 +163,22 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         self.assertNotIn("depth_chart_role_score_3yr", "\n".join(templates.values()))
         for deferred_feature in contract.STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES:
             self.assertNotIn(deferred_feature, "\n".join(templates.values()))
+
+    def test_standard_model_specs_are_position_specific_and_bust_is_inverse(self):
+        specs = contract.standard_model_specs()
+        model_names = {spec["model_name"] for spec in specs}
+        candidate_ids = {spec["candidate_id"] for spec in specs}
+
+        self.assertEqual(len(specs), 16)
+        self.assertIn("ranking_bqml_v2_standard_qb_linear_points_v0", model_names)
+        self.assertIn("ranking_bqml_v2_standard_wr_logistic_elite_v0", model_names)
+        self.assertIn("bqml_v2_standard_te_logistic_bust_inverse_v0", candidate_ids)
+        bust_specs = [spec for spec in specs if spec["candidate_family"] == "bqml_v2_standard_logistic_bust_inverse"]
+        self.assertEqual(len(bust_specs), 4)
+        for spec in bust_specs:
+            self.assertEqual(spec["label_field"], "bust_label")
+            self.assertEqual(spec["higher_is_better"], "false")
+            self.assertEqual(spec["prediction_column"], "predicted_bust_label_probs")
 
     def test_readiness_thresholds_keep_injury_and_depth_optional(self):
         self.assertEqual(contract.STANDARD_READINESS_THRESHOLDS["baseline_pigskin_proxies"], 0.95)
