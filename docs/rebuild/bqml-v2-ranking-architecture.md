@@ -402,3 +402,23 @@ Observed feature weights show the patched fields are active in the trained model
 - QB linear points used `passing_epa_per_play`, but the coefficient direction and QB comparison remain noisy.
 
 Decision: patched Standard BQML v2 is ready for owner review with warnings. It should not replace the original Standard v2 or Current Pigskin automatically. Use it as a position-specific challenger set, especially RB 2024 and TE 2025, then build owner-review boards before any champion decision.
+
+## Phase 33.9 Original vs Patched Standard Review
+
+Phase 33.9 compared original Standard v2 against patched Standard v2 at the owner-review board level. It used existing trained models, read-only `ML.PREDICT`, persisted summary evidence, and generated local board evidence. It did not train models, write live rankings, activate champions, deploy, call Gemini, call Pigskin chat, call Sleeper, or write detail rows.
+
+Selected Standard owner-review finalists:
+
+| Position | Finalist | Decision |
+|---|---|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | Keep original. Patched QB does not improve enough and remains noisy. |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | Keep original. Patched logistic elite is component evidence, not the finalist. |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | Keep original. Patched bust inverse helps 2025 points/VOR but loses enough top-N/NDCG context to stay secondary. |
+| TE | `bqml_v2_standard_te_logistic_bust_inverse_v0` | Keep original risk-aware finalist. Patched bust inverse and original linear points remain component evidence. |
+
+Architecture decision:
+
+- Standard position finalists are ready for owner review.
+- Standard BQML v2 is not ready for activation.
+- A Standard overall-board rule is still required before champion-selection review.
+- The overall rule should use VOR, scarcity, cutline context, bust-safety context, and deterministic tie-breakers.

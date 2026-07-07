@@ -1595,3 +1595,32 @@ Original Standard v2 still led important slices:
 | 2025 WR | `bqml_v2_standard_wr_logistic_elite_v0` | top-N 0.831 and NDCG 0.751 |
 
 Scorecard decision: do not promote patched Standard v2 as a single replacement. Keep Current Pigskin live. Treat patched Standard v2 as an owner-review challenger with useful RB/WR/TE components and unresolved QB noise.
+
+## Phase 33.9 Standard Original vs Patched Review
+
+Phase 33.9 compared original Standard BQML v2 and patched Standard BQML v2 using summary evidence plus owner-review board movement. No live rankings changed and no champion is active.
+
+Evidence state:
+
+| Formula version | Runs | Summaries | Detail rows |
+|---|---:|---:|---:|
+| `ranking_backtest_sql_native_bqml_v2_standard_v0` | 2 | 32 | 0 |
+| `ranking_backtest_sql_native_bqml_v2_standard_patched_v0` | 2 | 32 | 0 |
+
+Selected Standard finalists:
+
+| Position | Finalist | Status |
+|---|---|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | original Standard v2 finalist |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | original Standard v2 finalist |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | original Standard v2 finalist |
+| TE | `bqml_v2_standard_te_logistic_bust_inverse_v0` | original Standard v2 finalist |
+
+Patched Standard v2 remains useful as component evidence:
+
+- RB patched logistic elite: useful 2024 role/opportunity signal.
+- WR patched bust inverse: useful 2025 points/VOR signal, with movement risk.
+- TE patched bust inverse: useful 2025 TE signal, not enough to erase 2024 TE warning.
+- QB patched models: not better enough to carry forward as finalists.
+
+Scorecard decision: Standard BQML v2 position finalists are ready for owner-review planning, but the next blocker is an overall-board rule. Current Pigskin remains live.

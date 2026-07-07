@@ -275,3 +275,30 @@ TE linear points has the best combined scorecard VOR from Phase 33.5, but its pe
 ## Overall Board Interpretation
 
 This is a position-review board, not a production overall-board builder. A production-grade Standard overall board still needs an owner-approved VOR and scarcity rule, plus a separate activation phase. No global all-profile winner is recommended.
+## Phase 33.9 Original vs Patched Review
+
+Phase 33.9 compared original Standard BQML v2 models against patched Standard BQML v2 models using read-only `ML.PREDICT`, persisted summary evidence, and generated owner-review boards for 2024 validation and 2025 holdout.
+
+No live rankings changed. No champion was activated.
+
+Selected Standard owner-review finalists:
+
+| Position | Finalist | Status | Warning |
+|---|---|---|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | original Standard v2 finalist | Patched QB adds `passing_epa_per_play`, but the summary and movement evidence remain noisy. |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | original Standard v2 finalist | Patched logistic elite is useful component evidence, especially 2024 top-N/points. |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | original Standard v2 finalist | Patched bust inverse improves 2025 points/VOR, but original keeps stronger top-N/NDCG reads. |
+| TE | `bqml_v2_standard_te_logistic_bust_inverse_v0` | original Standard v2 finalist | Patched bust inverse improves 2025. 2024 TE still favors original linear points. |
+
+Owner-review board notes:
+
+- Position output remains capped at QB45, RB80, WR100, TE35.
+- TE owner-review output stays TE35.
+- Some generated historical boards show odd or low-volume names near cutlines. Treat those as movement warnings.
+- The 2025 board slice is thin or rank-collapsed for several positions, so summary metrics carry more weight than generated board movement.
+- Current Pigskin remains live.
+
+Overall-board gap:
+
+- No production-grade Standard overall board rule exists yet.
+- A later phase must define VOR, scarcity, cutline, bust-safety, and deterministic tie-breaker rules before champion review.

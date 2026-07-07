@@ -811,3 +811,31 @@ Interpretation:
 - `ngs_catch_over_expected_score_3yr` remains blocked. Do not fabricate it from catch percentage, YAC, or separation fields.
 
 Next action: generate patched Standard owner-review boards only if the owner wants to inspect these challengers. Do not activate a patched champion from summary evidence alone.
+
+## Phase 33.9 Patched Feature Impact
+
+Phase 33.9 compared original and patched Standard BQML v2 boards. The patched fields helped selected component lanes, but did not produce a clean replacement.
+
+Impact by position:
+
+| Position | Patched fields that showed signal | Owner-review read |
+|---|---|---|
+| QB | `passing_epa_per_play` appeared in patched QB weights. | Helpful context, but QB remains noisy. Keep original QB finalist. |
+| RB | `red_zone_opportunities` and `receiving_xfp_pbp_3yr` appeared in patched RB logistic elite weights. | Useful RB component signal. Keep original RB finalist until overall-board rule review. |
+| WR | `receiving_epa` appeared in patched WR bust weights beside target-share, WOPR, xFP share, and air yards. | Useful 2025 points/VOR signal, but movement risk remains. |
+| TE | `receiving_epa` appeared in patched TE bust weights beside target-share, WOPR, xFP share, and air yards. | Useful 2025 TE signal, but 2024 still keeps original TE evidence important. |
+
+Still blocked:
+
+- `ngs_catch_over_expected_score_3yr`
+- true route share
+- YPRR
+- TPRR
+- first-read share
+- pressure EPA
+- covered-receiver EPA
+- historical depth
+- `pigskin_context_score`
+- Sleeper current context as a historical predictor
+
+Policy: patched fields may support explainability and component review. They do not activate a champion.
