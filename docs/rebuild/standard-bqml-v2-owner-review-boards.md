@@ -4,6 +4,27 @@ Generated from existing Phase 33.5 BQML models and summary rows. No live ranking
 
 Review limits: QB45, RB80, WR100, TE35. Standard is the only scoring profile in scope. Board rows aggregate weekly predictions to one player-season row for owner review.
 
+## Phase 33.10 Overall-Board Rule Status
+
+Phase 33.10 tested Standard-only cross-position board rules that combine the Phase 33.9 position finalists into one overall board.
+
+Owner-review rule: `standard_bqml_v2_conservative_overlay_v0`.
+
+Rule shape:
+
+- 70 percent Current Pigskin normalized score.
+- 20 percent BQML VOR score.
+- 10 percent BQML finalist safety or elite score.
+
+Combined 2024-2025 read:
+
+| Rule | Top-24 | Top-50 | Top-100 | Points cap100 | VOR cap100 |
+|---|---:|---:|---:|---:|---:|
+| Conservative overlay | 0.479 | 0.560 | 0.810 | 1.022 | 1.081 |
+| Current Pigskin baseline | 0.417 | 0.550 | 0.810 | 1.001 | 1.074 |
+
+The overlay is owner-review evidence only. It did not write live rankings, activate a champion, train models, or replace Current Pigskin.
+
 ## Selected Candidates
 
 | Position | Owner-review candidate | Decision note |

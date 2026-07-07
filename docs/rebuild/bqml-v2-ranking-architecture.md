@@ -422,3 +422,30 @@ Architecture decision:
 - Standard BQML v2 is not ready for activation.
 - A Standard overall-board rule is still required before champion-selection review.
 - The overall rule should use VOR, scarcity, cutline context, bust-safety context, and deterministic tie-breakers.
+
+## Phase 33.10 Standard Overall-Board Rule Prototype
+
+Phase 33.10 tested transparent Standard-only overall board rules from the Phase 33.9 original Standard v2 finalists. It used existing models, read-only `ML.PREDICT`, and `ranking_backtest_feature_mart`. It did not train models, write live rankings, activate champions, deploy, call Gemini, call Pigskin chat, call Sleeper, ingest source data, or write backtest detail rows.
+
+Selected owner-review rule:
+
+- `standard_bqml_v2_conservative_overlay_v0`
+
+Formula shape:
+
+- 70 percent Current Pigskin normalized score.
+- 20 percent BQML VOR score.
+- 10 percent BQML finalist safety or elite score.
+
+Combined 2024-2025 comparison:
+
+| Rule | Top-24 | Top-50 | Top-100 | Points cap100 | VOR cap100 | Missing | Extreme top100 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Conservative overlay | 0.479 | 0.560 | 0.810 | 1.022 | 1.081 | 0.003 | 0 |
+| Current Pigskin baseline | 0.417 | 0.550 | 0.810 | 1.001 | 1.074 | 0.003 | 0 |
+
+VOR-only and points-to-VOR rules are not ready. VOR-only trailed the baseline on top-100 and VOR capture. Points-to-VOR was sensitive to replacement policy and weaker in early board hit rates.
+
+Draft Priority Index remains display-only. It is not the evaluation source of truth.
+
+Standard can move to owner champion-selection review with warnings. Current Pigskin remains live until a separate owner-approved activation phase.

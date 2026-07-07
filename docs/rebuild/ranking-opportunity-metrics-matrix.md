@@ -109,6 +109,23 @@ PBP values are xFP-like component proxies, not official fantasy-point xFP column
 - Phase 32.32 confirms CTE-only live 2026 BQML review input is available for Standard, Half PPR, PPR, and GNG Keeper. The production candidate table remains PPR-only and was not overwritten.
 - Phase 32.37 deployed the read-only Formula Review dashboard code and reduced active live TE depth to 35 per scoring profile. It did not run live ranking generation, write champions, overwrite candidates, call Gemini, call Pigskin chat, call Sleeper, train BQML, or ingest source data.
 - Phase 32.38 keeps opportunity, role, ideal, PBP, NGS, injury, and availability fields as explanation context only for v1.0. Current Pigskin remains the live formula for every scoring profile and position. Pigskin chat can use `docs/rebuild/pigskin-live-ranking-formula-context.md` as static policy context, but it must not treat any component lane as an active champion.
+- Phase 33.10 tested Standard-only overall-board rules using source-backed Current Pigskin proxy fields, BQML VOR predictions, and position finalist safety or elite scores. The selected conservative overlay is owner-review evidence only. It does not activate a champion or change live rankings.
+
+## Phase 33.10 Overall-Board Source Status
+
+| Rule input | Source status | Use |
+|---|---|---|
+| Current Pigskin proxy | Available in `ranking_backtest_feature_mart` from analytical grade, opportunity, efficiency, role stability, and profile points fields. | 70 percent of conservative overlay. |
+| BQML VOR score | Available through existing Standard linear VOR models and read-only `ML.PREDICT`. | 20 percent of conservative overlay. |
+| Finalist safety or elite score | Available through existing Standard logistic finalist models. | 10 percent of conservative overlay. |
+| Replacement baseline policies | Tested as project-like, paper candidate, and conservative owner-review policies. | Points-to-VOR sensitivity check only. |
+| Draft Priority Index | Derived display score from board rank. | Display only. Not a decision metric. |
+
+Remaining gaps:
+
+- No tested summary-only overall-board evaluator contract exists yet for persisting these cross-position rule summaries.
+- VOR-only and points-to-VOR rules are not strong enough for activation review.
+- The conservative overlay is Standard-only. Half PPR, PPR, and GNG Keeper still need separate profile-specific evidence.
 
 ## Phase 32.38 Formula-Context Status
 

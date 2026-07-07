@@ -57,6 +57,8 @@ Phase 32.37 changed active live ranking depth to QB45, RB80, WR100, and TE35 per
 
 Phase 32.38 set v1.0 live defaults without changing ranking data. Current Pigskin remains live for every scoring profile and position. Standard is the default scoring profile, ALL is the default Player Profiles board, and Pigskin chat now receives static read-only formula context. No challenger formula was promoted.
 
+Phase 33.10 tested Standard-only overall-board rules. The conservative overlay is ready for owner champion-selection review with warnings, but no champion is active and Current Pigskin remains live.
+
 ## Historical Seasons Covered
 
 Target seasons: 2017 through 2025.
@@ -160,6 +162,29 @@ Pigskin chat context:
 
 - Static context file: `docs/rebuild/pigskin-live-ranking-formula-context.md`.
 - The context tells Pigskin to name Current Pigskin as active, avoid BQML-active claims, avoid champion-active claims, and not invent `pigskin_context_score`.
+
+### Phase 33.10: Standard BQML v2 overall-board rule prototype
+
+Phase 33.10 tested Standard-only cross-position owner-review rules from the Phase 33.9 original Standard v2 finalists. It did not train models, write live rankings, activate champions, write detail rows, call Gemini, call Pigskin chat, call Sleeper, ingest source data, or deploy.
+
+Best rule:
+
+- `standard_bqml_v2_conservative_overlay_v0`
+
+Rule shape:
+
+- 70 percent Current Pigskin normalized score.
+- 20 percent BQML VOR score.
+- 10 percent BQML finalist safety or elite score.
+
+Combined 2024-2025 result:
+
+| Rule | Top-24 | Top-50 | Top-100 | Points cap100 | VOR cap100 | Missing | Extreme top100 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Conservative overlay | 0.479 | 0.560 | 0.810 | 1.022 | 1.081 | 0.003 | 0 |
+| Current Pigskin baseline | 0.417 | 0.550 | 0.810 | 1.001 | 1.074 | 0.003 | 0 |
+
+Decision: conservative overlay is ready for owner champion-selection review with warnings. Current Pigskin remains live. No formula champion is active.
 
 ### Phase 32.5: Rolling multi-year tournament
 
