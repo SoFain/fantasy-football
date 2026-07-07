@@ -127,7 +127,32 @@ weekly_source AS (
     'AVAILABLE' AS participation_source_status,
     'UNAVAILABLE' AS contract_source_status,
     'UNAVAILABLE' AS pressure_coverage_source_status,
-    -- JSON flags/freshness
+    -- Populate structured source_freshness_json (for compatibility with validation 195)
+    TO_JSON_STRING(STRUCT(
+      pws.source_freshness_json AS core_stats_source,
+      raw.loaded_at AS raw_loaded_at,
+      part.source_freshness_json AS snap_source,
+      ngs.created_at AS ngs_source_updated
+    )) AS source_freshness_json,
+    -- Populate structured missing_data_flags (for compatibility with validation 193 and 196)
+    TO_JSON_STRING(STRUCT(
+      (raw.player_id IS NULL) AS missing_raw_payload,
+      (part.player_id_internal IS NULL) AS missing_participation,
+      (ngs.player_id_internal IS NULL AND pws.season >= 2016) AS missing_ngs,
+      (role.player_id_internal IS NULL) AS missing_injury_role,
+      COALESCE(opp.team_targets, 0) = 0 AS zero_team_targets_denominator,
+      COALESCE(opp.team_air_yards, 0) = 0 AS zero_team_air_yards_denominator,
+      COALESCE(opp.team_rush_attempts, 0) = 0 AS zero_team_rush_attempts_denominator,
+      COALESCE(opp.team_targets, 0) + COALESCE(opp.team_rush_attempts, 0) = 0 AS zero_team_opportunity_denominator,
+      COALESCE(pws.targets, 0) = 0 AS zero_player_targets_denominator,
+      COALESCE(pws.air_yards, opp.air_yards, 0) = 0 AS zero_player_air_yards_denominator,
+      pws.air_yards IS NULL AND opp.air_yards IS NULL AS missing_player_air_yards_source,
+      COALESCE(pws.carries, 0) + COALESCE(pws.targets, 0) = 0 AS zero_player_opportunity_denominator,
+      TRUE AS route_metrics_blocked,
+      TRUE AS red_zone_high_value_metrics_blocked,
+      TRUE AS injury_depth_context_unavailable
+    )) AS missing_data_flags,
+    -- Duplicate to new columns
     TO_JSON_STRING(STRUCT(
       pws.source_freshness_json AS core_stats_source,
       raw.loaded_at AS raw_loaded_at,
@@ -138,7 +163,18 @@ weekly_source AS (
       (raw.player_id IS NULL) AS missing_raw_payload,
       (part.player_id_internal IS NULL) AS missing_participation,
       (ngs.player_id_internal IS NULL AND pws.season >= 2016) AS missing_ngs,
-      (role.player_id_internal IS NULL) AS missing_injury_role
+      (role.player_id_internal IS NULL) AS missing_injury_role,
+      COALESCE(opp.team_targets, 0) = 0 AS zero_team_targets_denominator,
+      COALESCE(opp.team_air_yards, 0) = 0 AS zero_team_air_yards_denominator,
+      COALESCE(opp.team_rush_attempts, 0) = 0 AS zero_team_rush_attempts_denominator,
+      COALESCE(opp.team_targets, 0) + COALESCE(opp.team_rush_attempts, 0) = 0 AS zero_team_opportunity_denominator,
+      COALESCE(pws.targets, 0) = 0 AS zero_player_targets_denominator,
+      COALESCE(pws.air_yards, opp.air_yards, 0) = 0 AS zero_player_air_yards_denominator,
+      pws.air_yards IS NULL AND opp.air_yards IS NULL AS missing_player_air_yards_source,
+      COALESCE(pws.carries, 0) + COALESCE(pws.targets, 0) = 0 AS zero_player_opportunity_denominator,
+      TRUE AS route_metrics_blocked,
+      TRUE AS red_zone_high_value_metrics_blocked,
+      TRUE AS injury_depth_context_unavailable
     )) AS missing_flags_json,
     TO_JSON_STRING(STRUCT(
       FALSE AS using_proxy_routes,
@@ -184,7 +220,6 @@ SELECT * FROM weekly_source
 
 
 def build_season_advanced_metrics_sql(project: str, dataset: str) -> str:
-    # Aggregates weekly metrics into seasonal metrics, grouping by season and season_type (REG/POST)
     return f"""
 WITH weekly AS (
   SELECT *
@@ -204,7 +239,6 @@ team_totals AS (
   GROUP BY 1, 2, 3, 4, 5, 6
 ),
 season_team_totals AS (
-  -- Sum team totals over the season for active weeks of multi-team players
   SELECT
     w.season,
     w.season_type,
@@ -230,7 +264,6 @@ season_base AS (
     ANY_VALUE(w.player_name) AS player_name,
     w.position,
     ANY_VALUE(w.position_group) AS position_group,
-    -- Handle traded players: show the team they played for in the latest week of the season
     ARRAY_AGG(w.team ORDER BY w.week DESC LIMIT 1)[OFFSET(0)] AS team,
     TO_JSON_STRING(ARRAY_AGG(DISTINCT w.team ORDER BY w.team)) AS teams_json,
     SUM(w.games) AS games,
@@ -288,7 +321,6 @@ season_base AS (
     ANY_VALUE(w.participation_source_status) AS participation_source_status,
     ANY_VALUE(w.contract_source_status) AS contract_source_status,
     ANY_VALUE(w.pressure_coverage_source_status) AS pressure_coverage_source_status,
-    -- JSON metadata
     TO_JSON_STRING(STRUCT(
       'player_week_advanced_metrics' AS season_source_table,
       COUNT(DISTINCT w.week) AS weeks_aggregated
@@ -325,7 +357,7 @@ season_calculated AS (
     SAFE_DIVIDE(sb.passing_epa, NULLIF(sb.attempts, 0)) AS passing_epa_per_attempt,
     SAFE_DIVIDE(sb.passing_epa, NULLIF(sb.dropbacks, 0)) AS passing_epa_per_dropback,
     SAFE_DIVIDE(sb.passing_first_downs, NULLIF(sb.attempts, 0)) AS passing_first_down_rate,
-    -- Weighted Opportunity calculations (PPR, Half PPR, Standard, GNG Keeper)
+    -- Weighted Opportunity calculations
     (COALESCE(sb.red_zone_targets, 0) * 1.47) + ((COALESCE(sb.targets, 0) - COALESCE(sb.red_zone_targets, 0)) * 0.67) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + ((COALESCE(sb.carries, 0) - COALESCE(sb.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_standard,
     (COALESCE(sb.red_zone_targets, 0) * 1.93) + ((COALESCE(sb.targets, 0) - COALESCE(sb.red_zone_targets, 0)) * 1.00) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + ((COALESCE(sb.carries, 0) - COALESCE(sb.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_half_ppr,
     (COALESCE(sb.red_zone_targets, 0) * 2.39) + ((COALESCE(sb.targets, 0) - COALESCE(sb.red_zone_targets, 0)) * 1.54) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + ((COALESCE(sb.carries, 0) - COALESCE(sb.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_ppr,
@@ -428,7 +460,6 @@ FROM season_calculated
 
 
 def build_source_coverage_sql(project: str, dataset: str) -> str:
-    # Inserts descriptive row audits of metric source coverage by season into player_metric_source_coverage
     return f"""
 WITH weekly AS (
   SELECT *
@@ -453,11 +484,8 @@ SELECT
   season,
   metric_name,
   CASE
-    -- Route metrics are permanently blocked
     WHEN metric_name IN ('YPRR', 'TPRR') THEN 'BLOCKED'
-    -- NGS starts in 2016
     WHEN metric_name IN ('NGS Separation', 'NGS Cushion') AND season < 2016 THEN 'UNAVAILABLE'
-    -- All other metrics are available back to 2014
     ELSE 'AVAILABLE'
   END AS source_status,
   COUNT(1) AS coverage_count,
@@ -507,8 +535,8 @@ def run_pipeline(
       ngs_qb_time_to_throw, ngs_qb_aggressiveness, ngs_qb_cpoe, offensive_snap_share,
       snap_role_stability, availability_score, injury_status_score, injury_burden_score,
       missed_time_risk_score, route_metrics_source_status, ngs_source_status, participation_source_status,
-      contract_source_status, pressure_coverage_source_status, source_coverage_json, missing_flags_json,
-      proxy_flags_json, blocked_flags_json, generated_at
+      contract_source_status, pressure_coverage_source_status, source_freshness_json, missing_data_flags,
+      source_coverage_json, missing_flags_json, proxy_flags_json, blocked_flags_json, generated_at
     )
     {build_weekly_advanced_metrics_sql(project, dataset)}
     """
@@ -547,7 +575,6 @@ def run_pipeline(
 
     results = {}
     if write:
-        # Bounded deletes first to prevent duplicate rows on rerun
         print("Executing bounded deletes...")
         client.query(
             f"DELETE FROM {_table(project, dataset, 'player_week_advanced_metrics')} WHERE metric_version = @metric_version AND season BETWEEN @season_start AND @season_end",

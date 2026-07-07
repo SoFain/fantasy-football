@@ -98,6 +98,9 @@ The active dataset used by the app and pipeline is `fantasy_football_brain`. `sr
 | `roster_formats` | admin metadata | no runtime reader yet | `bigquery/migrations/0003__model_run_config_foundation.sql` | one roster format | partition by `created_at`; cluster by active/roster format ID | Safe config metadata. |
 | `feature_config_versions` | admin metadata | no runtime reader yet | `bigquery/migrations/0003__model_run_config_foundation.sql` | one feature config version | partition by `created_at`; cluster by active/config/horizon | Safe config metadata. |
 | `source_freshness_snapshots` | admin metadata | `model_runs` rows reference `source_freshness_snapshot_id`; no UI reader yet | `bigquery/migrations/0003__model_run_config_foundation.sql`; `src/model_runs.py:create_source_freshness_snapshot`, `src/model_runs.py:218` | one source freshness snapshot | partition by `created_at`; cluster by snapshot ID | Safe lineage metadata. |
+| `player_week_advanced_metrics` | feature-like mart | future UI, rankings, projection, and evidence-packet marts | migration `0040`; materialized by `src/nflverse_advanced_metrics_warehouse.py` | one player-season-week advanced metric row | range partition by `season`; cluster by `position`, `player_id_internal` | Safe for UI/LLM. |
+| `player_season_advanced_metrics` | feature-like mart | future UI, rankings, projection, and evidence-packet marts | migration `0040`; materialized by `src/nflverse_advanced_metrics_warehouse.py` | one player-season advanced metric row | range partition by `season`; cluster by `position`, `player_id_internal` | Safe for UI/LLM. |
+| `player_metric_source_coverage` | admin metadata | validation queries `190a`; audit checks | migration `0040`; materialized by `src/nflverse_advanced_metrics_warehouse.py` | one metric-season source status row | range partition by `season`; cluster by `metric_name` | Safe for admin audit, not useful for player evidence. |
 | `active_league_rosters` | deprecated/unknown | prompt exposure only, `app.py:2623` | no writer found | unknown | unknown | Not safe. Remove from prompt or replace with Sleeper marts. |
 | `historical_player_metrics` | deprecated/unknown alias | prompt text says alias for `weekly_metrics`, `app.py:2606` | no writer found | unknown alias | unknown | Not safe. Replace with `analytics_player_weekly_truth` or future feature mart. |
 
@@ -161,18 +164,18 @@ The minimum compatibility layer should preserve existing function names and visu
    - The compatibility view exposes only materialized packet rows where `packet_json IS NOT NULL`; older legacy mart rows may remain in the backing table until cleanup.
 
 10. `llm_player_context_packet`
-   - Replaces arbitrary Pigskin chat access to raw tables.
-   - Inputs: `compat_player_profiles_current`, `compat_trade_player_history`, `model_runs`, fraud watch, ranking history, QB splits, context events, and external verification leads.
-   - Grain: one player, scoring profile, league type, roster format, model run, and as-of season/week.
-   - Runtime status: production mart, view, materializer, and helper exist, but Pigskin chat remains unchanged until feature-flagged wiring.
+    - Replaces arbitrary Pigskin chat access to raw tables.
+    - Inputs: `compat_player_profiles_current`, `compat_trade_player_history`, `model_runs`, fraud watch, ranking history, QB splits, context events, and external verification leads.
+    - Grain: one player, scoring profile, league type, roster format, model run, and as-of season/week.
+    - Runtime status: production mart, view, materializer, and helper exist, but Pigskin chat remains unchanged until feature-flagged wiring.
 
 11. `model_runs`
-   - Adds the required compatibility metadata for generated outputs.
-   - Existing `ranking_version` remains as display compatibility until the UI is migrated.
+    - Adds the required compatibility metadata for generated outputs.
+    - Existing `ranking_version` remains as display compatibility until the UI is migrated.
 
 12. Model-run config tables
-   - `scoring_profiles`, `league_types`, `roster_formats`, `feature_config_versions`, and `source_freshness_snapshots` support reproducible model context.
-   - These are admin/config metadata, not direct player evidence.
+    - `scoring_profiles`, `league_types`, `roster_formats`, `feature_config_versions`, and `source_freshness_snapshots` support reproducible model context.
+    - These are admin/config metadata, not direct player evidence.
 
 ## Prioritized Migration-Debt List
 
@@ -183,9 +186,9 @@ The minimum compatibility layer should preserve existing function names and visu
 5. P1: Move Player Profiles onto `compat_player_profiles_current`.
 6. P1: Replace Pigskin arbitrary SQL with `llm_player_context_packet` helper calls behind a default-off flag.
 7. P1: Move Viewer Team Lab onto `compat_viewer_team_context` behind `USE_COMPAT_VIEWER_TEAM_CONTEXT=false` after packet validation.
-7. P1: Wire market values through `compat_trade_assets_current` after live validation.
-8. P1: Wire Trade Lab and Pigskin to `trade_review_packets` behind a default-off feature flag after packet validation.
-9. P1: Wire Segment pages and Pigskin to `fraud_watch_packets` and `sleeper_breakout_packets` behind default-off flags after packet validation.
-10. P1: Generate and validate baseline projection outputs before wiring rankings, trade, viewer-team, segment, or Pigskin consumers.
-11. P1: Add partitioning or replacement marts for append-only Sleeper tables.
-12. P2: Restrict Pigskin chat to allowlisted context packet APIs instead of arbitrary SQL.
+8. P1: Wire market values through `compat_trade_assets_current` after live validation.
+9. P1: Wire Trade Lab and Pigskin to `trade_review_packets` behind a default-off feature flag after packet validation.
+10. P1: Wire Segment pages and Pigskin to `fraud_watch_packets` and `sleeper_breakout_packets` behind default-off flags after packet validation.
+11. P1: Generate and validate baseline projection outputs before wiring rankings, trade, viewer-team, segment, or Pigskin consumers.
+12. P1: Add partitioning or replacement marts for append-only Sleeper tables.
+13. P2: Restrict Pigskin chat to allowlisted context packet APIs instead of arbitrary SQL.

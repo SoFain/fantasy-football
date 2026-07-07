@@ -87,6 +87,9 @@ Classification values:
 | `roster_formats` | admin metadata | Created and seeded idempotently by `0003__model_run_config_foundation.sql`. | Safe config metadata. |
 | `feature_config_versions` | admin metadata | Created by `0003__model_run_config_foundation.sql` for future versioned feature configs. | Safe config metadata. |
 | `source_freshness_snapshots` | admin metadata | Created by `0003__model_run_config_foundation.sql`; helper writer is `src/model_runs.py:create_source_freshness_snapshot`, `src/model_runs.py:218`. | Safe lineage metadata. |
+| `player_week_advanced_metrics` | feature-like mart | Created or altered by `0040` and `0041`; materialized by `src/nflverse_advanced_metrics_warehouse.py`. | Safe. |
+| `player_season_advanced_metrics` | feature-like mart | Created by `0040`; materialized by `src/nflverse_advanced_metrics_warehouse.py`. | Safe. |
+| `player_metric_source_coverage` | admin metadata | Created by `0040`; materialized by `src/nflverse_advanced_metrics_warehouse.py` to audit source coverage. | Admin only. |
 | `active_league_rosters` | deprecated/unknown | Prompt reference only at `app.py:2623`; no writer found in `app.py` or `src/`. | Not safe. |
 | `historical_player_metrics` | deprecated/unknown | Prompt alias text at `app.py:2606`; no writer found in `app.py` or `src/`. | Not safe. |
 

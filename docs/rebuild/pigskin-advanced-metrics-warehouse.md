@@ -1,6 +1,6 @@
 # Pigskin Advanced Metrics Warehouse
 
-Status: contract scaffold for Phase 29.3. No data is written by this document.
+Status: Completed under Phase 33.15. Data is fully populated and validated for seasons 2014-2025 under metric_version 'advanced_player_metrics_v0'.
 
 ## Purpose
 

@@ -95,6 +95,19 @@ The feature mart can now carry these additional leakage-safe historical predicto
 
 PBP values are xFP-like component proxies, not official fantasy-point xFP columns. The source exposes expected pass, rush, touchdown, first-down, yardline, and two-point components. The derived table records that policy in `missing_flags_json`.
 
+Phase 33.15 adds three Player-Year Advanced Metrics Warehouse objects:
+
+- `player_week_advanced_metrics`, altered to include season-level advanced metrics alignments.
+- `player_season_advanced_metrics`, one row per player, season, season_type (REG/POST), and position.
+- `player_metric_source_coverage`, one row per metric, season, source status, and coverage count.
+
+Backfill result:
+- Seasons: 2014-2025.
+- Weekly rows: 217,230.
+- Seasonal rows: 28,865.
+- Coverage audit rows: 120.
+- Metric version: `advanced_player_metrics_v0`.
+
 ## Guardrails
 
 - Blocked advanced metrics are not fabricated.
