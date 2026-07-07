@@ -22,6 +22,15 @@ LEAGUE_TYPE_ID = "redraft"
 ROSTER_FORMAT_ID = "one_qb"
 NO_GLOBAL_ALL_PROFILE_WINNER = True
 REVIEW_POSITION_LIMITS = {"QB": 45, "RB": 80, "WR": 100, "TE": 35}
+STANDARD_READINESS_THRESHOLDS = {
+    "baseline_pigskin_proxies": 0.95,
+    "opportunity": 0.95,
+    "ideal_xfp": 0.90,
+    "pbp_xfp": 0.90,
+    "first_down_proxies": 0.90,
+    "ngs": 0.70,
+    "role_history": 0.90,
+}
 
 ALLOWED_MODEL_TYPES = ("LINEAR_REG", "LOGISTIC_REG")
 DEFERRED_MODEL_TYPES = ("BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER")
@@ -195,6 +204,18 @@ BLOCKED_FEATURES = frozenset(
     }
 )
 
+STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES = frozenset(
+    {
+        "passing_epa_per_play",
+        "red_zone_opportunities",
+        "goal_line_opportunities",
+        "receiving_yards",
+        "receiving_epa",
+        "red_zone_targets",
+        "ngs_catch_over_expected_score_3yr",
+    }
+)
+
 PROXY_LABELS = {
     "receiving_first_down_exp_pbp_3yr": "chain-mover proxy",
     "offensive_snap_share_3yr": "snap-role proxy",
@@ -285,6 +306,14 @@ def all_predictor_fields() -> tuple[str, ...]:
     return tuple(ordered)
 
 
+def standard_training_predictor_fields() -> tuple[str, ...]:
+    return tuple(
+        feature
+        for feature in all_predictor_fields()
+        if feature not in STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES
+    )
+
+
 def is_blocked_feature(feature_name: str, *, depth_coverage_available: bool = False) -> bool:
     normalized = feature_name.strip().lower()
     if normalized == "depth_chart_role_score_3yr" and depth_coverage_available:
@@ -316,6 +345,14 @@ def predictor_fields_for_position(position: str) -> tuple[str, ...]:
     return tuple(feature for feature in features if feature not in OUTCOME_ONLY_FIELDS)
 
 
+def standard_training_predictor_fields_for_position(position: str) -> tuple[str, ...]:
+    return tuple(
+        feature
+        for feature in predictor_fields_for_position(position)
+        if feature not in STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES
+    )
+
+
 def target_fields_for_family(family_id: str) -> tuple[str, ...]:
     families = {family.family_id: family for family in MODEL_FAMILIES}
     if family_id not in families:
@@ -332,7 +369,7 @@ def _quote_table(project_id: str, dataset_id: str, table_name: str) -> str:
 
 
 def _select_predictor_columns() -> str:
-    return ",\n    ".join(all_predictor_fields())
+    return ",\n    ".join(standard_training_predictor_fields())
 
 
 def _json_missing_flags_expression() -> str:
@@ -424,7 +461,7 @@ SELECT
   target_season,
   COUNT(*) AS record_count,
   COUNTIF(profile_points_score IS NOT NULL) AS baseline_feature_count,
-  COUNTIF(targets IS NOT NULL OR carries IS NOT NULL OR red_zone_opportunities IS NOT NULL OR goal_line_opportunities IS NOT NULL) AS opportunity_feature_count,
+  COUNTIF(targets IS NOT NULL OR carries IS NOT NULL OR rb_high_value_opportunity_score IS NOT NULL) AS opportunity_feature_count,
   COUNTIF(xfp_score_3yr IS NOT NULL OR high_value_xfp_score_3yr IS NOT NULL) AS ideal_xfp_feature_count,
   COUNTIF(passing_xfp_pbp_3yr IS NOT NULL OR rushing_xfp_pbp_3yr IS NOT NULL OR receiving_xfp_pbp_3yr IS NOT NULL) AS pbp_xfp_feature_count,
   COUNTIF(receiving_first_down_exp_pbp_3yr IS NOT NULL OR receiving_chain_mover_score_3yr IS NOT NULL) AS first_down_proxy_feature_count,
@@ -452,6 +489,138 @@ WHERE scoring_profile_id = '{STANDARD_SCORING_PROFILE}'
   AND source_window_end_season < target_season
   AND league_type_id = '{LEAGUE_TYPE_ID}'
   AND roster_format_id = '{ROSTER_FORMAT_ID}'"""
+
+
+def build_standard_integrity_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+) -> str:
+    dataset_query = build_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
+    return f"""WITH standard_dataset AS (
+{dataset_query}
+),
+grain AS (
+  SELECT
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    target_season,
+    target_week,
+    player_id_internal,
+    COUNT(*) AS grain_record_count
+  FROM standard_dataset
+  GROUP BY scoring_profile_id, league_type_id, roster_format_id, position, target_season, target_week, player_id_internal
+)
+SELECT
+  COUNT(*) AS record_count,
+  COUNTIF(source_window_end_season >= target_season) AS leakage_window_count,
+  COUNTIF(player_id_internal IS NULL OR player_id_internal = '') AS missing_player_id_count,
+  COUNTIF(scoring_profile_id IS NULL OR scoring_profile_id = '') AS missing_scoring_profile_count,
+  COUNTIF(target_fantasy_points IS NULL OR value_over_replacement IS NULL) AS missing_target_label_count,
+  (SELECT COUNT(*) FROM grain WHERE grain_record_count > 1) AS duplicate_grain_count
+FROM standard_dataset"""
+
+
+def build_standard_sample_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    per_position_limit: int = 5,
+) -> str:
+    if per_position_limit < 1 or per_position_limit > 25:
+        raise ValueError("per_position_limit must be between 1 and 25")
+    dataset_query = build_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
+    return f"""WITH standard_dataset AS (
+{dataset_query}
+),
+ranked AS (
+  SELECT
+    split,
+    target_season,
+    target_week,
+    source_window_start_season,
+    source_window_end_season,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    player_name,
+    profile_points_score,
+    recent_points_avg,
+    team_environment_score,
+    xfp_score_3yr,
+    receiving_xfp_pbp_3yr,
+    rushing_xfp_pbp_3yr,
+    passing_xfp_pbp_3yr,
+    target_fantasy_points,
+    value_over_replacement,
+    elite_finish_label,
+    starter_finish_label,
+    bust_label,
+    bqml_v2_missing_flags_json,
+    ROW_NUMBER() OVER (
+      PARTITION BY position
+      ORDER BY target_season DESC, target_week DESC, player_id_internal
+    ) AS position_sample_rank
+  FROM standard_dataset
+)
+SELECT * EXCEPT(position_sample_rank)
+FROM ranked
+WHERE position_sample_rank <= {per_position_limit}
+ORDER BY position, target_season DESC, target_week DESC, player_id_internal"""
+
+
+def build_standard_model_sql_templates(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    model_suffix: str = "bqml_v2_standard_v0",
+) -> dict[str, str]:
+    dataset_query = build_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
+    templates: dict[str, str] = {}
+    for position in POSITIONS:
+        predictor_list = ",\n    ".join(standard_training_predictor_fields_for_position(position))
+        position_lower = position.lower()
+        base_select = f"""WITH standard_dataset AS (
+{dataset_query}
+)
+SELECT
+    {predictor_list},
+    {{label_field}}
+FROM standard_dataset
+WHERE split = 'train'
+  AND position = '{position}'"""
+        templates[f"standard_{position_lower}_linear_points"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_linear_points_{model_suffix}`
+OPTIONS(
+  model_type = 'LINEAR_REG',
+  input_label_cols = ['target_fantasy_points'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='target_fantasy_points')}"""
+        templates[f"standard_{position_lower}_linear_vor"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_linear_vor_{model_suffix}`
+OPTIONS(
+  model_type = 'LINEAR_REG',
+  input_label_cols = ['value_over_replacement'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='value_over_replacement')}"""
+        templates[f"standard_{position_lower}_logistic_elite"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_logistic_elite_{model_suffix}`
+OPTIONS(
+  model_type = 'LOGISTIC_REG',
+  input_label_cols = ['elite_finish_label'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='elite_finish_label')}"""
+        templates[f"standard_{position_lower}_logistic_bust"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.bqml_v2_{position_lower}_logistic_bust_{model_suffix}`
+OPTIONS(
+  model_type = 'LOGISTIC_REG',
+  input_label_cols = ['bust_label'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='bust_label')}"""
+    return templates
 
 
 def assert_standard_query_leakage_safe(sql: str) -> None:

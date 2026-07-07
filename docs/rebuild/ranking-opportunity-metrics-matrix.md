@@ -639,3 +639,44 @@ Coverage summary:
 | First-down proxy | 38,321 | 39,061 |
 | NGS | 32,436 | 39,061 |
 | Role history | 38,650 | 39,061 |
+
+## Phase 33.3 Standard Dataset Coverage Readiness
+
+Phase 33.3 converted the Phase 33.2 contract into a Standard-only dataset readiness check. The training query keeps 41 predictors and excludes zero-coverage fields from the initial Standard training set.
+
+Deferred zero-coverage fields:
+
+| Field | Status |
+|---|---|
+| `passing_epa_per_play` | Future-eligible, excluded from initial Standard training query. |
+| `red_zone_opportunities` | Future-eligible, excluded from initial Standard training query. |
+| `goal_line_opportunities` | Future-eligible, excluded from initial Standard training query. |
+| `receiving_yards` | Future-eligible, excluded from initial Standard training query. |
+| `receiving_epa` | Future-eligible, excluded from initial Standard training query. |
+| `red_zone_targets` | Future-eligible, excluded from initial Standard training query. |
+| `ngs_catch_over_expected_score_3yr` | Future-eligible, excluded from initial Standard training query. |
+
+Position readiness:
+
+| Position | Predictor count | Minimum feature coverage | Readiness |
+|---|---:|---:|---|
+| QB | 11 | 96.3% | ready |
+| RB | 19 | 62.0% | ready with warnings |
+| WR | 19 | 77.0% | ready with warnings |
+| TE | 23 | 71.9% | ready with warnings |
+
+Low-coverage warnings:
+
+| Position | Low-coverage fields |
+|---|---|
+| RB | `target_share_slope_3yr`, `carry_share_slope_3yr`, `ngs_box_resilience_score_3yr`, `ngs_rushing_efficiency_score_3yr`, `ngs_rush_yards_over_expected_score_3yr` |
+| WR | `wopr_slope_3yr`, `target_share_slope_3yr`, `ngs_receiving_efficiency_score_3yr`, `ngs_separation_score_3yr`, `ngs_yac_over_expected_score_3yr` |
+| TE | `wopr_slope_3yr`, `target_share_slope_3yr`, `ngs_receiving_efficiency_score_3yr`, `ngs_separation_score_3yr`, `ngs_yac_over_expected_score_3yr` |
+
+Blocked fields remain blocked:
+
+- `pigskin_context_score`
+- route-derived metrics without source-backed route denominators
+- historical depth
+- current Sleeper context as historical predictor
+- legacy `injury_risk_score_3yr` for the first Standard v2 training dataset

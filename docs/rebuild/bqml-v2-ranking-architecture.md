@@ -178,3 +178,52 @@ Half PPR, PPR, and GNG Keeper can be added after Standard passes:
 - model sanity checks
 
 Each profile must be evaluated separately. Do not silently fall back to PPR. Do not average profiles into a single champion.
+
+## Phase 33.3 Standard Dataset Readiness
+
+Phase 33.3 committed the Phase 33.2 contract package as `88963a3 phase 33.2 add bqml v2 feature contract`, then ran the Standard-only dataset readiness pass.
+
+Standard training dataset status:
+
+| Check | Result |
+|---|---|
+| Standard training predictor columns | 41 |
+| Missing predictor columns | 0 |
+| Predictor types | 41 `FLOAT` |
+| Estimated training-query bytes | 1,201,855,586 |
+| Total Standard rows | 39,061 |
+| Duplicate grain rows | 0 |
+| Missing player IDs | 0 |
+| Missing scoring profiles | 0 |
+| Missing target labels | 0 |
+| Leakage window rows | 0 |
+
+Zero-coverage fields deferred from the initial Standard training dataset:
+
+- `passing_epa_per_play`
+- `red_zone_opportunities`
+- `goal_line_opportunities`
+- `receiving_yards`
+- `receiving_epa`
+- `red_zone_targets`
+- `ngs_catch_over_expected_score_3yr`
+
+These fields remain future-eligible in the broader source-backed allowlist, but the Standard v2 training query and model templates do not use them until coverage exists.
+
+Readiness by position:
+
+| Position | Readiness | Notes |
+|---|---|---|
+| QB | ready | 11 predictors, no zero-coverage fields, minimum feature coverage 96.3 percent. |
+| RB | ready with warnings | 19 predictors, no zero-coverage fields. NGS yards-over-expected coverage is 62.0 percent, so NGS should stay optional/missing-flagged. |
+| WR | ready with warnings | 19 predictors, no zero-coverage fields. WOPR and target-share coverage are below 90 percent, NGS receiving fields are about 86.4 percent. |
+| TE | ready with warnings | 23 predictors, no zero-coverage fields. NGS receiving coverage is about 71.9 percent and role-history coverage is below 90 percent. |
+
+Prepared but not executed:
+
+- Standard QB/RB/WR/TE linear points templates.
+- Standard QB/RB/WR/TE linear VOR templates.
+- Standard QB/RB/WR/TE logistic elite templates.
+- Standard QB/RB/WR/TE logistic bust templates.
+
+Training policy for the next phase remains `data_split_method = NO_SPLIT`, train rows only for model creation, validation and holdout only for later evaluation, and no 2025 holdout tuning.

@@ -1386,3 +1386,46 @@ Blocked feature result:
 - Current Sleeper context remains display-only and is rejected as a historical predictor.
 
 Next research step: Standard-only BQML v2 training dataset dry run, still with no model training unless owner-approved in a later phase.
+
+## Phase 33.3 Standard BQML V2 Dataset Readiness
+
+Phase 33.3 committed the Phase 33.2 contract package as `88963a3` and ran a Standard-only dataset readiness check. No BQML model was trained. No live ranking table changed. No champion is active.
+
+Dataset result:
+
+| Check | Result |
+|---|---:|
+| Standard training predictors | 41 |
+| Missing predictor columns | 0 |
+| Training dry-run bytes | 1,201,855,586 |
+| Total Standard rows | 39,061 |
+| Duplicate grain rows | 0 |
+| Leakage window rows | 0 |
+| Missing target-label rows | 0 |
+
+Rows by split:
+
+| Split | Rows |
+|---|---:|
+| train | 32,452 |
+| validation | 4,918 |
+| holdout | 1,691 |
+
+Readiness:
+
+| Position | Status |
+|---|---|
+| QB | ready |
+| RB | ready with warnings |
+| WR | ready with warnings |
+| TE | ready with warnings |
+
+Warning basis:
+
+- Zero-coverage fields were deferred from the Standard training query.
+- RB, WR, and TE have sub-90-percent coverage in selected NGS or role-history fields.
+- Historical depth and legacy injury risk remain excluded.
+
+Prepared but not executed: 16 Standard model SQL templates for linear points, linear VOR, logistic elite, and logistic bust across QB/RB/WR/TE.
+
+Next owner decision: approve or reject Phase 33.4 Standard-only BQML v2 linear/logistic training.

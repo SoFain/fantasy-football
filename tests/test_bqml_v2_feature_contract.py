@@ -83,6 +83,14 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "label or outcome"):
             contract.validate_features("QB", ["target_fantasy_points"])
 
+    def test_standard_training_predictors_defer_zero_coverage_fields(self):
+        predictors = contract.standard_training_predictor_fields()
+
+        for deferred_feature in contract.STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES:
+            self.assertNotIn(deferred_feature, predictors)
+        self.assertIn("passing_epa_per_play", contract.features_for_position("QB"))
+        self.assertIn("receiving_epa", contract.features_for_position("WR"))
+
     def test_target_columns_are_allowed_only_as_labels(self):
         self.assertEqual(
             contract.target_fields_for_family("bqml_v2_qb_profile_points"),
@@ -108,6 +116,8 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         sql = contract.build_standard_training_dataset_query("project", "dataset").lower()
         for blocked_feature in contract.BLOCKED_FEATURES:
             self.assertNotIn(blocked_feature, sql)
+        for deferred_feature in contract.STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES:
+            self.assertNotIn(deferred_feature, sql)
 
     def test_proxy_names_do_not_overclaim_route_metrics(self):
         self.assertEqual(contract.PROXY_LABELS["receiving_first_down_exp_pbp_3yr"], "chain-mover proxy")
@@ -117,6 +127,46 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
 
     def test_te_review_board_limit_is_35(self):
         self.assertEqual(contract.REVIEW_POSITION_LIMITS["TE"], 35)
+
+    def test_integrity_query_checks_grain_and_leakage(self):
+        sql = contract.build_standard_integrity_query("project", "dataset")
+
+        self.assertIn("source_window_end_season >= target_season", sql)
+        self.assertIn("missing_player_id_count", sql)
+        self.assertIn("missing_scoring_profile_count", sql)
+        self.assertIn("missing_target_label_count", sql)
+        self.assertIn("duplicate_grain_count", sql)
+        self.assertNotIn(" AS rows", sql)
+
+    def test_sample_query_is_bounded_by_position(self):
+        sql = contract.build_standard_sample_query("project", "dataset", per_position_limit=5)
+
+        self.assertIn("ROW_NUMBER() OVER", sql)
+        self.assertIn("PARTITION BY position", sql)
+        self.assertIn("position_sample_rank <= 5", sql)
+        self.assertIn("bqml_v2_missing_flags_json", sql)
+
+    def test_training_sql_templates_are_prepared_not_executed(self):
+        templates = contract.build_standard_model_sql_templates("project", "dataset")
+
+        self.assertEqual(len(templates), 16)
+        self.assertIn("standard_qb_linear_points", templates)
+        self.assertIn("standard_te_logistic_bust", templates)
+        self.assertIn("data_split_method = 'NO_SPLIT'", templates["standard_qb_linear_points"])
+        self.assertIn("split = 'train'", templates["standard_qb_linear_points"])
+        self.assertIn("model_type = 'LINEAR_REG'", templates["standard_qb_linear_points"])
+        self.assertIn("model_type = 'LOGISTIC_REG'", templates["standard_qb_logistic_elite"])
+        self.assertNotIn("BOOSTED_TREE", "\n".join(templates.values()))
+        self.assertNotIn("pigskin_context_score", "\n".join(templates.values()))
+        self.assertNotIn("depth_chart_role_score_3yr", "\n".join(templates.values()))
+        for deferred_feature in contract.STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES:
+            self.assertNotIn(deferred_feature, "\n".join(templates.values()))
+
+    def test_readiness_thresholds_keep_injury_and_depth_optional(self):
+        self.assertEqual(contract.STANDARD_READINESS_THRESHOLDS["baseline_pigskin_proxies"], 0.95)
+        self.assertEqual(contract.STANDARD_READINESS_THRESHOLDS["opportunity"], 0.95)
+        self.assertNotIn("injury_availability", contract.STANDARD_READINESS_THRESHOLDS)
+        self.assertNotIn("historical_depth", contract.STANDARD_READINESS_THRESHOLDS)
 
 
 if __name__ == "__main__":
