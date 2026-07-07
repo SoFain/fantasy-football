@@ -17,7 +17,7 @@ Phase 33.12 was already committed before this phase:
 
 Known untracked files remain historical validation backlog and owner-review artifacts. Generated evidence under `output/` was not staged.
 
-Package commit: pending.
+Package commit: `13cce48 phase 33.13 complete profile positional bqml formulas`
 
 ## Dataset Readiness
 
