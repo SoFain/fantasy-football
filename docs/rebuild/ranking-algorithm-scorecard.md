@@ -1489,3 +1489,37 @@ Feature signal:
 - The deferred EPA, receiving-yardage, red-zone, goal-line, and CPOE fields remain out of the model set.
 
 Decision: Standard BQML v2 beats Current Pigskin and deserves owner-review boards, but it is not a champion-selection result.
+
+## Phase 33.6 Standard BQML V2 Owner-Review Boards
+
+Phase 33.6 generated Standard-only owner-review boards from the existing Phase 33.5 BQML models. No model training, Gemini call, Pigskin chat, Sleeper API call, ingest, deploy, live ranking write, champion activation, or backtest detail write occurred.
+
+Owner-review evidence:
+
+| Evidence | Result |
+|---|---:|
+| Weekly `ML.PREDICT` rows read | 8,088 |
+| Player-season review rows | 783 |
+| Selected summary rows | 10 |
+| `ranking_backtest_runs` for `ranking_backtest_sql_native_bqml_v2_standard_v0` | 2 |
+| `ranking_backtest_candidate_summaries` for the same formula version | 32 |
+| `ranking_backtest_results` for the same formula version | 0 |
+| `ranking_formula_champions` | 0 |
+
+Phase 33.6 finalist labels:
+
+| Position | Finalist | Status |
+|---|---|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | owner-review finalist with warnings. It can beat Current Pigskin in Standard summaries but still trails prior QB BQML linear-points evidence. |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | owner-review finalist with warnings. 2025 VOR capture is null because the denominator is unavailable or zero in the slice. |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | owner-review finalist. |
+| TE | `bqml_v2_standard_te_logistic_bust_inverse_v0` | owner-review finalist. Linear points stays component evidence. |
+
+Board-quality warnings:
+
+- Weekly predictions had to be aggregated to player-season rows before owner review.
+- Some Standard boards have unintuitive cutline names. This is acceptable for review evidence, but not good enough for activation.
+- TE linear points still has the best combined scorecard VOR from Phase 33.5, but null pairwise fields make it weaker as a review finalist than the bust-inverse lane.
+- The Phase 33.6 board is not a production overall-board builder.
+
+Decision: Standard BQML v2 owner-review boards are ready with warnings. Current Pigskin remains live.

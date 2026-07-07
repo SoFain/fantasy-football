@@ -727,3 +727,26 @@ Deferred after training:
 - `ngs_catch_over_expected_score_3yr`
 
 The first six remain feature-mart patch candidates. `ngs_catch_over_expected_score_3yr` remains blocked by source availability.
+
+## Phase 33.6 Standard Owner-Review Signal
+
+Phase 33.6 used the Phase 33.5 Standard BQML v2 models to generate owner-review boards. The phase did not change feature definitions, train models, write live rankings, or activate a champion.
+
+Signal interpretation by position:
+
+| Position | Finalist | Opportunity signal status | Warning |
+|---|---|---|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | Uses source-backed QB rushing and volatility terms. | QB board quality is not strong enough for activation. Prior BQML linear-points evidence remains important. |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | Uses role share, xFP, NGS rushing, and team context signals. | 2025 VOR denominator is null in the summary slice. Cutline shape needs owner review. |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | Uses target role, WOPR, air yards, xFP, first-down proxy, and NGS receiving fields. | Keep deferred receiving yards, receiving EPA, and red-zone targets out until the feature-mart patch proves coverage. |
+| TE | `bqml_v2_standard_te_logistic_bust_inverse_v0` | Uses WR-style receiving opportunity plus snap-role context. | Linear points remains useful component evidence. Bust inverse is the Phase 33.6 review finalist, not an activated champion. |
+
+Feature backlog after Phase 33.6:
+
+- Add leakage-safe rolling `passing_epa_per_play`.
+- Add rolling `receiving_yards` and `receiving_epa`.
+- Derive red-zone targets and red-zone opportunities from `yardline_100`.
+- Derive goal-line opportunities from an owner-approved yardline rule.
+- Keep `ngs_catch_over_expected_score_3yr` blocked until a real source exists.
+
+Do not fabricate route share, yards per route run, first-read share, historical depth, or current Sleeper context as historical predictors.

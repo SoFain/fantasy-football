@@ -270,3 +270,39 @@ Position labels:
 | TE | `bqml_v2_standard_te_linear_points_v0` | owner-review challenger | Best TE comparison and clear lift over Current Pigskin. |
 
 Next recommended step: generate Standard owner-review boards for the four selected challenger lanes, while separately planning the EPA/red-zone/receiving feature-mart patch.
+
+## Phase 33.6 Standard Owner-Review Boards
+
+Phase 33.6 generated Standard-only owner-review boards from the existing Phase 33.5 BQML models. It did not train models, write live rankings, activate champions, call Gemini, call Pigskin chat, call Sleeper, ingest sources, or deploy.
+
+Owner-review board file:
+
+- `docs/rebuild/standard-bqml-v2-owner-review-boards.md`
+
+Generation shape:
+
+- 8,088 weekly BQML prediction rows read from `ML.PREDICT`.
+- 783 player-season rows after aggregating weekly predictions to one owner-review row per player, season, candidate, and position.
+- 10 selected summary rows read from `ranking_backtest_candidate_summaries`.
+- Review limits: QB45, RB80, WR100, TE35.
+- Scoring profile: `standard` only.
+
+Phase 33.6 owner-review finalists:
+
+| Position | Finalist | Phase 33.6 status |
+|---|---|---|
+| QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | owner-review only, with quality warnings. |
+| RB | `bqml_v2_standard_rb_logistic_bust_inverse_v0` | owner-review only, with 2025 VOR denominator and board-shape warnings. |
+| WR | `bqml_v2_standard_wr_logistic_elite_v0` | strongest owner-review finalist in this cut. |
+| TE | `bqml_v2_standard_te_logistic_bust_inverse_v0` | selected over linear points for owner review because 2025 holdout VOR is stronger and the lane is risk-aware. |
+
+TE decision:
+
+- `bqml_v2_standard_te_linear_points_v0` remains useful component evidence.
+- It is not the Phase 33.6 TE finalist because its persisted pairwise fields are null and the bust-inverse lane has stronger 2025 holdout VOR.
+
+Activation policy:
+
+- No Standard BQML v2 candidate is a champion yet.
+- The generated boards are owner-review evidence, not a live overall-board builder.
+- A production-grade Standard overall board still needs an owner-approved VOR, scarcity, and cutline rule.
