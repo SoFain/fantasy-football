@@ -17,7 +17,7 @@ Phase 33.11 was already committed before calibration:
 
 Known untracked files remain historical validation backlog and owner-review artifacts. Generated evidence under `output/` was not staged.
 
-Package commit: pending.
+Package commit: `69126d2 phase 33.12 calibrate standard overlay guardrails`
 
 ## Movement Diagnosis
 
