@@ -789,3 +789,25 @@ Range and leakage checks:
 - Extreme red-zone and goal-line count checks: 0 rows.
 
 The patched fields are now eligible for Standard BQML v2 retraining in a separate phase.
+
+## Phase 33.8 Patched Model Signal
+
+Phase 33.8 proved the newly patched fields are visible to Standard BQML v2 training, but the model results are mixed.
+
+Observed patched-field signal:
+
+| Position | Model inspected | High-magnitude patched or opportunity fields |
+|---|---|---|
+| QB | `ranking_bqml_v2_standard_patched_qb_linear_points_v0` | `passing_epa_per_play`, `rushing_xfp_pbp_3yr`, `rushing_xfp_share_pbp_3yr` |
+| RB | `ranking_bqml_v2_standard_patched_rb_logistic_elite_v0` | `target_share_slope_3yr`, `xfp_share_3yr`, `carry_share_slope_3yr`, `red_zone_opportunities`, `receiving_xfp_pbp_3yr` |
+| WR | `ranking_bqml_v2_standard_patched_wr_logistic_bust_v0` | `target_share_slope_3yr`, `wopr_slope_3yr`, `xfp_share_3yr`, `receiving_xfp_share_pbp_3yr`, `air_yards`, `receiving_epa` |
+| TE | `ranking_bqml_v2_standard_patched_te_logistic_bust_v0` | `target_share_slope_3yr`, `xfp_share_3yr`, `wopr_slope_3yr`, `air_yards`, `receiving_xfp_share_pbp_3yr`, `receiving_epa` |
+
+Interpretation:
+
+- RB and TE show the clearest owner-review value from the patched opportunity fields.
+- WR has useful patched evidence, but original Standard v2 still wins some rank-quality metrics.
+- QB remains noisy. `passing_epa_per_play` is active but not enough to displace the original QB Standard v2 lane.
+- `ngs_catch_over_expected_score_3yr` remains blocked. Do not fabricate it from catch percentage, YAC, or separation fields.
+
+Next action: generate patched Standard owner-review boards only if the owner wants to inspect these challengers. Do not activate a patched champion from summary evidence alone.

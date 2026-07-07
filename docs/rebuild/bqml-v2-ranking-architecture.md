@@ -348,3 +348,57 @@ Standard dataset dry-run after the patch:
 | Missing labels | 0 |
 
 These fields are ready for a separate Standard BQML v2 retrain phase. They are not a champion-selection result.
+
+## Phase 33.8 Patched Standard BQML V2 Retrain
+
+Phase 33.8 trained the 47-predictor Standard BQML v2 patched model set after the Phase 33.7 EPA, receiving, red-zone, and goal-line feature-mart patch. It did not deploy, write live rankings, activate champions, call Gemini, call Pigskin chat, call Sleeper, run source ingest, or write backtest detail rows.
+
+Training scope:
+
+| Scope | Result |
+|---|---:|
+| Scoring profile | `standard` |
+| Positions | QB, RB, WR, TE |
+| Model families | linear points, linear VOR, logistic elite, logistic bust |
+| Models trained | 16 |
+| Training seasons | 2017-2023 |
+| Evaluation seasons | 2024 validation, 2025 holdout |
+| Standard predictor count | 47 |
+| Summary runs written | 2 |
+| Candidate summary rows written | 32 |
+| Detail rows written | 0 |
+| Live ranking rows written | 0 |
+| Champion rows written | 0 |
+
+Formula version written to summary tables:
+
+- `ranking_backtest_sql_native_bqml_v2_standard_patched_v0`
+
+Controlled write:
+
+- Authorization gate: `ALLOW_RANKING_FORMULA_BACKTEST_WRITE=true`, set only inside the write command process.
+- Write job: `ba463b16-a0aa-46aa-8ebf-94a74df4d212`.
+- Gate was removed after the write.
+- Write targets were limited to `ranking_backtest_runs` and `ranking_backtest_candidate_summaries`.
+
+Patch outcome versus original Standard v2:
+
+| Season | Position | Best patched signal | Decision read |
+|---|---|---|---|
+| 2024 | QB | Linear points slightly improved points and VOR capture, but original retained top-N and NDCG edge. | mixed |
+| 2024 | RB | Patched logistic elite led top-N and points capture. | useful challenger |
+| 2024 | WR | Patched linear points led top-N and points capture, but original logistic elite retained VOR and NDCG edge. | mixed |
+| 2024 | TE | Original Standard v2 linear points still led top-N, points, VOR, and NDCG. | patch regressed TE 2024 |
+| 2025 | QB | Original Standard v2 logistic bust inverse still led top-N, points, VOR, and NDCG. | original remains stronger |
+| 2025 | RB | Both original and patched hit perfect top-N and points in the slice; original retained higher NDCG. | no clear replacement |
+| 2025 | WR | Patched bust inverse led points and VOR; original logistic elite retained top-N and NDCG. | mixed |
+| 2025 | TE | Patched bust inverse led top-N, points, VOR, and NDCG. | useful challenger |
+
+Observed feature weights show the patched fields are active in the trained models:
+
+- RB logistic elite emphasized `target_share_slope_3yr`, `xfp_share_3yr`, `carry_share_slope_3yr`, `red_zone_opportunities`, and `receiving_xfp_pbp_3yr`.
+- WR logistic bust emphasized `target_share_slope_3yr`, `wopr_slope_3yr`, `xfp_share_3yr`, `receiving_xfp_share_pbp_3yr`, `air_yards`, and `receiving_epa`.
+- TE logistic bust emphasized `target_share_slope_3yr`, `xfp_share_3yr`, `wopr_slope_3yr`, `air_yards`, `receiving_xfp_share_pbp_3yr`, and `receiving_epa`.
+- QB linear points used `passing_epa_per_play`, but the coefficient direction and QB comparison remain noisy.
+
+Decision: patched Standard BQML v2 is ready for owner review with warnings. It should not replace the original Standard v2 or Current Pigskin automatically. Use it as a position-specific challenger set, especially RB 2024 and TE 2025, then build owner-review boards before any champion decision.

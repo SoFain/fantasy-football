@@ -1561,3 +1561,37 @@ Blocked after patch:
 - `pigskin_context_score`
 
 Next scorecard action: retrain Standard BQML v2 with the 47-predictor dataset in a separate owner-approved phase. Current Pigskin remains live.
+
+## Phase 33.8 Patched Standard BQML V2 Scorecard
+
+Phase 33.8 trained 16 patched Standard BQML v2 models using the 47-predictor dataset. Summary-only evidence was written as `ranking_backtest_sql_native_bqml_v2_standard_patched_v0`.
+
+Persistence result:
+
+| Table | Rows written |
+|---|---:|
+| `ranking_backtest_runs` | 2 |
+| `ranking_backtest_candidate_summaries` | 32 |
+| `ranking_backtest_results` | 0 |
+| `analytics_pigskin_rankings` | 0 |
+| `ranking_formula_champions` | 0 |
+
+Best patched winners against original Standard v2 were limited and position-specific:
+
+| Slice | Patched winner | Metric edge |
+|---|---|---|
+| 2024 RB | `bqml_v2_standard_patched_rb_logistic_elite_v0` | top-N 0.644, points 0.797 |
+| 2024 WR | `bqml_v2_standard_patched_wr_linear_points_v0` | top-N 0.435, points 0.626 |
+| 2025 WR | `bqml_v2_standard_patched_wr_logistic_bust_inverse_v0` | points 0.888, VOR 0.888 |
+| 2025 TE | `bqml_v2_standard_patched_te_logistic_bust_inverse_v0` | top-N 0.764, points 0.848, VOR 0.843, NDCG 0.712 |
+
+Original Standard v2 still led important slices:
+
+| Slice | Original winner | Metric edge |
+|---|---|---|
+| 2024 TE | `bqml_v2_standard_te_linear_points_v0` | top-N 0.463, points 0.652, VOR 0.551, NDCG 0.584 |
+| 2025 QB | `bqml_v2_standard_qb_logistic_bust_inverse_v0` | top-N 0.852, points 0.890, VOR 0.851, NDCG 0.832 |
+| 2025 RB | `bqml_v2_standard_rb_linear_points_v0` | NDCG 0.848, with perfect top-N and points in the slice |
+| 2025 WR | `bqml_v2_standard_wr_logistic_elite_v0` | top-N 0.831 and NDCG 0.751 |
+
+Scorecard decision: do not promote patched Standard v2 as a single replacement. Keep Current Pigskin live. Treat patched Standard v2 as an owner-review challenger with useful RB/WR/TE components and unresolved QB noise.
