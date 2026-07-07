@@ -206,6 +206,8 @@ Current Pigskin should hold for Standard.
 - `docs/rebuild/ranking-algorithm-scorecard.md`
 - `docs/rebuild/ranking-opportunity-metrics-matrix.md`
 
+Package commit: `afef1fb phase 33.11 generate standard overlay review board`
+
 ## Checks
 
 - `.\venv\Scripts\python.exe -m unittest tests.test_bqml_v2_feature_contract`: passed, 19 tests.
