@@ -14,9 +14,9 @@ Phase 33.9 was already committed before this phase:
 
 - `0f4cd42 phase 33.9 review standard bqml v2 finalists`
 
-Phase 33.10 commit:
+Phase 33.10 documentation package commit:
 
-- `adf7670 phase 33.10 prototype standard overall board rules`
+- `953b7d8 phase 33.10 prototype standard overall board rules`
 
 Known untracked files remain historical validation backlog and owner-review artifacts. Generated evidence under `output/` is local only and was not staged.
 
