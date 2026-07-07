@@ -449,3 +449,21 @@ VOR-only and points-to-VOR rules are not ready. VOR-only trailed the baseline on
 Draft Priority Index remains display-only. It is not the evaluation source of truth.
 
 Standard can move to owner champion-selection review with warnings. Current Pigskin remains live until a separate owner-approved activation phase.
+
+## Phase 33.11 Standard 2026 Overlay Board
+
+Phase 33.11 generated an outcome-free Standard 2026 owner-review board from active Current Pigskin rows plus the latest pre-2026 feature-mart predictors. It used read-only `ML.PREDICT`; no model was trained and no live ranking table changed.
+
+Board artifact:
+
+- `docs/rebuild/standard-bqml-v2-2026-conservative-overlay-review-board.md`
+
+Result:
+
+- 260 active Standard rows reviewed.
+- QB45, RB80, WR100, TE35 baseline shape confirmed.
+- 82 rows had no feature-mart match.
+- 46 players moved more than 20 overall spots.
+- Top 24 shifted to QB9, RB8, WR5, TE2.
+
+Architecture decision: the conservative overlay is useful, but not ready for champion selection without rule refinement. Current Pigskin should hold for Standard.

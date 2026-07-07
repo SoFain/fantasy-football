@@ -127,6 +127,21 @@ Remaining gaps:
 - VOR-only and points-to-VOR rules are not strong enough for activation review.
 - The conservative overlay is Standard-only. Half PPR, PPR, and GNG Keeper still need separate profile-specific evidence.
 
+## Phase 33.11 2026 Overlay Feature Coverage
+
+Phase 33.11 used active Standard Current Pigskin rows as the review universe and the latest pre-2026 feature-mart rows as BQML predictor input.
+
+| Family | Records | Missing feature records | Leakage records |
+|---|---:|---:|---:|
+| all | 260 | 82 | 0 |
+| baseline candidate proxies | 260 | 82 | 0 |
+| ideal xFP | 260 | 82 | 0 |
+| PBP xFP | 260 | 82 | 0 |
+| NGS | 260 | 92 | 0 |
+| role history | 260 | 82 | 0 |
+
+Coverage read: enough to generate an inspectable board, not enough to activate. Rookies and low-history players need stronger baseline protection before champion-selection review.
+
 ## Phase 32.38 Formula-Context Status
 
 | Field family | Pigskin chat use for v1.0 | Live formula status |

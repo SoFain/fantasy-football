@@ -186,6 +186,27 @@ Combined 2024-2025 result:
 
 Decision: conservative overlay is ready for owner champion-selection review with warnings. Current Pigskin remains live. No formula champion is active.
 
+### Phase 33.11: Standard 2026 conservative overlay review board
+
+Phase 33.11 generated an outcome-free 2026 Standard owner-review board for `standard_bqml_v2_conservative_overlay_v0`. It did not train models, write live rankings, activate champions, call Gemini, call Pigskin chat, call Sleeper, run source ingest, run production ranking generation, or deploy.
+
+Board artifact:
+
+- `docs/rebuild/standard-bqml-v2-2026-conservative-overlay-review-board.md`
+
+Board result:
+
+| Check | Result |
+|---|---:|
+| Active Standard review rows | 260 |
+| Missing feature-mart rows | 82 |
+| Rank delta over 20 rows | 46 |
+| Top-24 mix | QB9, RB8, WR5, TE2 |
+| Top-50 mix | QB14, RB14, WR15, TE7 |
+| Top-100 mix | QB21, RB28, WR33, TE18 |
+
+Decision: review board is ready with warnings, but movement is too aggressive for champion selection. Current Pigskin remains live and no champion is active.
+
 ### Phase 32.5: Rolling multi-year tournament
 
 Backtest version: `ranking_backtest_tournament_v0_rolling_2017_2025`

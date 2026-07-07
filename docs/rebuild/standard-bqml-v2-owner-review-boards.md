@@ -25,6 +25,18 @@ Combined 2024-2025 read:
 
 The overlay is owner-review evidence only. It did not write live rankings, activate a champion, train models, or replace Current Pigskin.
 
+## Phase 33.11 2026 Overlay Board
+
+Phase 33.11 generated the Standard 2026 conservative-overlay review board:
+
+- `docs/rebuild/standard-bqml-v2-2026-conservative-overlay-review-board.md`
+
+Status: owner-review challenger with warnings.
+
+Current Pigskin remains live. The overlay is not a champion and should not be activated from this evidence alone.
+
+Main owner-review warning: the top 24 becomes QB/RB heavy and demotes several current top WR/TE rows. Missing feature-mart rows also affect rookies and low-history players.
+
 ## Selected Candidates
 
 | Position | Owner-review candidate | Decision note |

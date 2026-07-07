@@ -71,3 +71,21 @@ Meaning:
 - Not ready for live activation.
 - Not ready for global scoring-profile expansion without separate profile-specific tests.
 - Current Pigskin remains live.
+
+## Phase 33.11 2026 Review Board
+
+Phase 33.11 generated a Standard-only, outcome-free 2026 owner-review board for the conservative overlay:
+
+- `docs/rebuild/standard-bqml-v2-2026-conservative-overlay-review-board.md`
+
+Result: `STANDARD 2026 OVERLAY REVIEW BOARD READY WITH WARNINGS`.
+
+The board is inspectable, but movement is too aggressive for direct activation:
+
+- 46 of 260 players moved more than 20 overall spots.
+- Top 24 shifted to QB9, RB8, WR5, TE2.
+- Jalen Hurts moved from 34 to 2 and Lamar Jackson from 75 to 22.
+- Jaxon Smith-Njigba moved from 1 to 27, Drake London from 8 to 30, and Brock Bowers from 13 to 32.
+- 82 rows lacked a pre-2026 feature-mart match.
+
+Current Pigskin should hold for Standard until the owner approves a separate refinement or champion-selection phase.
