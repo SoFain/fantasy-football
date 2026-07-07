@@ -83,13 +83,17 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "label or outcome"):
             contract.validate_features("QB", ["target_fantasy_points"])
 
-    def test_standard_training_predictors_defer_zero_coverage_fields(self):
+    def test_standard_training_predictors_include_recovered_feature_mart_fields(self):
         predictors = contract.standard_training_predictor_fields()
 
-        for deferred_feature in contract.STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES:
-            self.assertNotIn(deferred_feature, predictors)
-        self.assertIn("passing_epa_per_play", contract.features_for_position("QB"))
-        self.assertIn("receiving_epa", contract.features_for_position("WR"))
+        self.assertIn("passing_epa_per_play", predictors)
+        self.assertIn("receiving_yards", predictors)
+        self.assertIn("receiving_epa", predictors)
+        self.assertIn("red_zone_targets", predictors)
+        self.assertIn("red_zone_opportunities", predictors)
+        self.assertIn("goal_line_opportunities", predictors)
+        self.assertNotIn("ngs_catch_over_expected_score_3yr", predictors)
+        self.assertEqual(contract.STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES, frozenset({"ngs_catch_over_expected_score_3yr"}))
 
     def test_target_columns_are_allowed_only_as_labels(self):
         self.assertEqual(
@@ -161,8 +165,13 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         self.assertNotIn("BOOSTED_TREE", "\n".join(templates.values()))
         self.assertNotIn("pigskin_context_score", "\n".join(templates.values()))
         self.assertNotIn("depth_chart_role_score_3yr", "\n".join(templates.values()))
-        for deferred_feature in contract.STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES:
-            self.assertNotIn(deferred_feature, "\n".join(templates.values()))
+        self.assertIn("passing_epa_per_play", templates["standard_qb_linear_points"])
+        self.assertIn("red_zone_opportunities", templates["standard_rb_linear_points"])
+        self.assertIn("goal_line_opportunities", templates["standard_rb_linear_points"])
+        self.assertIn("receiving_yards", templates["standard_wr_linear_points"])
+        self.assertIn("receiving_epa", templates["standard_wr_linear_points"])
+        self.assertIn("red_zone_targets", templates["standard_te_linear_points"])
+        self.assertNotIn("ngs_catch_over_expected_score_3yr", "\n".join(templates.values()))
 
     def test_standard_model_specs_are_position_specific_and_bust_is_inverse(self):
         specs = contract.standard_model_specs()

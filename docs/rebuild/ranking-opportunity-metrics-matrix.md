@@ -750,3 +750,42 @@ Feature backlog after Phase 33.6:
 - Keep `ngs_catch_over_expected_score_3yr` blocked until a real source exists.
 
 Do not fabricate route share, yards per route run, first-read share, historical depth, or current Sleeper context as historical predictors.
+
+## Phase 33.7 EPA, Receiving, Red-Zone, and Goal-Line Patch
+
+Phase 33.7 moved six recoverable fields from source-gap backlog into the leakage-safe feature-mart path. No model was trained and no live ranking table changed.
+
+Patch status:
+
+| Field | Source | Derivation policy | Status |
+|---|---|---|---|
+| `passing_epa_per_play` | `stg_play_player_events` | passer EPA divided by passer event count inside the historical source window | populated |
+| `receiving_yards` | `stg_player_week_stats` | weekly receiving yards, clamped at zero in the feature mart | populated |
+| `receiving_epa` | `stg_play_player_events` | receiver EPA by player-week inside the historical source window | populated |
+| `red_zone_targets` | `stg_play_player_events` | target events where `yardline_100 <= 20` | populated |
+| `red_zone_opportunities` | `stg_play_player_events` | target plus rusher events where `yardline_100 <= 20` | populated |
+| `goal_line_opportunities` | `stg_play_player_events` | target plus rusher events where `yardline_100 <= 5` | populated |
+
+Source-policy notes:
+
+- Red-zone and goal-line derivations use `yardline_100`.
+- `red_zone_flag` and `inside_5_flag` remain unusable for this patch because prior checks showed zero true rows.
+- `ngs_catch_over_expected_score_3yr` remains blocked. Do not fabricate it from YAC or catch-percentage fields.
+
+Refresh scope:
+
+- Feature mart: `ranking_backtest_feature_mart`.
+- Target seasons: 2017-2025.
+- Source windows: rolling historical windows ending before the target season.
+- Scoring profiles: `standard`, `half_ppr`, `ppr`, `gng_keeper`.
+- Positions: QB, RB, WR, TE.
+- Total refreshed rows: 156,244.
+
+Range and leakage checks:
+
+- `source_window_end_season >= target_season`: 0 rows.
+- `target_season = 2026`: 0 rows.
+- Negative `receiving_yards`, red-zone, and goal-line counts: 0 rows after the receiving-yard clamp.
+- Extreme red-zone and goal-line count checks: 0 rows.
+
+The patched fields are now eligible for Standard BQML v2 retraining in a separate phase.

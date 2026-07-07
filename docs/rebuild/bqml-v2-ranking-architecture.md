@@ -306,3 +306,45 @@ Activation policy:
 - No Standard BQML v2 candidate is a champion yet.
 - The generated boards are owner-review evidence, not a live overall-board builder.
 - A production-grade Standard overall board still needs an owner-approved VOR, scarcity, and cutline rule.
+
+## Phase 33.7 EPA, Receiving, Red-Zone Patch
+
+Phase 33.7 patched six recoverable fields into the ranking research feature path without training models, changing live rankings, activating champions, calling Gemini, calling Pigskin chat, calling Sleeper, or deploying.
+
+Patched feature sources:
+
+| Field | Source-backed implementation |
+|---|---|
+| `passing_epa_per_play` | `stg_play_player_events` passer EPA divided by passer event count, bounded to historical source windows only. |
+| `receiving_yards` | `stg_player_week_stats.receiving_yards`, clamped at zero for the feature contract. |
+| `receiving_epa` | `stg_play_player_events` receiver EPA, with existing truth fallback. |
+| `red_zone_targets` | `stg_play_player_events` target events where `yardline_100 <= 20`. |
+| `red_zone_opportunities` | target plus rusher events where `yardline_100 <= 20`. |
+| `goal_line_opportunities` | target plus rusher events where `yardline_100 <= 5`. |
+
+The patch refreshed `ranking_backtest_feature_mart` for `standard`, `half_ppr`, `ppr`, and `gng_keeper`, target seasons 2017-2025, positions QB/RB/WR/TE. Total refreshed rows: 156,244.
+
+Standard BQML v2 training predictors increased from 41 to 47. The added predictors are position-specific:
+
+- QB: `passing_epa_per_play`
+- RB: `red_zone_opportunities`, `goal_line_opportunities`
+- WR: `receiving_yards`, `receiving_epa`, `red_zone_targets`
+- TE: `receiving_yards`, `receiving_epa`, `red_zone_targets`
+
+`ngs_catch_over_expected_score_3yr` remains blocked. The loaded public NGS lane still lacks a real catch-over-expected source field.
+
+Standard dataset dry-run after the patch:
+
+| Check | Result |
+|---|---:|
+| Predictor count before | 41 |
+| Predictor count after | 47 |
+| Standard training dataset dry-run bytes | 1,219,493,385 |
+| Standard coverage dry-run bytes | 26,143,117 |
+| Standard integrity dry-run bytes | 12,851,069 |
+| Standard integrity rows | 39,061 |
+| Leakage rows | 0 |
+| Duplicate grain rows | 0 |
+| Missing labels | 0 |
+
+These fields are ready for a separate Standard BQML v2 retrain phase. They are not a champion-selection result.

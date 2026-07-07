@@ -1946,7 +1946,26 @@ LANGUAGE js AS '''
   if (!Number.isFinite(seasonSpan) || seasonSpan === 0) return null;
   return (Number(last.value) - Number(first.value)) / seasonSpan;
 ''';
-WITH season_features AS (
+WITH yardline_opportunities AS (
+    SELECT
+        season,
+        week,
+        REGEXP_REPLACE(player_id_internal, r'^gsis:', '') AS player_key,
+        SUM(IF(event_type = 'target' AND yardline_100 <= 20, 1.0, 0.0)) AS red_zone_targets,
+        SUM(IF(event_type IN ('target', 'rusher') AND yardline_100 <= 20, 1.0, 0.0)) AS red_zone_opportunities,
+        SUM(IF(event_type IN ('target', 'rusher') AND yardline_100 <= 5, 1.0, 0.0)) AS goal_line_opportunities,
+        SUM(IF(event_type = 'receiver', epa, NULL)) AS receiving_epa,
+        SUM(IF(event_type = 'passer', epa, NULL)) AS passing_epa,
+        SUM(IF(event_type = 'passer', 1.0, 0.0)) AS passing_epa_play_count
+    FROM `{table_id(project_id, dataset_id, "stg_play_player_events")}`
+    WHERE season BETWEEN @source_window_start AND @source_season
+      AND season < @target_season
+      AND event_type IN ('target', 'rusher', 'receiver', 'passer')
+      AND player_id_internal IS NOT NULL
+      AND NOT STARTS_WITH(player_id_internal, 'TEAM:')
+    GROUP BY 1, 2, 3
+),
+season_features AS (
     SELECT
         REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') AS player_key,
         metrics.player_id_internal,
@@ -1960,9 +1979,9 @@ WITH season_features AS (
         LEAST(100.0, GREATEST(0.0, AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) * 4.0)) AS profile_points_score,
         AVG(metrics.targets) AS targets,
         AVG(metrics.carries) AS carries,
-        AVG(truth.receiving_yards) AS receiving_yards,
-        AVG(truth.receiving_epa) AS receiving_epa,
-        AVG(metrics.red_zone_targets) AS red_zone_targets,
+        AVG(GREATEST(COALESCE(stats.receiving_yards, truth.receiving_yards), 0.0)) AS receiving_yards,
+        AVG(COALESCE(yardline.receiving_epa, truth.receiving_epa)) AS receiving_epa,
+        AVG(COALESCE(yardline.red_zone_targets, metrics.red_zone_targets, opportunity.red_zone_targets)) AS red_zone_targets,
         AVG(metrics.success_rate) AS success_rate,
         AVG(metrics.success_rate) AS passing_success_rate,
         AVG(truth.pass_attempts) AS dropbacks,
@@ -1977,9 +1996,12 @@ WITH season_features AS (
         AVG(metrics.epa_per_opportunity) AS epa_per_play,
         LEAST(100.0, GREATEST(0.0, AVG(metrics.opportunities) * 4.0)) AS opportunity_score_proxy,
         LEAST(100.0, GREATEST(0.0, 50.0 + (AVG(metrics.epa_per_opportunity) * 25.0))) AS efficiency_score_proxy,
-        AVG(SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0))) AS passing_epa_per_play,
-        AVG(metrics.red_zone_touches) AS red_zone_opportunities,
-        AVG(metrics.inside_5_carries) AS goal_line_opportunities,
+        AVG(COALESCE(
+            SAFE_DIVIDE(yardline.passing_epa, NULLIF(yardline.passing_epa_play_count, 0)),
+            SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0))
+        )) AS passing_epa_per_play,
+        AVG(COALESCE(yardline.red_zone_opportunities, metrics.red_zone_touches, opportunity.red_zone_touches)) AS red_zone_opportunities,
+        AVG(COALESCE(yardline.goal_line_opportunities, metrics.inside_5_carries, opportunity.inside_5_carries)) AS goal_line_opportunities,
         AVG(metrics.snap_share) AS snap_share_proxy,
         AVG(metrics.air_yards_share) AS air_yards,
         AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
@@ -2015,6 +2037,20 @@ WITH season_features AS (
      AND source_profile.scoring_profile_id = @scoring_profile_id
      AND COALESCE(source_profile.league_type_id, @league_type_id) = @league_type_id
      AND COALESCE(source_profile.roster_format_id, @roster_format_id) = @roster_format_id
+    LEFT JOIN `{table_id(project_id, dataset_id, "stg_player_week_stats")}` stats
+      ON metrics.season = stats.season
+     AND metrics.week = stats.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(stats.player_id_internal, r'^gsis:', '')
+     AND metrics.position = stats.position
+    LEFT JOIN `{table_id(project_id, dataset_id, "player_week_opportunity_metrics")}` opportunity
+      ON metrics.season = opportunity.season
+     AND metrics.week = opportunity.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(opportunity.player_id_internal, r'^gsis:', '')
+     AND metrics.position = opportunity.position
+    LEFT JOIN yardline_opportunities yardline
+      ON metrics.season = yardline.season
+     AND metrics.week = yardline.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = yardline.player_key
     WHERE metrics.position = @position
       AND metrics.season BETWEEN @source_window_start AND @source_season
       AND metrics.season < @target_season
@@ -2213,6 +2249,7 @@ WHERE season BETWEEN @season_start AND @season_end
 def build_opportunity_metrics_insert_sql(*, project_id: str, dataset_id: str) -> str:
     opportunity_table = table_id(project_id, dataset_id, "player_week_opportunity_metrics")
     metrics_table = table_id(project_id, dataset_id, "player_week_advanced_metrics")
+    events_table = table_id(project_id, dataset_id, "stg_play_player_events")
     stats_table = table_id(project_id, dataset_id, "stg_player_week_stats")
     team_table = table_id(project_id, dataset_id, "stg_team_week_stats")
     points_table = table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")
@@ -2282,6 +2319,25 @@ WITH participation AS (
     WHERE season BETWEEN @season_start AND @season_end
     GROUP BY 1, 2, 3
 ),
+yardline_opportunities AS (
+    SELECT
+        season,
+        week,
+        REGEXP_REPLACE(player_id_internal, r'^gsis:', '') AS player_key,
+        SUM(IF(event_type = 'target' AND yardline_100 <= 20, 1.0, 0.0)) AS red_zone_targets,
+        SUM(IF(event_type = 'rusher' AND yardline_100 <= 20, 1.0, 0.0)) AS red_zone_carries,
+        SUM(IF(event_type IN ('target', 'rusher') AND yardline_100 <= 20, 1.0, 0.0)) AS red_zone_touches,
+        SUM(IF(event_type = 'rusher' AND yardline_100 <= 10, 1.0, 0.0)) AS inside_10_carries,
+        SUM(IF(event_type = 'rusher' AND yardline_100 <= 5, 1.0, 0.0)) AS inside_5_carries,
+        SUM(IF(event_type IN ('target', 'rusher') AND yardline_100 <= 5, 1.0, 0.0)) AS goal_line_opportunities
+    FROM `{events_table}`
+    WHERE season BETWEEN @season_start AND @season_end
+      AND event_type IN ('target', 'rusher')
+      AND yardline_100 IS NOT NULL
+      AND player_id_internal IS NOT NULL
+      AND NOT STARTS_WITH(player_id_internal, 'TEAM:')
+    GROUP BY 1, 2, 3
+),
 base AS (
     SELECT
         metrics.*,
@@ -2300,7 +2356,13 @@ base AS (
         stats.receiving_yards AS source_receiving_yards,
         stats.passing_yards AS source_passing_yards,
         profile_points.total_fantasy_points AS ppr_points,
-        COALESCE(participation.has_true_route_source, FALSE) AS has_true_route_source
+        COALESCE(participation.has_true_route_source, FALSE) AS has_true_route_source,
+        yardline.red_zone_targets AS yardline_red_zone_targets,
+        yardline.red_zone_carries AS yardline_red_zone_carries,
+        yardline.red_zone_touches AS yardline_red_zone_touches,
+        yardline.inside_10_carries AS yardline_inside_10_carries,
+        yardline.inside_5_carries AS yardline_inside_5_carries,
+        yardline.goal_line_opportunities AS yardline_goal_line_opportunities
     FROM `{metrics_table}` metrics
     LEFT JOIN `{stats_table}` stats
       ON metrics.season = stats.season
@@ -2321,6 +2383,10 @@ base AS (
       ON metrics.season = participation.season
      AND metrics.week = participation.week
      AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = participation.player_key
+    LEFT JOIN yardline_opportunities yardline
+      ON metrics.season = yardline.season
+     AND metrics.week = yardline.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = yardline.player_key
     WHERE metrics.season BETWEEN @season_start AND @season_end
       AND metrics.scoring_profile_id = 'ppr'
       AND metrics.league_type_id = 'redraft'
@@ -2331,13 +2397,18 @@ base AS (
 scored AS (
     SELECT
         *,
-        SAFE_DIVIDE(inside_5_carries, NULLIF(red_zone_carries, 0)) AS goal_line_carry_share_calc,
+        COALESCE(yardline_red_zone_targets, red_zone_targets) AS patched_red_zone_targets,
+        COALESCE(yardline_red_zone_carries, red_zone_carries) AS patched_red_zone_carries,
+        COALESCE(yardline_red_zone_touches, red_zone_touches) AS patched_red_zone_touches,
+        COALESCE(yardline_inside_10_carries, inside_10_carries) AS patched_inside_10_carries,
+        COALESCE(yardline_inside_5_carries, inside_5_carries) AS patched_inside_5_carries,
+        SAFE_DIVIDE(COALESCE(yardline_inside_5_carries, inside_5_carries), NULLIF(COALESCE(yardline_red_zone_carries, red_zone_carries), 0)) AS goal_line_carry_share_calc,
         SAFE_DIVIDE(
-            red_zone_touches,
+            COALESCE(yardline_red_zone_touches, red_zone_touches),
             NULLIF((COALESCE(red_zone_pass_rate, 0) * COALESCE(team_pass_attempts, 0)) + (COALESCE(red_zone_rush_rate, 0) * COALESCE(team_rush_attempts, 0)), 0)
         ) AS red_zone_opportunity_share_calc,
         LEAST(100.0, GREATEST(0.0,
-            COALESCE(red_zone_touches, 0) * 6.0
+            COALESCE(yardline_red_zone_touches, red_zone_touches, 0) * 6.0
             + COALESCE(high_value_touches, 0) * 8.0
             + COALESCE(target_share, 0) * 35.0
             + COALESCE(opportunity_share, 0) * 35.0
@@ -2351,8 +2422,8 @@ scored AS (
           WHEN position = 'QB' THEN LEAST(100.0, GREATEST(0.0,
               COALESCE(carry_share, 0) * 40.0
               + COALESCE(carries, 0) * 2.0
-              + COALESCE(red_zone_carries, 0) * 7.0
-              + COALESCE(inside_5_carries, 0) * 12.0
+              + COALESCE(yardline_red_zone_carries, red_zone_carries, 0) * 7.0
+              + COALESCE(yardline_inside_5_carries, inside_5_carries, 0) * 12.0
           ))
           ELSE NULL
         END AS qb_rushing_leverage_index_calc,
@@ -2361,7 +2432,7 @@ scored AS (
               COALESCE(target_share, 0) * 45.0
               + COALESCE(air_yards_share, 0) * 35.0
               + COALESCE(wopr, 0) * 20.0
-              + COALESCE(red_zone_targets, 0) * 3.0
+              + COALESCE(yardline_red_zone_targets, red_zone_targets, 0) * 3.0
           ))
           ELSE NULL
         END AS wr_dominance_score_calc,
@@ -2370,7 +2441,7 @@ scored AS (
               COALESCE(target_share, 0) * 45.0
               + COALESCE(air_yards_share, 0) * 20.0
               + COALESCE(wopr, 0) * 25.0
-              + COALESCE(red_zone_targets, 0) * 4.0
+              + COALESCE(yardline_red_zone_targets, red_zone_targets, 0) * 4.0
               + COALESCE(snap_share, 0) * 10.0
           ))
           ELSE NULL
@@ -2415,11 +2486,11 @@ SELECT
     air_yards_share,
     weighted_opportunity,
     wopr,
-    red_zone_targets,
-    red_zone_carries,
-    red_zone_touches,
-    inside_10_carries,
-    inside_5_carries,
+    patched_red_zone_targets AS red_zone_targets,
+    patched_red_zone_carries AS red_zone_carries,
+    patched_red_zone_touches AS red_zone_touches,
+    patched_inside_10_carries AS inside_10_carries,
+    patched_inside_5_carries AS inside_5_carries,
     goal_line_carry_share_calc AS goal_line_carry_share,
     red_zone_opportunity_share_calc AS red_zone_opportunity_share,
     high_value_touches,
@@ -2452,6 +2523,7 @@ SELECT
     END AS elite_week_flag,
     TO_JSON_STRING(STRUCT(
         'player_week_advanced_metrics' AS opportunity_source_table,
+        'stg_play_player_events.yardline_100' AS red_zone_goal_line_source,
         'stg_player_week_stats' AS player_week_source_table,
         'stg_team_week_stats' AS team_source_table,
         'analytics_player_fantasy_points_by_profile' AS spike_bust_source_table,
@@ -2461,8 +2533,8 @@ SELECT
         target_share IS NULL AS target_share_missing,
         air_yards_share IS NULL AS air_yards_share_missing,
         carry_share IS NULL AS carry_share_missing,
-        red_zone_touches IS NULL AS red_zone_touches_missing,
-        inside_5_carries IS NULL AS inside_5_carries_missing,
+        patched_red_zone_touches IS NULL AS red_zone_touches_missing,
+        patched_inside_5_carries IS NULL AS inside_5_carries_missing,
         team_epa_per_play IS NULL AS team_environment_missing,
         ppr_points IS NULL AS fantasy_points_missing,
         NOT has_true_route_source AS route_share_unavailable,
@@ -2536,6 +2608,8 @@ def build_feature_mart_insert_sql(*, project_id: str, dataset_id: str) -> str:
     points_table = table_id(project_id, dataset_id, "analytics_player_fantasy_points_by_profile")
     packet_table = table_id(project_id, dataset_id, "pigskin_player_context_packet_current")
     opportunity_table = table_id(project_id, dataset_id, "player_week_opportunity_metrics")
+    stats_table = table_id(project_id, dataset_id, "stg_player_week_stats")
+    events_table = table_id(project_id, dataset_id, "stg_play_player_events")
     ideal_table = table_id(project_id, dataset_id, "player_week_ideal_opportunity_metrics")
     pbp_ideal_table = table_id(project_id, dataset_id, "player_week_pbp_opportunity_metrics")
     role_context_table = table_id(project_id, dataset_id, "player_week_role_context_metrics")
@@ -2684,6 +2758,24 @@ WITH profiles AS (
 positions AS (
     SELECT position FROM UNNEST(@positions) AS position
 ),
+yardline_opportunities AS (
+    SELECT
+        season,
+        week,
+        REGEXP_REPLACE(player_id_internal, r'^gsis:', '') AS player_key,
+        SUM(IF(event_type = 'target' AND yardline_100 <= 20, 1.0, 0.0)) AS red_zone_targets,
+        SUM(IF(event_type IN ('target', 'rusher') AND yardline_100 <= 20, 1.0, 0.0)) AS red_zone_opportunities,
+        SUM(IF(event_type IN ('target', 'rusher') AND yardline_100 <= 5, 1.0, 0.0)) AS goal_line_opportunities,
+        SUM(IF(event_type = 'receiver', epa, NULL)) AS receiving_epa,
+        SUM(IF(event_type = 'passer', epa, NULL)) AS passing_epa,
+        SUM(IF(event_type = 'passer', 1.0, 0.0)) AS passing_epa_play_count
+    FROM `{events_table}`
+    WHERE season BETWEEN @source_window_start_season AND @source_window_end_season
+      AND event_type IN ('target', 'rusher', 'receiver', 'passer')
+      AND player_id_internal IS NOT NULL
+      AND NOT STARTS_WITH(player_id_internal, 'TEAM:')
+    GROUP BY 1, 2, 3
+),
 season_features AS (
     SELECT
         profiles.scoring_profile_id,
@@ -2699,17 +2791,17 @@ season_features AS (
         LEAST(100.0, GREATEST(0.0, AVG(COALESCE(source_profile.total_fantasy_points, truth.fantasy_points_ppr, truth.fantasy_points)) * 4.0)) AS profile_points_score,
         AVG(metrics.targets) AS targets,
         AVG(metrics.carries) AS carries,
-        AVG(truth.receiving_yards) AS receiving_yards,
-        AVG(truth.receiving_epa) AS receiving_epa,
-        AVG(metrics.red_zone_targets) AS red_zone_targets,
+        AVG(GREATEST(COALESCE(stats.receiving_yards, truth.receiving_yards), 0.0)) AS receiving_yards,
+        AVG(COALESCE(yardline.receiving_epa, truth.receiving_epa)) AS receiving_epa,
+        AVG(COALESCE(yardline.red_zone_targets, metrics.red_zone_targets, opportunity.red_zone_targets)) AS red_zone_targets,
         AVG(opportunity.red_zone_carries) AS red_zone_carries,
-        AVG(GREATEST(COALESCE(metrics.targets, 0.0) - COALESCE(metrics.red_zone_targets, 0.0), 0.0)) AS outside_red_zone_targets,
+        AVG(GREATEST(COALESCE(metrics.targets, 0.0) - COALESCE(yardline.red_zone_targets, metrics.red_zone_targets, opportunity.red_zone_targets, 0.0), 0.0)) AS outside_red_zone_targets,
         AVG(GREATEST(COALESCE(metrics.carries, 0.0) - COALESCE(opportunity.red_zone_carries, 0.0), 0.0)) AS outside_red_zone_carries,
         AVG(
             0.47 * GREATEST(COALESCE(metrics.carries, 0.0) - COALESCE(opportunity.red_zone_carries, 0.0), 0.0)
             + 1.28 * COALESCE(opportunity.red_zone_carries, 0.0)
-            + 1.54 * GREATEST(COALESCE(metrics.targets, 0.0) - COALESCE(metrics.red_zone_targets, 0.0), 0.0)
-            + 2.39 * COALESCE(metrics.red_zone_targets, 0.0)
+            + 1.54 * GREATEST(COALESCE(metrics.targets, 0.0) - COALESCE(yardline.red_zone_targets, metrics.red_zone_targets, opportunity.red_zone_targets, 0.0), 0.0)
+            + 2.39 * COALESCE(yardline.red_zone_targets, metrics.red_zone_targets, opportunity.red_zone_targets, 0.0)
         ) AS gemini31_rb_weighted_opportunity_ppr,
         AVG(metrics.success_rate) AS success_rate,
         AVG(metrics.success_rate) AS passing_success_rate,
@@ -2725,9 +2817,12 @@ season_features AS (
         AVG(metrics.epa_per_opportunity) AS epa_per_play,
         LEAST(100.0, GREATEST(0.0, AVG(metrics.opportunities) * 4.0)) AS opportunity_score_proxy,
         LEAST(100.0, GREATEST(0.0, 50.0 + (AVG(metrics.epa_per_opportunity) * 25.0))) AS efficiency_score_proxy,
-        AVG(SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0))) AS passing_epa_per_play,
-        AVG(metrics.red_zone_touches) AS red_zone_opportunities,
-        AVG(metrics.inside_5_carries) AS goal_line_opportunities,
+        AVG(COALESCE(
+            SAFE_DIVIDE(yardline.passing_epa, NULLIF(yardline.passing_epa_play_count, 0)),
+            SAFE_DIVIDE(truth.passing_epa, NULLIF(truth.pass_attempts, 0))
+        )) AS passing_epa_per_play,
+        AVG(COALESCE(yardline.red_zone_opportunities, metrics.red_zone_touches, opportunity.red_zone_touches)) AS red_zone_opportunities,
+        AVG(COALESCE(yardline.goal_line_opportunities, metrics.inside_5_carries, opportunity.inside_5_carries)) AS goal_line_opportunities,
         AVG(metrics.snap_share) AS snap_share_proxy,
         AVG(metrics.air_yards_share) AS air_yards,
         AVG(SAFE_DIVIDE(truth.team_pass_attempts, NULLIF(truth.team_pass_attempts + truth.team_carries, 0))) AS team_pass_rate,
@@ -2738,8 +2833,8 @@ season_features AS (
             WHEN metrics.position = 'TE' THEN opportunity.te_receiving_role_dominance_score
             ELSE NULL
         END) AS receiving_role_dominance_score,
-        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.red_zone_targets, 0) * 4.0 + COALESCE(opportunity.red_zone_carries, 0) * 4.0 + COALESCE(opportunity.red_zone_touches, 0) * 3.0))) AS red_zone_usage_score,
-        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(opportunity.inside_5_carries, 0) * 12.0 + COALESCE(opportunity.inside_10_carries, 0) * 6.0))) AS goal_line_usage_score,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(yardline.red_zone_targets, opportunity.red_zone_targets, 0) * 4.0 + COALESCE(opportunity.red_zone_carries, 0) * 4.0 + COALESCE(yardline.red_zone_opportunities, opportunity.red_zone_touches, 0) * 3.0))) AS red_zone_usage_score,
+        LEAST(100.0, GREATEST(0.0, AVG(COALESCE(yardline.goal_line_opportunities, opportunity.inside_5_carries, 0) * 12.0 + COALESCE(opportunity.inside_10_carries, 0) * 6.0))) AS goal_line_usage_score,
         AVG(opportunity.team_environment_score) AS opportunity_team_environment_score,
         AVG(ideal.xfp_score) AS xfp_score,
         AVG(ideal.xfp_share) AS xfp_share,
@@ -2812,11 +2907,20 @@ season_features AS (
      AND source_profile.scoring_profile_id = profiles.scoring_profile_id
      AND COALESCE(source_profile.league_type_id, @league_type_id) = @league_type_id
      AND COALESCE(source_profile.roster_format_id, @roster_format_id) = @roster_format_id
+    LEFT JOIN `{stats_table}` stats
+      ON metrics.season = stats.season
+     AND metrics.week = stats.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(stats.player_id_internal, r'^gsis:', '')
+     AND metrics.position = stats.position
     LEFT JOIN `{opportunity_table}` opportunity
       ON metrics.season = opportunity.season
      AND metrics.week = opportunity.week
      AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = REGEXP_REPLACE(opportunity.player_id_internal, r'^gsis:', '')
      AND metrics.position = opportunity.position
+    LEFT JOIN yardline_opportunities yardline
+      ON metrics.season = yardline.season
+     AND metrics.week = yardline.week
+     AND REGEXP_REPLACE(metrics.player_id_internal, r'^gsis:', '') = yardline.player_key
     LEFT JOIN `{ideal_table}` ideal
       ON metrics.season = ideal.season
      AND metrics.week = ideal.week

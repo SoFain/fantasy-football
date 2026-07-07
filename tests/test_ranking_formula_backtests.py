@@ -1131,6 +1131,12 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         lowered = sql.lower()
 
         self.assertIn("player_week_advanced_metrics", sql)
+        self.assertIn("stg_play_player_events", sql)
+        self.assertIn("yardline_100 <= 20", sql)
+        self.assertIn("yardline_100 <= 5", sql)
+        self.assertIn("event_type IN ('target', 'rusher')", sql)
+        self.assertNotIn("red_zone_flag", lowered)
+        self.assertNotIn("inside_5_flag", lowered)
         self.assertIn("stg_team_week_stats", sql)
         self.assertIn("analytics_player_fantasy_points_by_profile", sql)
         self.assertIn("profile_points.scoring_profile_id = 'ppr'", sql)
@@ -1173,7 +1179,19 @@ class RankingFormulaBacktestTests(unittest.TestCase):
         ):
             self.assertIn(field, sql)
         self.assertIn("player_week_opportunity_metrics", sql)
+        self.assertIn("stg_player_week_stats", sql)
+        self.assertIn("stg_play_player_events", sql)
+        self.assertIn("GREATEST(COALESCE(stats.receiving_yards, truth.receiving_yards), 0.0)", sql)
+        self.assertIn("yardline.receiving_epa", sql)
+        self.assertIn("yardline.passing_epa", sql)
+        self.assertIn("yardline.passing_epa_play_count", sql)
+        self.assertIn("SAFE_DIVIDE(yardline.passing_epa", sql)
+        self.assertIn("yardline_100 <= 20", sql)
+        self.assertIn("yardline_100 <= 5", sql)
+        self.assertIn("event_type IN ('target', 'rusher', 'receiver', 'passer')", sql)
         self.assertIn("opportunity_source_freshness_json", sql)
+        self.assertNotIn("red_zone_flag", sql.lower())
+        self.assertNotIn("inside_5_flag", sql.lower())
 
     def test_feature_mart_insert_sql_consumes_pbp_xfp_without_target_leakage(self):
         sql = rfb.build_feature_mart_insert_sql(project_id="p", dataset_id="d")

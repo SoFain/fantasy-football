@@ -1523,3 +1523,41 @@ Board-quality warnings:
 - The Phase 33.6 board is not a production overall-board builder.
 
 Decision: Standard BQML v2 owner-review boards are ready with warnings. Current Pigskin remains live.
+
+## Phase 33.7 Feature-Mart Patch Status
+
+Phase 33.7 patched source-backed EPA, receiving, red-zone, and goal-line fields into `ranking_backtest_feature_mart`. It did not train models, call Gemini, call Pigskin chat, deploy, write live rankings, write champions, or write detail rows.
+
+Patched fields now available for research:
+
+- `passing_epa_per_play`
+- `receiving_yards`
+- `receiving_epa`
+- `red_zone_targets`
+- `red_zone_opportunities`
+- `goal_line_opportunities`
+
+Refresh scope:
+
+| Scope | Result |
+|---|---:|
+| Target seasons | 2017-2025 |
+| Scoring profiles | `standard`, `half_ppr`, `ppr`, `gng_keeper` |
+| Positions | QB, RB, WR, TE |
+| Feature-mart rows refreshed | 156,244 |
+| Standard predictor count before patch | 41 |
+| Standard predictor count after patch | 47 |
+| Standard integrity rows | 39,061 |
+| Leakage rows | 0 |
+| Duplicate grain rows | 0 |
+| Missing labels | 0 |
+
+Blocked after patch:
+
+- `ngs_catch_over_expected_score_3yr`
+- fabricated route metrics
+- historical depth
+- current Sleeper context as a historical predictor
+- `pigskin_context_score`
+
+Next scorecard action: retrain Standard BQML v2 with the 47-predictor dataset in a separate owner-approved phase. Current Pigskin remains live.

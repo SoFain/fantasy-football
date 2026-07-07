@@ -209,12 +209,6 @@ BLOCKED_FEATURES = frozenset(
 
 STANDARD_ZERO_COVERAGE_DEFERRED_FEATURES = frozenset(
     {
-        "passing_epa_per_play",
-        "red_zone_opportunities",
-        "goal_line_opportunities",
-        "receiving_yards",
-        "receiving_epa",
-        "red_zone_targets",
         "ngs_catch_over_expected_score_3yr",
     }
 )
