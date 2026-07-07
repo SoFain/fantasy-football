@@ -1429,3 +1429,25 @@ Warning basis:
 Prepared but not executed: 16 Standard model SQL templates for linear points, linear VOR, logistic elite, and logistic bust across QB/RB/WR/TE.
 
 Next owner decision: approve or reject Phase 33.4 Standard-only BQML v2 linear/logistic training.
+
+## Phase 33.4 nflverse Source-Gap Audit
+
+Phase 33.4 audited the seven zero-coverage Standard BQML v2 fields from Phase 33.3. No model was trained. No BigQuery write, feature-mart refresh, champion activation, live ranking change, Gemini call, Pigskin chat, Sleeper API call, or deploy occurred.
+
+Audit result:
+
+| Field | Status | Scorecard decision |
+|---|---|---|
+| `passing_epa_per_play` | recoverable wiring gap | Keep excluded from current Standard training SQL. Add a leakage-safe rolling EPA feature later. |
+| `receiving_yards` | recoverable wiring gap | Keep excluded until a feature-mart patch wires existing populated receiving yards. |
+| `receiving_epa` | recoverable wiring gap | Keep excluded until a feature-mart patch wires weekly or event-level receiver EPA. |
+| `red_zone_targets` | recoverable from PBP yardline | Keep excluded until red-zone targets are derived from `yardline_100`, not the currently empty flags. |
+| `red_zone_opportunities` | recoverable from PBP yardline | Keep excluded until target plus rush opportunities are derived with source-window bounds. |
+| `goal_line_opportunities` | recoverable from PBP yardline | Keep excluded until the goal-line rule is explicitly defined, likely `yardline_100 <= 5`. |
+| `ngs_catch_over_expected_score_3yr` | unavailable in the loaded public NGS lane | Keep deferred. Do not fabricate CPOE-style signal from YAC fields. |
+
+Training implication:
+
+- Standard BQML v2 remains ready for first training with the 41 predictors proven in Phase 33.3.
+- The six recoverable fields are future feature-mart work, not blockers for first Standard training.
+- `ngs_catch_over_expected_score_3yr` remains blocked unless a real source field is added.

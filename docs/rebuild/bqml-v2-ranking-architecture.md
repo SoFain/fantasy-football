@@ -227,3 +227,21 @@ Prepared but not executed:
 - Standard QB/RB/WR/TE logistic bust templates.
 
 Training policy for the next phase remains `data_split_method = NO_SPLIT`, train rows only for model creation, validation and holdout only for later evaluation, and no 2025 holdout tuning.
+
+## Phase 33.4 Source-Gap Audit
+
+Phase 33.4 audited the seven zero-coverage fields deferred in Phase 33.3. No model was trained and no feature mart refresh ran.
+
+Field decisions:
+
+| Field | Classification | Decision |
+|---|---|---|
+| `passing_epa_per_play` | recoverable from existing warehouse / nflverse player stats | Defer to additive feature-mart patch. Source exists as `passing_epa` in weekly player stats and as passer EPA events. |
+| `receiving_yards` | recoverable from existing warehouse / nflverse player stats | Defer to additive feature-mart patch. Source exists in `stg_player_week_stats` and `player_week_opportunity_metrics`. |
+| `receiving_epa` | recoverable from nflverse player stats and staging events | Defer to additive feature-mart patch. Source exists in weekly player stats and receiver EPA events. |
+| `red_zone_targets` | recoverable from PBP yardline derivation | Defer to additive feature-mart patch. Existing red-zone flags are not populated, but yardline-derived target events exist. |
+| `red_zone_opportunities` | recoverable from PBP yardline derivation | Defer to additive feature-mart patch. Use target plus rusher events with `yardline_100 <= 20`. |
+| `goal_line_opportunities` | recoverable from PBP yardline derivation | Defer to additive feature-mart patch. Use rush events with `yardline_100 <= 5` or a clearly named broader goal-line rule if approved. |
+| `ngs_catch_over_expected_score_3yr` | unavailable in public loaded NGS lane | Keep deferred. Public receiving NGS loaded here has catch percentage and expected YAC fields, not expected catch or catch-over-expected. |
+
+The Standard training SQL remains unchanged for Phase 33.4: zero-coverage fields stay excluded until an additive, leakage-safe feature-mart patch proves coverage.

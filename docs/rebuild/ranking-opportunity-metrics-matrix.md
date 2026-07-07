@@ -680,3 +680,25 @@ Blocked fields remain blocked:
 - historical depth
 - current Sleeper context as historical predictor
 - legacy `injury_risk_score_3yr` for the first Standard v2 training dataset
+
+## Phase 33.4 nflverse Source-Gap Classification
+
+Phase 33.4 checked only the Standard BQML v2 zero-coverage fields from Phase 33.3. No source ingest, feature-mart refresh, BQML training, or live ranking write occurred.
+
+Warehouse and nflreadpy evidence:
+
+| Field | Source evidence | Classification | Next action |
+|---|---|---|---|
+| `passing_epa_per_play` | `nflreadpy.load_player_stats` exposes `passing_epa`; `stg_play_player_events` has 242,829 passer EPA events for 2014-2025. | recoverable wiring gap | Add leakage-safe rolling QB EPA feature in a later patch. |
+| `receiving_yards` | `stg_player_week_stats` and `player_week_opportunity_metrics` have populated `receiving_yards` for QB/RB/WR/TE. | recoverable wiring gap | Wire rolling receiving yards into feature mart. |
+| `receiving_epa` | `nflreadpy.load_player_stats` exposes `receiving_epa`; `stg_play_player_events` has 219,876 receiver EPA events for 2014-2025. | recoverable wiring gap | Add leakage-safe rolling receiving EPA feature. |
+| `red_zone_targets` | Raw and staging PBP have `yardline_100`; 29,600 target events fall at `yardline_100 <= 20`. Existing `red_zone_flag` is not populated. | recoverable from PBP yardline derivation | Derive from yardline, not from current red-zone flags. |
+| `red_zone_opportunities` | Raw PBP has 29,600 red-zone targets and 28,712 red-zone rushes by yardline. Staging events have 29,600 target and 29,386 rusher events by yardline. | recoverable from PBP yardline derivation | Derive target plus rusher opportunities with source-window bounds. |
+| `goal_line_opportunities` | Raw PBP has 8,916 inside-five rushes by yardline. Staging events have 9,056 inside-five rusher events by yardline. Existing inside-five flags are not populated. | recoverable from PBP yardline derivation | Derive explicitly from `yardline_100 <= 5`, then name it clearly. |
+| `ngs_catch_over_expected_score_3yr` | `raw_nflverse_ngs_receiving` has `avg_expected_yac`, `avg_yac_above_expectation`, and `catch_percentage`; loaded NGS has 0 non-null expected catch and catch-over-expected rows. | unavailable in current public NGS lane | Keep deferred. Do not fabricate catch-over-expected. |
+
+Source caution:
+
+- `red_zone_flag` and `inside_5_flag` currently have 0 true rows in raw/staging checks. Yardline-derived logic is the recoverable path.
+- Public NGS receiving in this lane supports YAC and separation style context, not expected catch or CPOE-style receiving catch-over-expected.
+- These fields should remain out of the Standard training predictor set until a later additive feature-mart patch proves coverage and leakage safety.
