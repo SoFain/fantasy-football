@@ -205,6 +205,12 @@ BLOCKED_FEATURES = frozenset(
         "sleeper_depth_chart_order",
         "current_team",
         "current_roster_status",
+        "routes_run",
+        "receiving_first_downs_per_route",
+        "route_participation_rate",
+        "end_zone_targets",
+        "dakota",
+        "contract_aav",
     }
 )
 
@@ -744,3 +750,482 @@ def assert_standard_query_leakage_safe(sql: str) -> None:
 
 def feature_family_map() -> dict[str, tuple[str, ...]]:
     return {family: tuple(features) for family, features in _FAMILY_FEATURES.items()}
+
+
+# ==============================================================================
+# Advanced Metrics v1 Contract Integration (Phase 33.17)
+# ==============================================================================
+
+ADVANCED_METRICS_VERSION = "advanced_player_metrics_v1"
+ADVANCED_DATASET_VERSION_PREFIX = "bqml_v2_advanced_training_dataset_v0"
+
+# Position-specific advanced feature allowlists (representing rolling 3-year averages)
+QB_ADV_ALLOWED_FEATURES = (
+    "profile_points_score_3yr",
+    "recent_points_avg_3yr",
+    "adv_passing_epa_3yr",
+    "adv_passing_epa_per_attempt_3yr",
+    "adv_passing_epa_per_dropback_3yr",
+    "adv_passing_cpoe_3yr",
+    "adv_ngs_qb_time_to_throw_3yr",
+    "adv_ngs_qb_aggressiveness_3yr",
+    "adv_ngs_qb_cpoe_3yr",
+    "adv_rushing_yards_3yr",
+    "adv_carries_3yr",
+    "adv_rushing_epa_3yr",
+    "adv_qb_rushing_baseline_3yr",
+    "team_environment_score_3yr",
+)
+
+RB_ADV_ALLOWED_FEATURES = (
+    "adv_weighted_opportunity_profile_3yr",
+    "adv_red_zone_opportunities_3yr",
+    "adv_goal_line_opportunities_3yr",
+    "adv_red_zone_carries_3yr",
+    "adv_goal_line_carries_3yr",
+    "adv_rushing_epa_per_carry_3yr",
+    "adv_ngs_rushing_efficiency_3yr",
+    "adv_ngs_rush_yards_over_expected_3yr",
+    "adv_ngs_rush_yards_over_expected_per_att_3yr",
+    "adv_ngs_box_count_rate_3yr",
+    "adv_offensive_snap_share_3yr",
+    "adv_snap_role_stability_3yr",
+    "adv_availability_score_3yr_context",
+)
+
+WR_ADV_ALLOWED_FEATURES = (
+    "adv_targets_3yr",
+    "adv_receptions_3yr",
+    "adv_receiving_yards_3yr",
+    "adv_receiving_air_yards_3yr",
+    "adv_receiving_epa_3yr",
+    "adv_receiving_epa_per_target_3yr",
+    "adv_receiving_first_down_rate_3yr",
+    "adv_target_share_3yr",
+    "adv_air_yards_share_3yr",
+    "adv_wopr_3yr",
+    "adv_racr_3yr",
+    "adv_adot_3yr",
+    "adv_red_zone_targets_3yr",
+    "adv_goal_line_targets_3yr",
+    "adv_ngs_avg_separation_3yr",
+    "adv_ngs_avg_cushion_3yr",
+    "adv_ngs_yac_above_expectation_3yr",
+    "adv_offensive_snap_share_3yr",
+    "adv_snap_role_stability_3yr",
+    "adv_availability_score_3yr_context",
+)
+
+TE_ADV_ALLOWED_FEATURES = WR_ADV_ALLOWED_FEATURES
+
+ADV_FEATURE_ALLOWLISTS = {
+    "QB": QB_ADV_ALLOWED_FEATURES,
+    "RB": RB_ADV_ALLOWED_FEATURES,
+    "WR": WR_ADV_ALLOWED_FEATURES,
+    "TE": TE_ADV_ALLOWED_FEATURES,
+}
+
+
+def advanced_features_for_position(position: str) -> tuple[str, ...]:
+    normalized = position.upper()
+    if normalized not in ADV_FEATURE_ALLOWLISTS:
+        raise ValueError(f"Unknown BQML v2 position: {position}")
+    return ADV_FEATURE_ALLOWLISTS[normalized]
+
+
+def all_advanced_predictor_fields() -> tuple[str, ...]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for position in POSITIONS:
+        for feature in advanced_features_for_position(position):
+            if feature not in seen:
+                seen.add(feature)
+                ordered.append(feature)
+    return tuple(ordered)
+
+
+def build_advanced_profile_training_dataset_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    scoring_profile_id: str = STANDARD_SCORING_PROFILE,
+    include_order_by: bool = True,
+) -> str:
+    """Build a scoring-profile-specific leakage-safe BQML v2 training dataset query from advanced metrics."""
+    scoring_profile_id = _validate_scoring_profile(scoring_profile_id)
+    mart_table = _quote_table(project_id, dataset_id, "ranking_backtest_feature_mart")
+    advanced_table = _quote_table(project_id, dataset_id, "player_season_advanced_metrics")
+    
+    order_by = "\nORDER BY target_season, target_week, position, player_id_internal" if include_order_by else ""
+    
+    return f"""WITH advanced_rolling AS (
+  SELECT
+    t.target_season,
+    hist.player_id_internal,
+    hist.position,
+    
+    -- QB Advanced Metrics 3-year averages
+    AVG(hist.passing_epa) AS adv_passing_epa_3yr,
+    AVG(hist.passing_epa_per_attempt) AS adv_passing_epa_per_attempt_3yr,
+    AVG(hist.passing_epa_per_dropback) AS adv_passing_epa_per_dropback_3yr,
+    AVG(hist.passing_cpoe) AS adv_passing_cpoe_3yr,
+    AVG(hist.ngs_qb_time_to_throw) AS adv_ngs_qb_time_to_throw_3yr,
+    AVG(hist.ngs_qb_aggressiveness) AS adv_ngs_qb_aggressiveness_3yr,
+    AVG(hist.ngs_qb_cpoe) AS adv_ngs_qb_cpoe_3yr,
+    AVG(hist.rushing_yards) AS adv_rushing_yards_3yr,
+    AVG(hist.carries) AS adv_carries_3yr,
+    AVG(hist.rushing_epa) AS adv_rushing_epa_3yr,
+    AVG(hist.qb_rushing_baseline_score) AS adv_qb_rushing_baseline_3yr,
+
+    -- RB Advanced Metrics 3-year averages
+    AVG(hist.weighted_opportunity_standard) AS adv_weighted_opportunity_standard_3yr,
+    AVG(hist.weighted_opportunity_half_ppr) AS adv_weighted_opportunity_half_ppr_3yr,
+    AVG(hist.weighted_opportunity_ppr) AS adv_weighted_opportunity_ppr_3yr,
+    AVG(hist.weighted_opportunity_gng_keeper) AS adv_weighted_opportunity_gng_keeper_3yr,
+    AVG(hist.red_zone_opportunities) AS adv_red_zone_opportunities_3yr,
+    AVG(hist.goal_line_opportunities) AS adv_goal_line_opportunities_3yr,
+    AVG(hist.red_zone_carries) AS adv_red_zone_carries_3yr,
+    AVG(hist.goal_line_carries) AS adv_goal_line_carries_3yr,
+    AVG(hist.rushing_epa_per_carry) AS adv_rushing_epa_per_carry_3yr,
+    AVG(hist.ngs_rushing_efficiency) AS adv_ngs_rushing_efficiency_3yr,
+    AVG(hist.ngs_rush_yards_over_expected) AS adv_ngs_rush_yards_over_expected_3yr,
+    AVG(hist.ngs_rush_yards_over_expected_per_att) AS adv_ngs_rush_yards_over_expected_per_att_3yr,
+    AVG(hist.ngs_box_count_rate) AS adv_ngs_box_count_rate_3yr,
+
+    -- WR/TE Advanced Metrics 3-year averages
+    AVG(hist.targets) AS adv_targets_3yr,
+    AVG(hist.receptions) AS adv_receptions_3yr,
+    AVG(hist.receiving_yards) AS adv_receiving_yards_3yr,
+    AVG(hist.receiving_air_yards) AS adv_receiving_air_yards_3yr,
+    AVG(hist.receiving_epa) AS adv_receiving_epa_3yr,
+    AVG(hist.receiving_epa_per_target) AS adv_receiving_epa_per_target_3yr,
+    AVG(hist.receiving_first_down_rate) AS adv_receiving_first_down_rate_3yr,
+    AVG(hist.target_share) AS adv_target_share_3yr,
+    AVG(hist.air_yards_share) AS adv_air_yards_share_3yr,
+    AVG(hist.wopr) AS adv_wopr_3yr,
+    AVG(hist.racr) AS adv_racr_3yr,
+    AVG(hist.adot) AS adv_adot_3yr,
+    AVG(hist.red_zone_targets) AS adv_red_zone_targets_3yr,
+    AVG(hist.goal_line_targets) AS adv_goal_line_targets_3yr,
+    AVG(hist.ngs_avg_separation) AS adv_ngs_avg_separation_3yr,
+    AVG(hist.ngs_avg_cushion) AS adv_ngs_avg_cushion_3yr,
+    AVG(hist.ngs_yac_above_expectation) AS adv_ngs_yac_above_expectation_3yr,
+
+    -- Common snap/role/injury features
+    AVG(hist.offensive_snap_share) AS adv_offensive_snap_share_3yr,
+    AVG(hist.snap_role_stability) AS adv_snap_role_stability_3yr,
+    AVG(hist.availability_score) AS adv_availability_score_3yr_context
+    
+  FROM {advanced_table} hist
+  JOIN (
+    SELECT DISTINCT target_season 
+    FROM {mart_table}
+    WHERE target_season BETWEEN 2017 AND 2025
+  ) t
+    ON hist.season BETWEEN t.target_season - 3 AND t.target_season - 1
+  WHERE hist.metric_version = '{ADVANCED_METRICS_VERSION}'
+  GROUP BY t.target_season, hist.player_id_internal, hist.position
+),
+final_dataset AS (
+  SELECT
+    '{ADVANCED_DATASET_VERSION_PREFIX}' AS dataset_version,
+    CASE
+      WHEN mart.target_season BETWEEN 2017 AND 2023 THEN 'train'
+      WHEN mart.target_season = 2024 THEN 'validation'
+      WHEN mart.target_season = 2025 THEN 'holdout'
+      ELSE 'excluded'
+    END AS split,
+    mart.source_window_start_season,
+    mart.source_window_end_season,
+    mart.target_season,
+    mart.target_week,
+    mart.scoring_profile_id,
+    mart.league_type_id,
+    mart.roster_format_id,
+    mart.position,
+    mart.player_id_internal,
+    mart.player_name,
+    mart.team,
+    mart.source_team,
+    
+    -- Baseline/context features from mart
+    mart.profile_points_score AS profile_points_score_3yr,
+    mart.recent_points_avg AS recent_points_avg_3yr,
+    mart.team_environment_score AS team_environment_score_3yr,
+    
+    -- Advanced QB features
+    COALESCE(adv.adv_passing_epa_3yr, 0.0) AS adv_passing_epa_3yr,
+    COALESCE(adv.adv_passing_epa_per_attempt_3yr, 0.0) AS adv_passing_epa_per_attempt_3yr,
+    COALESCE(adv.adv_passing_epa_per_dropback_3yr, 0.0) AS adv_passing_epa_per_dropback_3yr,
+    COALESCE(adv.adv_passing_cpoe_3yr, 0.0) AS adv_passing_cpoe_3yr,
+    COALESCE(adv.adv_ngs_qb_time_to_throw_3yr, 0.0) AS adv_ngs_qb_time_to_throw_3yr,
+    COALESCE(adv.adv_ngs_qb_aggressiveness_3yr, 0.0) AS adv_ngs_qb_aggressiveness_3yr,
+    COALESCE(adv.adv_ngs_qb_cpoe_3yr, 0.0) AS adv_ngs_qb_cpoe_3yr,
+    COALESCE(adv.adv_rushing_yards_3yr, 0.0) AS adv_rushing_yards_3yr,
+    COALESCE(adv.adv_carries_3yr, 0.0) AS adv_carries_3yr,
+    COALESCE(adv.adv_rushing_epa_3yr, 0.0) AS adv_rushing_epa_3yr,
+    COALESCE(adv.adv_qb_rushing_baseline_3yr, 0.0) AS adv_qb_rushing_baseline_3yr,
+    
+    -- Advanced RB features
+    CASE mart.scoring_profile_id
+      WHEN 'standard' THEN COALESCE(adv.adv_weighted_opportunity_standard_3yr, 0.0)
+      WHEN 'half_ppr' THEN COALESCE(adv.adv_weighted_opportunity_half_ppr_3yr, 0.0)
+      WHEN 'ppr' THEN COALESCE(adv.adv_weighted_opportunity_ppr_3yr, 0.0)
+      WHEN 'gng_keeper' THEN COALESCE(adv.adv_weighted_opportunity_gng_keeper_3yr, 0.0)
+      ELSE 0.0
+    END AS adv_weighted_opportunity_profile_3yr,
+    COALESCE(adv.adv_red_zone_opportunities_3yr, 0.0) AS adv_red_zone_opportunities_3yr,
+    COALESCE(adv.adv_goal_line_opportunities_3yr, 0.0) AS adv_goal_line_opportunities_3yr,
+    COALESCE(adv.adv_red_zone_carries_3yr, 0.0) AS adv_red_zone_carries_3yr,
+    COALESCE(adv.adv_goal_line_carries_3yr, 0.0) AS adv_goal_line_carries_3yr,
+    COALESCE(adv.adv_rushing_epa_per_carry_3yr, 0.0) AS adv_rushing_epa_per_carry_3yr,
+    COALESCE(adv.adv_ngs_rushing_efficiency_3yr, 0.0) AS adv_ngs_rushing_efficiency_3yr,
+    COALESCE(adv.adv_ngs_rush_yards_over_expected_3yr, 0.0) AS adv_ngs_rush_yards_over_expected_3yr,
+    COALESCE(adv.adv_ngs_rush_yards_over_expected_per_att_3yr, 0.0) AS adv_ngs_rush_yards_over_expected_per_att_3yr,
+    COALESCE(adv.adv_ngs_box_count_rate_3yr, 0.0) AS adv_ngs_box_count_rate_3yr,
+    
+    -- Advanced WR/TE features
+    COALESCE(adv.adv_targets_3yr, 0.0) AS adv_targets_3yr,
+    COALESCE(adv.adv_receptions_3yr, 0.0) AS adv_receptions_3yr,
+    COALESCE(adv.adv_receiving_yards_3yr, 0.0) AS adv_receiving_yards_3yr,
+    COALESCE(adv.adv_receiving_air_yards_3yr, 0.0) AS adv_receiving_air_yards_3yr,
+    COALESCE(adv.adv_receiving_epa_3yr, 0.0) AS adv_receiving_epa_3yr,
+    COALESCE(adv.adv_receiving_epa_per_target_3yr, 0.0) AS adv_receiving_epa_per_target_3yr,
+    COALESCE(adv.adv_receiving_first_down_rate_3yr, 0.0) AS adv_receiving_first_down_rate_3yr,
+    COALESCE(adv.adv_target_share_3yr, 0.0) AS adv_target_share_3yr,
+    COALESCE(adv.adv_air_yards_share_3yr, 0.0) AS adv_air_yards_share_3yr,
+    COALESCE(adv.adv_wopr_3yr, 0.0) AS adv_wopr_3yr,
+    COALESCE(adv.adv_racr_3yr, 0.0) AS adv_racr_3yr,
+    COALESCE(adv.adv_adot_3yr, 0.0) AS adv_adot_3yr,
+    COALESCE(adv.adv_red_zone_targets_3yr, 0.0) AS adv_red_zone_targets_3yr,
+    COALESCE(adv.adv_goal_line_targets_3yr, 0.0) AS adv_goal_line_targets_3yr,
+    COALESCE(adv.adv_ngs_avg_separation_3yr, 0.0) AS adv_ngs_avg_separation_3yr,
+    COALESCE(adv.adv_ngs_avg_cushion_3yr, 0.0) AS adv_ngs_avg_cushion_3yr,
+    COALESCE(adv.adv_ngs_yac_above_expectation_3yr, 0.0) AS adv_ngs_yac_above_expectation_3yr,
+    
+    -- Common snap/role/injury features
+    COALESCE(adv.adv_offensive_snap_share_3yr, 0.0) AS adv_offensive_snap_share_3yr,
+    COALESCE(adv.adv_snap_role_stability_3yr, 0.0) AS adv_snap_role_stability_3yr,
+    COALESCE(adv.adv_availability_score_3yr_context, 100.0) AS adv_availability_score_3yr_context,
+    
+    -- Target labels
+    mart.target_fantasy_points,
+    mart.value_over_replacement,
+    IF(mart.actual_position_rank <= CASE mart.position WHEN 'QB' THEN 6 WHEN 'RB' THEN 12 WHEN 'WR' THEN 12 WHEN 'TE' THEN 6 END, 1, 0) AS elite_finish_label,
+    IF(mart.actual_position_rank <= CASE mart.position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 36 WHEN 'TE' THEN 12 END, 1, 0) AS starter_finish_label,
+    IF(
+      mart.target_fantasy_points < COALESCE(mart.replacement_points, mart.target_fantasy_points)
+      OR mart.actual_position_rank > CASE mart.position WHEN 'QB' THEN 24 WHEN 'RB' THEN 48 WHEN 'WR' THEN 72 WHEN 'TE' THEN 24 END,
+      1,
+      0
+    ) AS bust_label,
+    mart.predictor_missing_flags_json,
+    mart.outcome_missing_flags_json,
+    mart.source_freshness_json,
+    mart.provenance_json
+  FROM {mart_table} mart
+  LEFT JOIN advanced_rolling adv
+    ON mart.target_season = adv.target_season
+    AND mart.player_id_internal = adv.player_id_internal
+    AND mart.position = adv.position
+  WHERE mart.scoring_profile_id = '{scoring_profile_id}'
+    AND mart.position IN ('QB', 'RB', 'WR', 'TE')
+    AND mart.target_season BETWEEN 2017 AND 2025
+    AND mart.source_window_end_season < mart.target_season
+    AND mart.league_type_id = '{LEAGUE_TYPE_ID}'
+    AND mart.roster_format_id = '{ROSTER_FORMAT_ID}'
+)
+SELECT * FROM final_dataset{order_by}"""
+
+
+def build_advanced_standard_training_dataset_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    include_order_by: bool = True,
+) -> str:
+    return build_advanced_profile_training_dataset_query(
+        project_id,
+        dataset_id,
+        scoring_profile_id=STANDARD_SCORING_PROFILE,
+        include_order_by=include_order_by,
+    )
+
+
+def build_advanced_coverage_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+) -> str:
+    dataset_query = build_advanced_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
+    return f"""WITH advanced_dataset AS (
+{dataset_query}
+)
+SELECT
+  split,
+  position,
+  target_season,
+  COUNT(*) AS record_count,
+  COUNTIF(profile_points_score_3yr IS NOT NULL) AS baseline_feature_count,
+  COUNTIF(adv_targets_3yr > 0 OR adv_carries_3yr > 0 OR adv_weighted_opportunity_profile_3yr > 0) AS opportunity_feature_count,
+  COUNTIF(adv_weighted_opportunity_profile_3yr > 0) AS ideal_xfp_feature_count,
+  COUNTIF(adv_passing_epa_3yr != 0 OR adv_rushing_epa_3yr != 0 OR adv_receiving_epa_3yr != 0) AS pbp_xfp_feature_count,
+  COUNTIF(adv_receiving_first_down_rate_3yr > 0) AS first_down_proxy_feature_count,
+  COUNTIF(adv_ngs_qb_cpoe_3yr != 0 OR adv_ngs_rushing_efficiency_3yr != 0 OR adv_ngs_avg_separation_3yr != 0) AS ngs_feature_count,
+  COUNTIF(adv_snap_role_stability_3yr != 0) AS role_history_feature_count,
+  COUNTIF(target_fantasy_points IS NULL OR value_over_replacement IS NULL) AS missing_label_count
+FROM advanced_dataset
+GROUP BY split, position, target_season
+ORDER BY target_season, split, position"""
+
+
+def build_advanced_integrity_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+) -> str:
+    dataset_query = build_advanced_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
+    return f"""WITH advanced_dataset AS (
+{dataset_query}
+),
+grain AS (
+  SELECT
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    target_season,
+    target_week,
+    player_id_internal,
+    COUNT(*) AS grain_record_count
+  FROM advanced_dataset
+  GROUP BY scoring_profile_id, league_type_id, roster_format_id, position, target_season, target_week, player_id_internal
+)
+SELECT
+  COUNT(*) AS record_count,
+  COUNTIF(source_window_end_season >= target_season) AS leakage_window_count,
+  COUNTIF(player_id_internal IS NULL OR player_id_internal = '') AS missing_player_id_count,
+  COUNTIF(scoring_profile_id IS NULL OR scoring_profile_id = '') AS missing_scoring_profile_count,
+  COUNTIF(target_fantasy_points IS NULL OR value_over_replacement IS NULL) AS missing_target_label_count,
+  (SELECT COUNT(*) FROM grain WHERE grain_record_count > 1) AS duplicate_grain_count
+FROM advanced_dataset"""
+
+
+def build_advanced_sample_query(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    per_position_limit: int = 5,
+) -> str:
+    if per_position_limit < 1 or per_position_limit > 25:
+        raise ValueError("per_position_limit must be between 1 and 25")
+    dataset_query = build_advanced_standard_training_dataset_query(project_id, dataset_id, include_order_by=False)
+    return f"""WITH advanced_dataset AS (
+{dataset_query}
+),
+ranked AS (
+  SELECT
+    split,
+    target_season,
+    target_week,
+    source_window_start_season,
+    source_window_end_season,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    position,
+    player_id_internal,
+    player_name,
+    profile_points_score_3yr,
+    recent_points_avg_3yr,
+    team_environment_score_3yr,
+    adv_weighted_opportunity_profile_3yr,
+    adv_receiving_yards_3yr,
+    adv_rushing_epa_3yr,
+    adv_passing_epa_3yr,
+    target_fantasy_points,
+    value_over_replacement,
+    elite_finish_label,
+    starter_finish_label,
+    bust_label,
+    ROW_NUMBER() OVER (
+      PARTITION BY position
+      ORDER BY target_season DESC, target_week DESC, player_id_internal
+    ) AS position_sample_rank
+  FROM advanced_dataset
+)
+SELECT * EXCEPT(position_sample_rank)
+FROM ranked
+WHERE position_sample_rank <= {per_position_limit}
+ORDER BY position, target_season DESC, target_week DESC, player_id_internal"""
+
+
+def build_advanced_model_sql_templates(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    *,
+    scoring_profile_id: str = STANDARD_SCORING_PROFILE,
+    model_suffix: str = STANDARD_MODEL_SUFFIX,
+) -> dict[str, str]:
+    scoring_profile_id = _validate_scoring_profile(scoring_profile_id)
+    dataset_query = build_advanced_profile_training_dataset_query(
+        project_id,
+        dataset_id,
+        scoring_profile_id=scoring_profile_id,
+        include_order_by=False,
+    )
+    templates: dict[str, str] = {}
+    for position in POSITIONS:
+        predictor_list = ",\n    ".join(advanced_features_for_position(position))
+        position_lower = position.lower()
+        template_prefix = f"adv_{scoring_profile_id}_{position_lower}"
+        model_prefix = f"ranking_bqml_v2_adv_{scoring_profile_id}_{position_lower}"
+        base_select = f"""WITH profile_dataset AS (
+{dataset_query}
+)
+SELECT
+    {predictor_list},
+    {{label_field}}
+FROM profile_dataset
+WHERE split = 'train'
+  AND position = '{position}'"""
+        templates[f"{template_prefix}_linear_points"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_linear_points_{model_suffix}`
+OPTIONS(
+  model_type = 'LINEAR_REG',
+  input_label_cols = ['target_fantasy_points'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='target_fantasy_points')}"""
+        templates[f"{template_prefix}_linear_vor"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_linear_vor_{model_suffix}`
+OPTIONS(
+  model_type = 'LINEAR_REG',
+  input_label_cols = ['value_over_replacement'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='value_over_replacement')}"""
+        templates[f"{template_prefix}_logistic_elite"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_logistic_elite_{model_suffix}`
+OPTIONS(
+  model_type = 'LOGISTIC_REG',
+  input_label_cols = ['elite_finish_label'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='elite_finish_label')}"""
+        templates[f"{template_prefix}_logistic_bust"] = f"""CREATE OR REPLACE MODEL `{project_id}.{dataset_id}.{model_prefix}_logistic_bust_{model_suffix}`
+OPTIONS(
+  model_type = 'LOGISTIC_REG',
+  input_label_cols = ['bust_label'],
+  data_split_method = 'NO_SPLIT'
+) AS
+{base_select.format(label_field='bust_label')}"""
+    return templates
+
+
+def assert_advanced_query_leakage_safe(sql: str) -> None:
+    lowered = sql.lower()
+    for blocked_feature in BLOCKED_FEATURES:
+        if blocked_feature in lowered:
+            if blocked_feature in ("yprr", "tprr", "route_share", "first_read_share", "pressure_epa", "covered_receiver_epa", "pigskin_context_score"):
+                raise ValueError(f"Blocked field appears in Advanced BQML v2 query: {blocked_feature}")
+    if "2026" in lowered:
+        raise ValueError("Advanced BQML v2 query must not use 2026 outcomes")
+    if "hist.season between t.target_season - 3 and t.target_season - 1" not in lowered:
+        raise ValueError("Advanced BQML v2 query must enforce leakage-safe historical window")
+

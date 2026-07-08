@@ -244,6 +244,45 @@ class BqmlV2FeatureContractTests(unittest.TestCase):
         self.assertNotIn("injury_availability", contract.STANDARD_READINESS_THRESHOLDS)
         self.assertNotIn("historical_depth", contract.STANDARD_READINESS_THRESHOLDS)
 
+    def test_advanced_metrics_version_and_allowlists(self):
+        self.assertEqual(contract.ADVANCED_METRICS_VERSION, "advanced_player_metrics_v1")
+        self.assertEqual(contract.ADVANCED_DATASET_VERSION_PREFIX, "bqml_v2_advanced_training_dataset_v0")
+        
+        qb_features = contract.advanced_features_for_position("QB")
+        rb_features = contract.advanced_features_for_position("RB")
+        wr_features = contract.advanced_features_for_position("WR")
+        te_features = contract.advanced_features_for_position("TE")
+        
+        self.assertIn("adv_passing_epa_3yr", qb_features)
+        self.assertNotIn("adv_passing_epa_3yr", rb_features)
+        self.assertIn("adv_weighted_opportunity_profile_3yr", rb_features)
+        self.assertIn("adv_wopr_3yr", wr_features)
+        self.assertIn("adv_availability_score_3yr_context", te_features)
+
+    def test_advanced_query_is_leakage_safe(self):
+        sql = contract.build_advanced_profile_training_dataset_query("project", "dataset", scoring_profile_id="ppr")
+        
+        self.assertIn("scoring_profile_id = 'ppr'", sql)
+        self.assertIn("bqml_v2_advanced_training_dataset_v0", sql)
+        self.assertIn("hist.season between t.target_season - 3 and t.target_season - 1", sql.lower())
+        self.assertNotIn("2026", sql)
+        contract.assert_advanced_query_leakage_safe(sql)
+
+    def test_advanced_integrity_query(self):
+        sql = contract.build_advanced_integrity_query("project", "dataset")
+        
+        self.assertIn("leakage_window_count", sql)
+        self.assertIn("duplicate_grain_count", sql)
+        self.assertIn("missing_player_id_count", sql)
+
+    def test_advanced_templates_are_prepared(self):
+        templates = contract.build_advanced_model_sql_templates("project", "dataset", scoring_profile_id="half_ppr")
+        
+        self.assertEqual(len(templates), 16)
+        self.assertIn("adv_half_ppr_qb_linear_points", templates)
+        self.assertIn("ranking_bqml_v2_adv_half_ppr_qb_linear_points_v0", templates["adv_half_ppr_qb_linear_points"])
+        self.assertIn("adv_passing_epa_3yr", templates["adv_half_ppr_qb_linear_points"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -506,12 +506,11 @@ Write targets:
 - `ranking_formula_champions`: 0 rows.
 - `analytics_pigskin_rankings`: 0 rows.
 
-First-pass profile-specific finalists:
+## Advanced Metrics v1 Integration (Phase 33.17)
 
-| Profile | QB | RB | WR | TE |
-|---|---|---|---|---|
-| half_ppr | `bqml_v2_half_ppr_qb_linear_points_v0` | `bqml_v2_half_ppr_rb_linear_points_v0` | `bqml_v2_half_ppr_wr_logistic_bust_inverse_v0` | `bqml_v2_half_ppr_te_linear_vor_v0` |
-| ppr | `bqml_v2_ppr_qb_linear_points_v0` | `bqml_v2_ppr_rb_linear_points_v0` | `bqml_v2_ppr_wr_logistic_elite_v0` | `bqml_v2_ppr_te_linear_points_v0` |
-| gng_keeper | `bqml_v2_gng_keeper_qb_linear_points_v0` | `bqml_v2_gng_keeper_rb_logistic_elite_v0` | `bqml_v2_gng_keeper_wr_linear_points_v0` | `bqml_v2_gng_keeper_te_linear_points_v0` |
+The feature contract is updated to support training BQML v2 models directly from the `advanced_player_metrics_v1` warehouse, replacing scattered/ad hoc feature-mart fields with audited rolling 3-year averages.
+* **Standard-First**: Standard scoring remains the baseline split for training.
+* **Route Metrics**: Route-dependent metrics (`routes_run`, `yprr`, `tprr`, `receiving_first_downs_per_route`, `route_participation_rate`) remain strictly **BLOCKED** and mapped to `NULL`.
+* **Top-100**: Top-100 interleaving is deferred.
 
 Architecture decision: BQML v2 positional formulas are ready for owner-review boards with warnings. Top-100 work is deferred. The future top-100 builder must use position-locked queues and must not reorder players inside a position.

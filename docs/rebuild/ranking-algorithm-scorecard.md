@@ -1713,3 +1713,12 @@ Owner-review finalists:
 | gng_keeper | `bqml_v2_gng_keeper_qb_linear_points_v0` | `bqml_v2_gng_keeper_rb_logistic_elite_v0` | `bqml_v2_gng_keeper_wr_linear_points_v0` | `bqml_v2_gng_keeper_te_linear_points_v0` |
 
 Scorecard decision: profile-specific BQML v2 positional formulas are ready for owner-review boards with warnings. Do not resume top-100 interleaver work until the owner accepts positional boards by profile.
+
+## Phase 33.17 BQML v2 Advanced Feature Contract
+
+Live status: Current Pigskin remains live. No champion is active. No live ranking row changed. No models were trained during this phase.
+
+Summary:
+The BQML v2 feature contract has been rebuilt to map positional predictors directly to the audited `advanced_player_metrics_v1` warehouse table using rolling 3-year historical averages. Dry-run query check successfully passed on BigQuery with 100% features/labels coverage, zero duplicate grain, and zero future data leakage.
+
+Scorecard decision: The advanced feature contract `bqml_v2_advanced_training_dataset_v0` is verified and ready to power future BQML v2 training iterations.

@@ -178,3 +178,22 @@ WHERE season = 2024
 ORDER BY weighted_opportunity_ppr DESC
 LIMIT 10;
 ```
+
+---
+
+## BQML v2 Integration
+
+The advanced player metrics warehouse serves as the canonical data source for BQML v2 positional ranking models. 
+
+### 1. Feature Allowlists & Mapping
+All positional predictors are mapped to rolling 3-year averages computed from the `advanced_player_metrics_v1` seasonal table. For example:
+* **QB**: Passing EPA is mapped via `adv_passing_epa_3yr`.
+* **RB**: Opportunity is mapped via `adv_weighted_opportunity_profile_3yr` (profile-specific resolution).
+* **WR/TE**: Receiving volume is mapped via `adv_wopr_3yr` and `adv_targets_3yr`.
+
+### 2. Leakage Safeguard Policy
+To prevent future leakage, training datasets must aggregate historical data using a strictly bounded window where the historical season is strictly less than the target season:
+```sql
+hist.season BETWEEN target_season - 3 AND target_season - 1
+```
+No target-season data from `player_season_advanced_metrics` may be used as a predictor.

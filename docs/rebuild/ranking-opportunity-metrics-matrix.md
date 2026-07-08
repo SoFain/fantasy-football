@@ -934,3 +934,11 @@ Profile-specific positional formula status:
 | `gng_keeper` | linear points | logistic elite | linear points | linear points |
 
 These are owner-review positional finalists, not live formulas.
+
+## Phase 33.17 BQML Feature Integration Status
+
+Under Phase 33.17, the BQML v2 feature contract is rebuilt to source rolling 3-year historical predictors directly from the audited `advanced_player_metrics_v1` seasonal warehouse table.
+* **Predictor source**: `player_season_advanced_metrics` where `metric_version = 'advanced_player_metrics_v1'`.
+* **Standard-First**: Enforced.
+* **Safeguards**: Evaluates `hist.season BETWEEN target_season - 3 AND target_season - 1` to strictly prevent future target-season data leakage.
+* **Blocked features**: Route metrics, end zone targets, dakota, pressure, covered EPA, and pigskin context score remain blocked (NULL).
