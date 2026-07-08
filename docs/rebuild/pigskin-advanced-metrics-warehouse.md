@@ -1,6 +1,6 @@
 # Pigskin Advanced Metrics Warehouse
 
-Status: Completed under Phase 33.15. Data is fully populated and validated for seasons 2014-2025 under metric_version 'advanced_player_metrics_v0'.
+Status: Completed under Phase 33.15, audited and corrected under Phase 33.16. Data is fully populated and validated for seasons 2014-2025 under metric_version 'advanced_player_metrics_v1'.
 
 ## Purpose
 

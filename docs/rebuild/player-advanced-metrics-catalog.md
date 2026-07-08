@@ -7,7 +7,7 @@ Seasonal aggregates of player volume, opportunity, and efficiency metrics. Group
 
 | Column | Type | Description |
 |---|---|---|
-| `metric_version` | STRING | ID of the calculations build (e.g., `advanced_player_metrics_v0`). |
+| `metric_version` | STRING | ID of the calculations build (e.g., `advanced_player_metrics_v1`). |
 | `generated_at` | TIMESTAMP | Timestamp when the row was written. |
 | `season` | INT64 | The NFL season (e.g., `2024`). |
 | `season_type` | STRING | `REG` for regular season, `POST` for postseason. |
@@ -78,8 +78,8 @@ Seasonal aggregates of player volume, opportunity, and efficiency metrics. Group
 | `ngs_qb_aggressiveness` | FLOAT64 | Average QB aggressiveness percentage. |
 | `ngs_qb_cpoe` | FLOAT64 | NGS calculated CPOE (QB). |
 | `offensive_snap_share` | FLOAT64 | Average offensive snap share. |
-| `snap_role_stability` | FLOAT64 | Stability index of depth chart role. |
-| `availability_score` | FLOAT64 | Average availability metric. |
+| `snap_role_stability` | FLOAT64 | Rolling weekly participation stability index derived from offensive snap share. |
+| `availability_score` | FLOAT64 | Average availability metric (100.0 is fully healthy/available, 0.0 is injured/out). |
 | `injury_status_score` | FLOAT64 | Total weeks appearing on the injury report. |
 | `injury_burden_score` | FLOAT64 | Average injury burden rating. |
 | `missed_time_risk_score` | FLOAT64 | Total weeks designated as OUT or missed. |
@@ -98,7 +98,7 @@ Audit table containing the source coverage stats per metric and season.
 
 | Column | Type | Description |
 |---|---|---|
-| `metric_version` | STRING | calculations build version (e.g. `advanced_player_metrics_v0`). |
+| `metric_version` | STRING | calculations build version (e.g. `advanced_player_metrics_v1`). |
 | `season` | INT64 | Season year (2014-2025). |
 | `metric_name` | STRING | Name of the checked metric (e.g. `WOPR`, `YPRR`, `NGS Cushion`). |
 | `source_status` | STRING | `AVAILABLE`, `UNAVAILABLE`, or `BLOCKED`. |
@@ -132,7 +132,7 @@ Calculated using the following coefficients based on the targets/carries red zon
 * **PPR**: `(red_zone_targets * 2.39) + (outside_red_zone_targets * 1.54) + (red_zone_carries * 1.28) + (outside_red_zone_carries * 0.47)`
 * **GNG Keeper (0.1 PPR)**: `(red_zone_targets * 1.56) + (outside_red_zone_targets * 0.74) + (red_zone_carries * 1.28) + (outside_red_zone_carries * 0.47)`
 
-*Note: `outside_red_zone_targets = targets - red_zone_targets` and `outside_red_zone_carries = carries - red_zone_carries`.*
+*Note: `outside_red_zone_targets = GREATEST(0.0, targets - red_zone_targets)` and `outside_red_zone_carries = GREATEST(0.0, carries - red_zone_carries)` to guard against negative outside counts.*
 
 ---
 
@@ -154,7 +154,7 @@ FROM `fantasy-football-498121.fantasy_football_brain.player_season_advanced_metr
 WHERE season = 2024
   AND season_type = 'REG'
   AND position = 'WR'
-  AND metric_version = 'advanced_player_metrics_v0'
+  AND metric_version = 'advanced_player_metrics_v1'
 ORDER BY wopr DESC
 LIMIT 10;
 ```
@@ -174,7 +174,7 @@ FROM `fantasy-football-498121.fantasy_football_brain.player_season_advanced_metr
 WHERE season = 2024
   AND season_type = 'REG'
   AND position = 'RB'
-  AND metric_version = 'advanced_player_metrics_v0'
+  AND metric_version = 'advanced_player_metrics_v1'
 ORDER BY weighted_opportunity_ppr DESC
 LIMIT 10;
 ```

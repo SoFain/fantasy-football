@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 DEFAULT_PROJECT = "fantasy-football-498121"
 DEFAULT_DATASET = "fantasy_football_brain"
-DEFAULT_METRIC_VERSION = "advanced_player_metrics_v0"
+DEFAULT_METRIC_VERSION = "advanced_player_metrics_v1"
 
 
 def _table(project: str, dataset: str, table_name: str) -> str:
@@ -55,7 +55,12 @@ weekly_source AS (
     pws.position,
     JSON_VALUE(raw.raw_payload_json, '$.position_group') AS position_group,
     pws.team,
-    1 AS games,
+    IF(
+      COALESCE(part.offense_snaps, 0) > 0 OR
+      (COALESCE(pws.targets, 0) + COALESCE(pws.carries, 0) + COALESCE(pws.receptions, 0) + COALESCE(CAST(JSON_VALUE(raw.raw_payload_json, '$.attempts') AS FLOAT64), 0.0) + ABS(COALESCE(pws.passing_yards, 0.0))) > 0,
+      1,
+      0
+    ) AS games,
     pws.targets,
     pws.receptions,
     pws.carries,
@@ -65,17 +70,17 @@ weekly_source AS (
     CAST(NULL AS FLOAT64) AS pass_play_snaps,
     part.offense_snaps AS offensive_snaps,
     GREATEST(0.0, pws.receiving_yards) AS receiving_yards,
-    COALESCE(pws.air_yards, opp.air_yards) AS receiving_air_yards,
+    CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_air_yards') AS FLOAT64) AS receiving_air_yards,
     CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_yards_after_catch') AS FLOAT64) AS receiving_yards_after_catch,
     CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_epa') AS FLOAT64) AS receiving_epa,
     SAFE_DIVIDE(CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_epa') AS FLOAT64), NULLIF(pws.targets, 0)) AS receiving_epa_per_target,
     CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_first_downs') AS FLOAT64) AS receiving_first_downs,
     SAFE_DIVIDE(CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_first_downs') AS FLOAT64), NULLIF(pws.targets, 0)) AS receiving_first_down_rate,
     COALESCE(opp.target_share, SAFE_DIVIDE(pws.targets, NULLIF(opp.team_targets, 0))) AS target_share,
-    COALESCE(opp.air_yards_share, SAFE_DIVIDE(pws.air_yards, NULLIF(opp.team_air_yards, 0))) AS air_yards_share,
-    1.5 * COALESCE(opp.target_share, SAFE_DIVIDE(pws.targets, NULLIF(opp.team_targets, 0))) + 0.7 * COALESCE(opp.air_yards_share, SAFE_DIVIDE(pws.air_yards, NULLIF(opp.team_air_yards, 0))) AS wopr,
-    SAFE_DIVIDE(pws.receiving_yards, NULLIF(COALESCE(pws.air_yards, opp.air_yards), 0)) AS racr,
-    SAFE_DIVIDE(COALESCE(pws.air_yards, opp.air_yards), NULLIF(pws.targets, 0)) AS adot,
+    COALESCE(opp.air_yards_share, SAFE_DIVIDE(CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_air_yards') AS FLOAT64), NULLIF(opp.team_air_yards, 0))) AS air_yards_share,
+    1.5 * COALESCE(opp.target_share, SAFE_DIVIDE(pws.targets, NULLIF(opp.team_targets, 0))) + 0.7 * COALESCE(opp.air_yards_share, SAFE_DIVIDE(CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_air_yards') AS FLOAT64), NULLIF(opp.team_air_yards, 0))) AS wopr,
+    SAFE_DIVIDE(pws.receiving_yards, NULLIF(CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_air_yards') AS FLOAT64), 0)) AS racr,
+    SAFE_DIVIDE(CAST(JSON_VALUE(raw.raw_payload_json, '$.receiving_air_yards') AS FLOAT64), NULLIF(pws.targets, 0)) AS adot,
     opp.red_zone_targets,
     CAST(glt.goal_line_targets AS FLOAT64) AS goal_line_targets,
     CAST(NULL AS FLOAT64) AS end_zone_targets,
@@ -93,10 +98,10 @@ weekly_source AS (
     COALESCE(opp.red_zone_targets, 0) + COALESCE(opp.red_zone_carries, 0) AS red_zone_opportunities,
     COALESCE(glt.goal_line_targets, 0) + COALESCE(opp.inside_5_carries, 0) AS goal_line_opportunities,
     -- Weighted Opportunity calculations
-    (COALESCE(opp.red_zone_targets, 0) * 1.47) + ((COALESCE(pws.targets, 0) - COALESCE(opp.red_zone_targets, 0)) * 0.67) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + ((COALESCE(pws.carries, 0) - COALESCE(opp.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_standard,
-    (COALESCE(opp.red_zone_targets, 0) * 1.93) + ((COALESCE(pws.targets, 0) - COALESCE(opp.red_zone_targets, 0)) * 1.00) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + ((COALESCE(pws.carries, 0) - COALESCE(opp.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_half_ppr,
-    (COALESCE(opp.red_zone_targets, 0) * 2.39) + ((COALESCE(pws.targets, 0) - COALESCE(opp.red_zone_targets, 0)) * 1.54) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + ((COALESCE(pws.carries, 0) - COALESCE(opp.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_ppr,
-    (COALESCE(opp.red_zone_targets, 0) * 1.56) + ((COALESCE(pws.targets, 0) - COALESCE(opp.red_zone_targets, 0)) * 0.74) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + ((COALESCE(pws.carries, 0) - COALESCE(opp.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_gng_keeper,
+    (COALESCE(opp.red_zone_targets, 0) * 1.47) + (GREATEST(0.0, COALESCE(pws.targets, 0.0) - COALESCE(opp.red_zone_targets, 0.0)) * 0.67) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(pws.carries, 0.0) - COALESCE(opp.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_standard,
+    (COALESCE(opp.red_zone_targets, 0) * 1.93) + (GREATEST(0.0, COALESCE(pws.targets, 0.0) - COALESCE(opp.red_zone_targets, 0.0)) * 1.00) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(pws.carries, 0.0) - COALESCE(opp.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_half_ppr,
+    (COALESCE(opp.red_zone_targets, 0) * 2.39) + (GREATEST(0.0, COALESCE(pws.targets, 0.0) - COALESCE(opp.red_zone_targets, 0.0)) * 1.54) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(pws.carries, 0.0) - COALESCE(opp.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_ppr,
+    (COALESCE(opp.red_zone_targets, 0) * 1.56) + (GREATEST(0.0, COALESCE(pws.targets, 0.0) - COALESCE(opp.red_zone_targets, 0.0)) * 0.74) + (COALESCE(opp.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(pws.carries, 0.0) - COALESCE(opp.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_gng_keeper,
     pws.passing_yards,
     CAST(JSON_VALUE(raw.raw_payload_json, '$.passing_epa') AS FLOAT64) AS passing_epa,
     SAFE_DIVIDE(CAST(JSON_VALUE(raw.raw_payload_json, '$.passing_epa') AS FLOAT64), NULLIF(CAST(JSON_VALUE(raw.raw_payload_json, '$.attempts') AS FLOAT64), 0)) AS passing_epa_per_attempt,
@@ -117,11 +122,16 @@ weekly_source AS (
     ngs.ngs_aggressiveness AS ngs_qb_aggressiveness,
     ngs.ngs_cpoe AS ngs_qb_cpoe,
     part.offense_pct AS offensive_snap_share,
-    role.depth_chart_role_score AS snap_role_stability,
-    role.injury_risk_score AS availability_score,
-    CAST(role.injury_report_count AS FLOAT64) AS injury_status_score,
-    role.injury_risk_score AS injury_burden_score,
-    CAST(role.out_status_count AS FLOAT64) AS missed_time_risk_score,
+    LEAST(100.0, GREATEST(0.0, COALESCE(part.offense_pct, 0.0) * 100.0 - COALESCE(
+      STDDEV(part.offense_pct) OVER (
+        PARTITION BY pws.player_id_internal
+        ORDER BY pws.season, pws.week
+        ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
+      ), 0.0) * 100.0)) AS snap_role_stability,
+    COALESCE(role.availability_score, 100.0) AS availability_score,
+    COALESCE(CAST(role.injury_report_count AS FLOAT64), 0.0) AS injury_status_score,
+    COALESCE(role.injury_burden_score, 0.0) AS injury_burden_score,
+    COALESCE(role.missed_time_risk_score, 0.0) AS missed_time_risk_score,
     'BLOCKED' AS route_metrics_source_status,
     IF(pws.season >= 2016, 'AVAILABLE', 'UNAVAILABLE') AS ngs_source_status,
     'AVAILABLE' AS participation_source_status,
@@ -208,7 +218,7 @@ weekly_source AS (
   LEFT JOIN {_table(project, dataset, "player_week_role_context_metrics")} role
     ON pws.season = role.season
     AND pws.week = role.week
-    AND pws.player_id_internal = role.player_id_internal
+    AND pws.player_id_internal = REGEXP_REPLACE(role.player_id_internal, r'^gsis:', '')
   LEFT JOIN goal_line_targets_cte glt
     ON pws.season = glt.season
     AND pws.week = glt.week
@@ -358,10 +368,10 @@ season_calculated AS (
     SAFE_DIVIDE(sb.passing_epa, NULLIF(sb.dropbacks, 0)) AS passing_epa_per_dropback,
     SAFE_DIVIDE(sb.passing_first_downs, NULLIF(sb.attempts, 0)) AS passing_first_down_rate,
     -- Weighted Opportunity calculations
-    (COALESCE(sb.red_zone_targets, 0) * 1.47) + ((COALESCE(sb.targets, 0) - COALESCE(sb.red_zone_targets, 0)) * 0.67) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + ((COALESCE(sb.carries, 0) - COALESCE(sb.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_standard,
-    (COALESCE(sb.red_zone_targets, 0) * 1.93) + ((COALESCE(sb.targets, 0) - COALESCE(sb.red_zone_targets, 0)) * 1.00) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + ((COALESCE(sb.carries, 0) - COALESCE(sb.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_half_ppr,
-    (COALESCE(sb.red_zone_targets, 0) * 2.39) + ((COALESCE(sb.targets, 0) - COALESCE(sb.red_zone_targets, 0)) * 1.54) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + ((COALESCE(sb.carries, 0) - COALESCE(sb.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_ppr,
-    (COALESCE(sb.red_zone_targets, 0) * 1.56) + ((COALESCE(sb.targets, 0) - COALESCE(sb.red_zone_targets, 0)) * 0.74) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + ((COALESCE(sb.carries, 0) - COALESCE(sb.red_zone_carries, 0)) * 0.47) AS weighted_opportunity_gng_keeper
+    (COALESCE(sb.red_zone_targets, 0) * 1.47) + (GREATEST(0.0, COALESCE(sb.targets, 0.0) - COALESCE(sb.red_zone_targets, 0.0)) * 0.67) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(sb.carries, 0.0) - COALESCE(sb.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_standard,
+    (COALESCE(sb.red_zone_targets, 0) * 1.93) + (GREATEST(0.0, COALESCE(sb.targets, 0.0) - COALESCE(sb.red_zone_targets, 0.0)) * 1.00) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(sb.carries, 0.0) - COALESCE(sb.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_half_ppr,
+    (COALESCE(sb.red_zone_targets, 0) * 2.39) + (GREATEST(0.0, COALESCE(sb.targets, 0.0) - COALESCE(sb.red_zone_targets, 0.0)) * 1.54) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(sb.carries, 0.0) - COALESCE(sb.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_ppr,
+    (COALESCE(sb.red_zone_targets, 0) * 1.56) + (GREATEST(0.0, COALESCE(sb.targets, 0.0) - COALESCE(sb.red_zone_targets, 0.0)) * 0.74) + (COALESCE(sb.red_zone_carries, 0) * 1.28) + (GREATEST(0.0, COALESCE(sb.carries, 0.0) - COALESCE(sb.red_zone_carries, 0.0)) * 0.47) AS weighted_opportunity_gng_keeper
   FROM season_base sb
   LEFT JOIN season_team_totals stt
     ON sb.season = stt.season
