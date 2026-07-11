@@ -104,7 +104,8 @@ UPDATE {live} SET is_active=FALSE WHERE is_active AND {scope}
 INSERT INTO {live}
   (ranking_version, generated_at, adjudicated_at, season, ranking_phase, format, position, rank, tier,
    player_id, player_name, current_team, stat_season, ranking_score, raw_ranking_score,
-   candidate_rank, candidate_ranking_score, rank_rationale, risk_flags, model_name, prompt_version,
+   candidate_rank, candidate_ranking_score, rank_rationale, pigskin_verdict, what_would_change_mind,
+   risk_flags, model_name, prompt_version,
    data_snapshot_label, is_active, sleeper_player_id, sleeper_team, sleeper_active, sleeper_status,
    sleeper_injury_status, sleeper_depth_chart_position, sleeper_depth_chart_order,
    ranking_eligibility, rank_source, model_run_id, scoring_profile_id, league_type_id, roster_format_id,
@@ -130,6 +131,8 @@ SELECT
   ROUND(50 + 49*SAFE_DIVIDE(te_fable_v1a_no_man_score-min_score,max_score-min_score),1),
   FORMAT('TE Fable v1.0a no-man: opportunity %+.3f, efficiency %+.3f, TD %+.3f, age/availability %+.3f',
     opportunity_component, no_man_efficiency_component, scoring_component, age_availability_component),
+  FORMAT('TE Fable v1.0a no-man ranks %s at TE%d from the deterministic 2025 input formula.', ranked.player_name, board_rank),
+  'A source-backed current-role change, verified rookie evidence, or an estimated regular-season games-missed range.',
   ARRAY_TO_STRING(ARRAY(SELECT flag FROM UNNEST([
     IF(context.team IS NULL, 'CURRENT_TEAM_UNKNOWN', NULL),
     IF(context.injury_status IS NOT NULL, 'SLEEPER_INJURY_' || UPPER(context.injury_status), NULL),

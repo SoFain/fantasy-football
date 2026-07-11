@@ -213,12 +213,6 @@ def build_evidence_lines(df):
 
 def build_prompt(position, df, ranking_version, scoring_profile_id=DEFAULT_SCORING_PROFILE_ID):
     profile_label = scoring_profile_label(scoring_profile_id)
-    tier_contract = {
-        "QB": "elite QB1, QB1, QB2 or streamer, backup or handcuff, bench or watchlist",
-        "RB": "elite, front-line starter, starter, flex or matchup, deep or watchlist",
-        "WR": "elite, front-line starter, starter, flex or matchup, deep or watchlist",
-        "TE": "elite, front-line starter, starter, flex or matchup, deep or watchlist",
-    }[position]
     evidence = build_evidence_lines(df)
     player_count = len(df)
     return f"""
@@ -243,8 +237,6 @@ Hard rules:
 12. Preseason Questionable status alone has zero rank effect. Use INJURY_UNCERTAIN with requested_rank_delta 0 if it deserves a visible warning.
 13. NO_ADJUSTMENT and INJURY_UNCERTAIN require requested_rank_delta 0. Every other request must have non-empty adjustment detail and evidence copied from supplied fields.
 
-Allowed tiers for {position}: {tier_contract}.
-
 Return strict JSON only. Do not include markdown. The JSON shape must be:
 {{
   "ranking_version": "{ranking_version}",
@@ -253,15 +245,10 @@ Return strict JSON only. Do not include markdown. The JSON shape must be:
     {{
       "player_id": "exact id from evidence",
       "requested_rank_delta": 0,
-      "tier": "one allowed tier",
       "adjustment_code": "one approved code",
       "adjustment_detail": "brief source-backed explanation of the movement, or no adjustment",
       "adjustment_evidence": "specific supplied metrics or current-role fields used",
-      "estimated_regular_season_games_missed": null,
-      "pigskin_verdict": "one sharp sentence",
-      "rank_rationale": "one or two evidence-heavy sentences citing the strongest metrics",
-      "risk_flags": "semicolon-separated analytical risks, or no major Pigskin ranking flag",
-      "what_would_change_mind": "specific evidence that would move the rank"
+      "estimated_regular_season_games_missed": null
     }}
   ]
 }}
@@ -409,13 +396,11 @@ def build_final_row(candidate, model_item, ranking_version, model_name, run_meta
     row["ranking_version"] = ranking_version
     row["generated_at"] = adjudicated_at
     row["ranking_score"] = safe_float(candidate.get("ranking_score"))
-    row["tier"] = str(model_item.get("tier") or candidate.get("tier") or "watchlist")
-    row["pigskin_verdict"] = str(model_item.get("pigskin_verdict") or candidate.get("pigskin_verdict") or "")
-    row["rank_rationale"] = str(model_item.get("rank_rationale") or candidate.get("rank_rationale") or "")
-    row["risk_flags"] = str(model_item.get("risk_flags") or candidate.get("risk_flags") or "")
-    row["what_would_change_mind"] = str(
-        model_item.get("what_would_change_mind") or candidate.get("what_would_change_mind") or ""
-    )
+    row["tier"] = str(candidate.get("tier") or "watchlist")
+    row["pigskin_verdict"] = str(candidate.get("pigskin_verdict") or "")
+    row["rank_rationale"] = str(candidate.get("rank_rationale") or "")
+    row["risk_flags"] = str(candidate.get("risk_flags") or "")
+    row["what_would_change_mind"] = str(candidate.get("what_would_change_mind") or "")
     row["model_name"] = model_name
     row["prompt_version"] = run_metadata["prompt_version"]
     row["rank_source"] = "llm_pigskin_adjudicated"

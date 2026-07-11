@@ -214,6 +214,45 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         self.assertEqual(row["prompt_version"], "prompt-test")
         self.assertEqual(row["candidate_rank"], 12)
 
+    def test_model_cannot_overwrite_deterministic_presentation_fields(self):
+        row = rankings.build_final_row(
+            {
+                "rank": 2,
+                "ranking_score": 95,
+                "tier": "elite",
+                "pigskin_verdict": "Deterministic verdict.",
+                "rank_rationale": "Formula components.",
+                "risk_flags": "SOURCE_FLAG",
+                "what_would_change_mind": "Verified role change.",
+                "data_snapshot_label": "snapshot",
+            },
+            {
+                "tier": "deep or watchlist",
+                "pigskin_verdict": "Model rewrite.",
+                "rank_rationale": "Model rewrite.",
+                "risk_flags": "MODEL_FLAG",
+                "what_would_change_mind": "Anything.",
+                "adjustment_code": "NO_ADJUSTMENT",
+                "requested_rank_delta": 0,
+            },
+            "version",
+            "model",
+            {
+                "model_run_id": "run",
+                "scoring_profile_id": "standard",
+                "league_type_id": "redraft",
+                "roster_format_id": "one_qb",
+                "feature_config_version_id": None,
+                "source_freshness_snapshot_id": "fresh",
+                "prompt_version": "guarded",
+            },
+        )
+        self.assertEqual(row["tier"], "elite")
+        self.assertEqual(row["pigskin_verdict"], "Deterministic verdict.")
+        self.assertEqual(row["rank_rationale"], "Formula components.")
+        self.assertEqual(row["risk_flags"], "SOURCE_FLAG")
+        self.assertEqual(row["what_would_change_mind"], "Verified role change.")
+
     def test_injury_adjustment_requires_a_matching_games_missed_range(self):
         row = rankings.build_final_row(
             {"rank": 8, "ranking_score": 72, "data_snapshot_label": "snapshot"},
