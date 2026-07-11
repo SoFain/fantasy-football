@@ -1401,8 +1401,8 @@ def render_formula_comparison_dashboard():
         """
         - Does not write `analytics_pigskin_rankings`.
         - Does not overwrite `analytics_pigskin_rankings_candidates`.
-        - Does not write `ranking_formula_champions`.
-        - Does not write `ranking_backtest_results`.
+        - Does not select or activate formula champions.
+        - Does not write formula backtest data.
         - Does not call Gemini, Pigskin chat, Sleeper API, or `src.generate_pigskin_rankings`.
         - Does not require or fabricate `pigskin_context_score`.
         - Does not silently fall back to PPR when reviewing Standard, Half PPR, or GNG Keeper.
@@ -3113,6 +3113,7 @@ def render_player_profiles_tab():
         "ranking_data_snapshot": pd.NA,
         "sleeper_team": pd.NA,
         "sleeper_status": pd.NA,
+        "sleeper_injury_status": pd.NA,
         "sleeper_depth_chart_position": pd.NA,
         "sleeper_depth_chart_order": pd.NA,
         "raw_ranking_score": pd.NA,
@@ -3133,6 +3134,11 @@ def render_player_profiles_tab():
         "candidate_rank": pd.NA,
         "candidate_ranking_score": pd.NA,
         "rank_source": pd.NA,
+        "llm_adjustment_code": pd.NA,
+        "llm_adjustment_detail": pd.NA,
+        "llm_adjustment_evidence": pd.NA,
+        "llm_estimated_games_missed": pd.NA,
+        "llm_rank_delta": pd.NA,
         "adjudicated_at": pd.NA,
         "ranking_eligibility": pd.NA,
     }
@@ -3386,6 +3392,7 @@ def render_player_profiles_tab():
             depth_display = f"#{int(float(depth_order))}" if not pd.isna(depth_order) else "unknown"
             sleeper_team = player_row.get("sleeper_team") if not pd.isna(player_row.get("sleeper_team")) else "unknown"
             sleeper_status = player_row.get("sleeper_status") if not pd.isna(player_row.get("sleeper_status")) else "unknown"
+            sleeper_injury_status = player_row.get("sleeper_injury_status")
             penalty_val = player_row.get("depth_chart_penalty")
             penalty_display = float(penalty_val) if not pd.isna(penalty_val) else 0.0
             rank_source = player_row.get("rank_source") if not pd.isna(player_row.get("rank_source")) else "candidate fallback"
@@ -3397,14 +3404,42 @@ def render_player_profiles_tab():
                 f"Sleeper eligibility: {sleeper_team}, {sleeper_status}, "
                 f"depth {depth_display}, penalty {penalty_display:.1f}, source {rank_source}"
             )
+            if not pd.isna(sleeper_injury_status):
+                st.caption(f"Sleeper injury status: {str(sleeper_injury_status).title()}")
             if not pd.isna(player_row.get("pigskin_verdict")):
                 st.info(str(player_row["pigskin_verdict"]))
             if not pd.isna(player_row.get("rank_rationale")):
                 st.markdown(f"**Why Pigskin owns the rank:** {player_row['rank_rationale']}")
+            adjustment_code = player_row.get("llm_adjustment_code")
+            if not pd.isna(adjustment_code) and str(adjustment_code) != "NO_ADJUSTMENT":
+                adjustment_delta = player_row.get("llm_rank_delta")
+                movement_text = ""
+                if not pd.isna(adjustment_delta):
+                    movement = int(adjustment_delta)
+                    if movement > 0:
+                        movement_text = f" (moved up {movement} spots)"
+                    elif movement < 0:
+                        movement_text = f" (moved down {abs(movement)} spots)"
+                st.markdown(f"**Pigskin adjustment:** `{adjustment_code}`{movement_text}")
+                if not pd.isna(player_row.get("llm_adjustment_detail")):
+                    st.write(str(player_row["llm_adjustment_detail"]))
+                if not pd.isna(player_row.get("llm_adjustment_evidence")):
+                    st.caption(f"Evidence: {player_row['llm_adjustment_evidence']}")
+                games_missed = player_row.get("llm_estimated_games_missed")
+                if not pd.isna(games_missed):
+                    st.caption(f"Estimated regular-season games missed: {int(games_missed)}")
             if not pd.isna(player_row.get("risk_flags")):
                 st.markdown(f"**Risk flags:** {player_row['risk_flags']}")
             if not pd.isna(player_row.get("what_would_change_mind")):
                 st.markdown(f"**What would change the rank:** {player_row['what_would_change_mind']}")
+            with st.expander("Pigskin adjustment key"):
+                st.markdown(
+                    "`CURRENT_ROLE_UPGRADE` / `CURRENT_ROLE_DOWNGRADE`: bounded repair for verified current-role evidence.  "
+                    "`ROOKIE_CONTEXT`: bounded repair for information unavailable to the historical formula.  "
+                    "`INJURY_1_2`, `INJURY_3_5`, `INJURY_6_8`, `INJURY_9_PLUS`: a source-backed regular-season games-missed estimate.  "
+                    "`INJURY_UNCERTAIN`: injury information exists but does not justify a rank movement.  "
+                    "`ORDER_REBALANCE`: mechanical movement caused by another coded repair."
+                )
 
         # Pigskin's AI Scouting Report
         st.markdown("### 🧠 Pigskin's Scouting Report")
@@ -3635,6 +3670,10 @@ def render_player_profiles_tab():
         display_ranks["display_score"] = display_ranks["display_score"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
         display_ranks["pigskin_tier"] = display_ranks["pigskin_tier"].fillna("legacy grade")
         display_ranks["pigskin_verdict"] = display_ranks["pigskin_verdict"].fillna("Pigskin ranking not materialized yet.")
+        display_ranks["llm_adjustment_code"] = display_ranks["llm_adjustment_code"].fillna("No overlay")
+        display_ranks["sleeper_injury_status"] = display_ranks["sleeper_injury_status"].apply(
+            lambda value: str(value).title() if not pd.isna(value) and str(value).strip() else "No flag"
+        )
         display_ranks["avg_ppr"] = display_ranks["avg_ppr"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
         display_ranks["contract_apy"] = display_ranks["contract_apy"].apply(format_currency)
         display_ranks["height"] = display_ranks["height"].apply(format_height)
@@ -3648,6 +3687,8 @@ def render_player_profiles_tab():
             "display_score": "Pigskin Score",
             "pigskin_tier": "Tier",
             "pigskin_verdict": "Pigskin Verdict",
+            "llm_adjustment_code": "Adjustment",
+            "sleeper_injury_status": "Injury",
             "avg_ppr": "Avg PPR",
             "contract_apy": "Salary APY",
             "height": "Height",
@@ -3655,9 +3696,14 @@ def render_player_profiles_tab():
         })
 
         st.dataframe(
-            display_ranks[[("Board Rank" if selected_pos == "ALL" else "Rank"), "Player", "Team", "College", "Pigskin Score", "Tier", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
+            display_ranks[[("Board Rank" if selected_pos == "ALL" else "Rank"), "Player", "Team", "College", "Injury", "Pigskin Score", "Tier", "Adjustment", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
             width="stretch",
             hide_index=True
+        )
+        st.caption(
+            "Adjustment key: CURRENT_ROLE codes repair verified role changes. ROOKIE_CONTEXT covers bounded information unavailable to the formula. "
+            "INJURY codes require a source-backed estimated regular-season games-missed range. INJURY_UNCERTAIN records unresolved injury context "
+            "without moving the rank. ORDER_REBALANCE is application-generated mechanical movement."
         )
 
         st.markdown("---")

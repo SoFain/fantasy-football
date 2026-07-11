@@ -73,16 +73,21 @@ def sort_player_profile_board(df, selected_board=PLAYER_PROFILE_DEFAULT_BOARD):
 
 def build_pigskin_rankings_query(project_id, dataset_id, scoring_profile_id):
     sql_query = f"""
+    WITH latest_sleeper_status AS (
+        SELECT sleeper_player_id, injury_status
+        FROM `{project_id}.{dataset_id}.sleeper_players_current`
+    )
     SELECT
-        player_id,
-        position,
-        scoring_profile_id,
-        rank AS pigskin_rank,
-        tier AS pigskin_tier,
-        ranking_score AS pigskin_ranking_score,
-        confidence_score AS pigskin_confidence_score,
-        sleeper_team,
-        sleeper_status,
+        rankings.player_id,
+        rankings.position,
+        rankings.scoring_profile_id,
+        rankings.rank AS pigskin_rank,
+        rankings.tier AS pigskin_tier,
+        rankings.ranking_score AS pigskin_ranking_score,
+        rankings.confidence_score AS pigskin_confidence_score,
+        rankings.sleeper_team,
+        rankings.sleeper_status,
+        COALESCE(latest_sleeper_status.injury_status, rankings.sleeper_injury_status) AS sleeper_injury_status,
         sleeper_depth_chart_position,
         sleeper_depth_chart_order,
         raw_ranking_score,
@@ -103,6 +108,11 @@ def build_pigskin_rankings_query(project_id, dataset_id, scoring_profile_id):
         candidate_rank,
         candidate_ranking_score,
         rank_source,
+        llm_adjustment_code,
+        llm_adjustment_detail,
+        llm_adjustment_evidence,
+        llm_estimated_games_missed,
+        llm_rank_delta,
         adjudicated_at,
         ranking_eligibility,
         pigskin_verdict,
@@ -114,10 +124,12 @@ def build_pigskin_rankings_query(project_id, dataset_id, scoring_profile_id):
         model_name AS ranking_model_name,
         prompt_version AS ranking_prompt_version,
         data_snapshot_label AS ranking_data_snapshot
-    FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings`
-    WHERE is_active = TRUE
-      AND scoring_profile_id = @scoring_profile_id
-      AND rank <= CASE position
+    FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings` rankings
+    LEFT JOIN latest_sleeper_status
+      ON rankings.sleeper_player_id = latest_sleeper_status.sleeper_player_id
+    WHERE rankings.is_active = TRUE
+      AND rankings.scoring_profile_id = @scoring_profile_id
+      AND rankings.rank <= CASE rankings.position
         WHEN 'QB' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["QB"]}
         WHEN 'RB' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["RB"]}
         WHEN 'WR' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["WR"]}

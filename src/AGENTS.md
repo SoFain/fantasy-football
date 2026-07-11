@@ -15,7 +15,10 @@ This subtree owns runtime and orchestration behavior. Keep Python focused on con
 - External or public data ingestion should reuse existing repo patterns where practical.
 - Missing metrics must be flagged, not fabricated or silently zero-filled.
 - Live rankings and champions are not touched without explicit phase approval.
+- LLM ranking overlays must preserve the deterministic candidate score, use a bounded adjustment code, and reject unsourced injury games-missed claims before writes.
+- Sleeper status refreshes update display context only. New OUT or IR transitions create an auditable pending review and never change ranks automatically.
 - Write paths require phase-specific gates and must fail closed.
+- Current-source archive builders should fetch once, write the dated snapshot idempotently, and derive current context from the newest completed snapshot.
 
 # Work Guidance
 

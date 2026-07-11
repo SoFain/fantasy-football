@@ -1,10 +1,10 @@
 # Formula Ranking Owner Review Index
 
-Last updated: 2026-07-06
+Last updated: 2026-07-10
 
 ## Current Decision
 
-Current Pigskin stays live.
+Current Pigskin remains live for unpromoted lanes. Standard RB uses RB Fable v1. Standard TE now uses TE Fable v1.0a no-man plus a coded Pigskin exception-repair layer.
 
 No formula champion is active. No BigQuery ML, NGS, injury, PBP, or Stats02 lane should replace current Pigskin without a separate owner-approved champion-selection phase and a separate live ranking generation phase.
 
@@ -22,7 +22,8 @@ Phase 32.38 v1.0 studio defaults:
 
 | Lane | Status | Use |
 |---|---|---|
-| Current Pigskin candidate score v1 plus LLM final rankings | live baseline | Keep as the production ranking source. Active rankings currently cover PPR, Half PPR, Standard, and GNG Keeper. |
+| Current Pigskin candidate score v1 plus LLM final rankings | partial live baseline | Remains active for unpromoted profile-position lanes. It no longer owns Standard RB or Standard TE. |
+| TE Fable v1.0a no-man plus guarded Pigskin | live Standard TE | Deterministic TE Fable order is authoritative. Pigskin may apply only bounded coded exception repairs. Initial guarded review made zero rank changes. |
 
 Active ranking state:
 
@@ -45,6 +46,30 @@ Active ranking state:
 | Stats02 WR/TE | component signal | Useful ideal-stat component evidence. Do not let it own rankings. |
 | PBP RB/WR | component signal | RB has useful high-value opportunity signal. WR movement still needs protection. |
 | NGS direct diagnostics | component signal | RB rushing NGS is the clearest additive component. WR/TE receiving NGS helps explain movement. |
+| TE Fable v1.0a no-man Standard | owner-review candidate | Three-fold backtest averaged 0.666 Spearman and 0.741 pairwise. The untouched 2024 to 2025 holdout reached 0.742 Spearman and 0.772 pairwise, ahead of prior-year Standard PPG. The man-split term did not justify its complexity, so the no-man ablation advances to owner review. It is not approved for live use. |
+
+## Proposed Standard TE Test
+
+Use [TE Fable v1.0a](te_fable_v1_ranking_formula.md) as the corrected owner-approved starting formula. Its contract now includes these controls:
+
+- Keep the fixed owner weights as the primary test. Do not grid-search against the final 2024 to 2025 holdout.
+- Fit or freeze the red-zone touchdown coefficient inside each training boundary. Do not derive it from future outcomes.
+- Compute historical age and games available at the prediction boundary, not from current-player state.
+- Treat routes per game as route volume. Do not label it route participation without a source-backed team dropback denominator.
+- Replace the loose `4+ games OR 100+ routes` qualifier with a minimum route sample for the primary board. Short-sample players belong in a separately flagged review lane.
+- Test `vs_man` YPRR as an ablation. Shrinkage reduces noise but does not establish that the split predicts next-season Standard scoring.
+- Keep current team changes, rookie context, and current injuries outside historical predictors unless point-in-time sources exist.
+
+Required evaluation:
+
+- Forward folds: 2022 to 2023, 2023 to 2024, and untouched 2024 to 2025 holdout.
+- Metrics: Spearman, pairwise win rate, NDCG, captured Standard points, top-6 precision, top-12 precision, and bust rate.
+- Cutline review: TE6, TE12, and TE18. Owner-facing output remains capped at TE35.
+- No live ranking write, champion activation, Gemini adjustment, or production deployment during formula testing.
+
+Completed Phase 35.2 evidence: [TE Fable v1.0a backtest](validation/phase-35-2-te-fable-v1a-backtest-report.md). Advance the no-man variant to a TE35 owner-review comparison. Keep Current Pigskin live until movement and current-context warnings are reviewed.
+
+Phase 35.2A same-cohort evidence: [TE Fable versus Current Pigskin and LLM audit](validation/phase-35-2a-te-fable-same-cohort-and-llm-audit-report.md). No-man Fable wins pairwise, top-6, top-12, captured points, NDCG, band regret, and bust control on the exact shared cohort. Current Pigskin leads aggregate Spearman by 0.003. The active LLM layer moves 28 of 35 Standard TEs but persists no adjustment codes or deltas, so it is not yet auditable.
 
 ## Risk Flags
 
@@ -162,7 +187,7 @@ Owner-approved v1.0 policy:
 
 | scoring_profile_id | QB | RB | WR | TE |
 |---|---|---|---|---|
-| `standard` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |
+| `standard` | Current Pigskin | RB Fable v1 | Current Pigskin | TE Fable v1.0a no-man plus guarded Pigskin |
 | `half_ppr` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |
 | `ppr` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |
 | `gng_keeper` | Current Pigskin | Current Pigskin | Current Pigskin | Current Pigskin |

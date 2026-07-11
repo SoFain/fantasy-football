@@ -41,6 +41,11 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
 
         self.assertIn("analytics_pigskin_rankings", sql)
         self.assertIn("scoring_profile_id = @scoring_profile_id", sql)
+        self.assertIn("llm_adjustment_code", sql)
+        self.assertIn("llm_rank_delta", sql)
+        self.assertIn("sleeper_injury_status", sql)
+        self.assertIn("latest_sleeper_status", sql)
+        self.assertIn("COALESCE(latest_sleeper_status.injury_status", sql)
         self.assertNotIn("ranking_formula_candidates", sql)
         params = {param.name: param.value for param in job_config.query_parameters}
         self.assertEqual(params["scoring_profile_id"], "standard")

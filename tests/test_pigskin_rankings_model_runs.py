@@ -214,6 +214,111 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         self.assertEqual(row["prompt_version"], "prompt-test")
         self.assertEqual(row["candidate_rank"], 12)
 
+    def test_injury_adjustment_requires_a_matching_games_missed_range(self):
+        row = rankings.build_final_row(
+            {"rank": 8, "ranking_score": 72, "data_snapshot_label": "snapshot"},
+            {
+                "requested_rank_delta": -4,
+                "adjustment_code": "INJURY_3_5",
+                "adjustment_detail": "Expected absence suppresses early-season availability.",
+                "adjustment_evidence": "source=team estimate; expected_games_missed=4",
+                "estimated_regular_season_games_missed": 4,
+            },
+            "pigskin-llm-test",
+            "test-model",
+            {
+                "model_run_id": "run-1",
+                "scoring_profile_id": "ppr",
+                "league_type_id": "redraft",
+                "roster_format_id": "one_qb",
+                "feature_config_version_id": None,
+                "source_freshness_snapshot_id": "fresh-1",
+                "prompt_version": "prompt-test",
+            },
+        )
+
+        rankings.validate_adjustment(row)
+        self.assertEqual(row["llm_rank_delta"], -4)
+        self.assertEqual(row["ranking_score"], 72)
+
+    def test_injury_adjustment_fails_closed_without_a_matching_games_missed_range(self):
+        row = {
+            "llm_adjustment_code": "INJURY_3_5",
+            "llm_rank_delta": -4,
+            "llm_estimated_games_missed": None,
+            "llm_adjustment_detail": "Injury concern.",
+            "llm_adjustment_evidence": "Sleeper injury status only",
+        }
+
+        with self.assertRaisesRegex(ValueError, "estimated_regular_season_games_missed"):
+            rankings.validate_adjustment(row)
+
+    def test_no_adjustment_cannot_move_a_rank(self):
+        row = {
+            "llm_adjustment_code": "NO_ADJUSTMENT",
+            "llm_rank_delta": 1,
+            "llm_estimated_games_missed": None,
+            "llm_adjustment_detail": "",
+            "llm_adjustment_evidence": "",
+        }
+
+        with self.assertRaisesRegex(ValueError, "NO_ADJUSTMENT permits"):
+            rankings.validate_adjustment(row)
+
+    def test_prompt_forbids_discretionary_formula_reinterpretation(self):
+        frame = pd.DataFrame([{
+            "player_id": "p1", "player_name": "Player One", "current_team": "A",
+            "sleeper_team": "A", "sleeper_active": True, "sleeper_status": "Active",
+            "sleeper_depth_chart_position": "TE", "sleeper_depth_chart_order": 1,
+            "rank": 1, "ranking_score": 90, "raw_ranking_score": 1.0, "depth_chart_penalty": 0,
+            "avg_profile_points": 10, "avg_ppr": 10, "avg_grade": 80, "avg_opportunity": 80,
+            "avg_efficiency": 80, "avg_epa_per_opportunity": 0.1, "season_total_epa": 10,
+            "season_passing_epa": 0, "season_rushing_epa": 0, "season_receiving_epa": 10,
+            "avg_role_quality": 80, "avg_role_fragility": 10, "avg_wopr": 0.5,
+            "latest_season_wopr": 0.5, "previous_season_wopr": 0.4, "two_years_ago_wopr": 0.3,
+            "avg_target_share": 0.2, "latest_season_target_share": 0.2,
+            "previous_season_target_share": 0.2, "avg_carry_share": 0,
+            "latest_season_carry_share": 0, "previous_season_carry_share": 0,
+            "latest_season_ppr": 10, "previous_season_ppr": 9, "risk_flags": "",
+            "rank_rationale": "deterministic formula evidence", "sleeper_injury_status": "Questionable",
+        }])
+        prompt = rankings.build_prompt("TE", frame, "v1", "standard")
+        self.assertIn("exception-repair layer", prompt)
+        self.assertIn("requested_rank_delta", prompt)
+        self.assertIn("Questionable status alone has zero rank effect", prompt)
+        self.assertNotIn("SUSTAINABILITY_UP", prompt)
+
+    def test_model_requests_are_applied_by_deterministic_reorder(self):
+        candidates = pd.DataFrame([
+            {"player_id": f"p{i}", "rank": i, "ranking_score": 100 - i, "data_snapshot_label": "snapshot"}
+            for i in range(1, 5)
+        ])
+        payload = {"rankings": [
+            {"player_id": "p1", "adjustment_code": "NO_ADJUSTMENT", "requested_rank_delta": 0},
+            {"player_id": "p2", "adjustment_code": "NO_ADJUSTMENT", "requested_rank_delta": 0},
+            {"player_id": "p3", "adjustment_code": "NO_ADJUSTMENT", "requested_rank_delta": 0},
+            {"player_id": "p4", "adjustment_code": "CURRENT_ROLE_UPGRADE", "requested_rank_delta": 2,
+             "adjustment_detail": "Verified starter role.", "adjustment_evidence": "depth=1"},
+        ]}
+        rows = rankings.normalize_model_rankings("TE", candidates, payload, "v1", "model", {
+            "model_run_id": "run", "scoring_profile_id": "standard", "league_type_id": "redraft",
+            "roster_format_id": "one_qb", "feature_config_version_id": None,
+            "source_freshness_snapshot_id": "fresh", "prompt_version": "guarded",
+        })
+        by_id = {row["player_id"]: row for row in rows}
+        self.assertEqual(by_id["p4"]["rank"], 3)
+        self.assertEqual(by_id["p4"]["llm_adjustment_code"], "CURRENT_ROLE_UPGRADE")
+        self.assertEqual(by_id["p3"]["llm_adjustment_code"], "ORDER_REBALANCE")
+
+    def test_questionable_status_cannot_drive_injury_movement(self):
+        row = {
+            "llm_adjustment_code": "INJURY_1_2", "llm_rank_delta": -1,
+            "llm_estimated_games_missed": 1, "llm_adjustment_detail": "Questionable.",
+            "llm_adjustment_evidence": "Sleeper status", "sleeper_injury_status": "Questionable",
+        }
+        with self.assertRaisesRegex(ValueError, "Questionable status cannot move"):
+            rankings.validate_adjustment(row)
+
     def test_final_pool_candidate_omission_is_rejected(self):
         candidates = pd.DataFrame([
             {"player_id": "p1", "rank": 1, "ranking_score": 90, "data_snapshot_label": "snapshot"},
