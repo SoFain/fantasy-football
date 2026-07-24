@@ -35,7 +35,17 @@ def _sql_number(value: object) -> str:
     return "NULL" if value is None else str(value)
 
 
-def validate_board(board: list[dict]) -> dict:
+def validate_board(board: list[dict], *, acknowledged_reason: str | None = None) -> dict:
+    """Enforce the guarded-board invariants.
+
+    QB6/QB24 cutline crossings normally fail the board. When the owner has
+    approved the specific movement, pass the approval text as
+    acknowledged_reason: the crossings are then recorded onto the crossing
+    records (and into their adjustment provenance at promotion) instead of
+    failing. One-time acknowledgment per the runbook's safety-layer change
+    class; the daily automation never passes a reason, so this can never
+    become a standing bypass. All other invariants still fail hard.
+    """
     summary = summarize(board)
     failures = []
     if summary["player_count"] != 45:
@@ -44,10 +54,29 @@ def validate_board(board: list[dict]) -> dict:
         failures.append("guarded ranks must be unique")
     if summary["guarded_weak_passing_riser_count"]:
         failures.append("weak-passing upward guard failed")
-    if summary["guarded_qb6_crossing_count"]:
-        failures.append("QB6 cutline must remain stable")
-    if summary["guarded_qb24_crossing_count"]:
-        failures.append("QB24 cutline must remain stable")
+    crossing_count = summary["guarded_qb6_crossing_count"] + summary["guarded_qb24_crossing_count"]
+    if crossing_count and acknowledged_reason:
+        acknowledged = []
+        for record in board:
+            anchor = record.get("anchor_rank")
+            rank = record["guarded_consensus_rank"]
+            if anchor is None:
+                continue
+            if (anchor <= 6) != (rank <= 6) or (anchor <= 24) != (rank <= 24):
+                record["cutline_adjustment_note"] = (
+                    f" Owner-approved cutline movement: anchor QB{anchor} to final QB{rank}. "
+                    f"{acknowledged_reason}"
+                )
+                acknowledged.append(
+                    {"player_name": record.get("player_name"), "anchor_rank": anchor, "guarded_rank": rank}
+                )
+        summary["acknowledged_crossings"] = acknowledged
+        summary["acknowledged_reason"] = acknowledged_reason
+    else:
+        if summary["guarded_qb6_crossing_count"]:
+            failures.append("QB6 cutline must remain stable")
+        if summary["guarded_qb24_crossing_count"]:
+            failures.append("QB24 cutline must remain stable")
     for record in board:
         depth_order = record.get("sleeper_depth_chart_order")
         rank = record["guarded_consensus_rank"]
@@ -87,7 +116,10 @@ def build_promotion_sql(
             f"{_sql_number(record.get('passing_cpoe'))} AS passing_cpoe, "
             f"{_sql_number(record.get('qb_rushing_baseline'))} AS rushing_baseline, "
             f"{_sql_number(record.get('sleeper_depth_chart_order'))} AS depth_order, "
-            f"{_sql_string(record.get('review_lane'))} AS review_lane)"
+            f"{_sql_string(record.get('review_lane'))} AS review_lane, "
+            # Typed NULL: bare NULL leaves the STRUCT array without a common
+            # supertype when only some rows carry an acknowledgment.
+            f"{'CAST(NULL AS STRING)' if record.get('cutline_adjustment_note') is None else _sql_string(record['cutline_adjustment_note'])} AS adjustment_note)"
         )
     promoted_sql = ",\n    ".join(promoted_records)
     formula_json = json.dumps(
@@ -186,7 +218,7 @@ SELECT prior_board.* REPLACE(
     COALESCE(CAST(ROUND(promoted.passing_epa,3) AS STRING),'unavailable'),
     COALESCE(CAST(ROUND(promoted.passing_cpoe,2) AS STRING),'unavailable'),
     COALESCE(CAST(promoted.depth_order AS STRING),'unknown')
-  ) AS rank_rationale,
+  ) || COALESCE(promoted.adjustment_note, '') AS rank_rationale,
   FORMAT(
     'Deterministic guarded Standard formula ranks %s at QB%d. No LLM reordering was applied.',
     prior_board.player_name, promoted.guarded_rank
@@ -205,11 +237,15 @@ SELECT prior_board.* REPLACE(
   TRUE AS is_active,
   'standard_qb_guarded_75_25' AS rank_source,
   '{model_run_id}' AS model_run_id,
-  'NO_ADJUSTMENT' AS llm_adjustment_code,
-  'Deterministic formula promotion; no LLM movement applied.' AS llm_adjustment_detail,
-  'Phases 35.9-35.11 historical, owner-review, and depth-order evidence.' AS llm_adjustment_evidence,
+  IF(promoted.adjustment_note IS NULL, 'NO_ADJUSTMENT', 'OWNER_APPROVED_CUTLINE_CROSSING') AS llm_adjustment_code,
+  IF(promoted.adjustment_note IS NULL,
+     'Deterministic formula promotion; no LLM movement applied.',
+     'Owner-approved QB24/QB6 cutline movement recorded in rank_rationale; raw formula score unchanged.') AS llm_adjustment_detail,
+  IF(promoted.adjustment_note IS NULL,
+     'Phases 35.9-35.11 historical, owner-review, and depth-order evidence.',
+     promoted.adjustment_note) AS llm_adjustment_evidence,
   CAST(NULL AS INT64) AS llm_estimated_games_missed,
-  0 AS llm_rank_delta
+  IF(promoted.adjustment_note IS NULL, 0, promoted.guarded_rank - promoted.anchor_rank) AS llm_rank_delta
 )
 FROM {live} AS prior_board
 JOIN promoted USING (player_id)
@@ -246,6 +282,16 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--acknowledge-crossings",
+        metavar="REASON",
+        help=(
+            "Owner approval text for the current QB6/QB24 cutline crossings. "
+            "Records the movement into rank_rationale and the adjustment "
+            "provenance fields instead of failing the board. One-time use; "
+            "the daily automation never passes this."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.apply and os.environ.get(WRITE_GATE) != "true":
@@ -255,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     client = bigquery.Client(project=args.project)
     review_job = client.query(build_owner_review_sql(args.project, args.dataset))
     board = assign_guarded_consensus_ranks([dict(record) for record in review_job.result()])
-    summary = validate_board(board)
+    summary = validate_board(board, acknowledged_reason=args.acknowledge_crossings)
     now = datetime.now(timezone.utc)
     ranking_version = now.strftime("standard-qb-guarded-75-25-%Y%m%d%H%M%S")
     model_run_id = now.strftime("standard_qb_guarded_75_25-%Y%m%dT%H%M%SZ")

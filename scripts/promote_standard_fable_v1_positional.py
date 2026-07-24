@@ -190,6 +190,10 @@ WITH ranked AS (
     metrics.non_garbage_time_targets_per_game, metrics.red_zone_targets_per_game,
     metrics.blended_td_per_game, metrics.games_played_rate,
     metrics.games_played, metrics.targets, metrics.prior_v1_score,
+    -- Narrative-only inputs for the veteran carry-forward rationale; both live
+    -- in the candidates view rather than the review table, so they must be
+    -- carried through this CTE for the outer FORMAT calls to resolve.
+    metrics.prior_v1_age_availability_component, metrics.age_availability_component,
     MIN(post_formula_score) OVER () AS min_score,
     MAX(post_formula_score) OVER () AS max_score
   FROM {wr} board
