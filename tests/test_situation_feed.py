@@ -15,7 +15,9 @@ def _row(**overrides):
         "offensive_coordinator": "Pete Carmichael", "hc_changed": True, "oc_changed": None,
         "flags_json": '["NEW_TEAM","QB_CHANGED","QB_UPGRADE_MAJOR","NEW_HC"]',
         "metric_basis": "2025_CHI", "games_prev": 17, "ppg_prev": 7.19,
-        "games_2025": 17, "std_ppg_2025": 7.19, "ppr_ppg_2025": 10.13,
+        "games_2025": 17, "std_ppg_2025": 7.19, "ppr_ppg_2025": 10.13, "gng_ppg_2025": 5.15,
+        "gng_ppg_prev": 5.15, "qb_quality_from_gng": 15.2, "qb_quality_to_gng": 19.33,
+        "qb_quality_delta_gng": 4.13,
         "targets_per_game": 5.0, "target_share_pct": 16.1, "wopr": 0.381,
         "carries_per_game": 0.88, "red_zone_touches_per_game": 0.76,
         "touchdowns_2025": 8, "epa_per_opportunity": 0.062,
@@ -30,6 +32,9 @@ class PlayerEntryTest(unittest.TestCase):
         entry = sf.player_entry(_row())
         s = entry["situation"]
         self.assertEqual((s["team_2025"], s["team"]), ("CHI", "BUF"))
+        # GNG parity: both scoring scales ride together.
+        self.assertAlmostEqual(s["qb_quality_delta_gng_ppg"], 4.13)
+        self.assertAlmostEqual(entry["metrics"]["gng_ppg"], 5.15)
         self.assertTrue(s["team_changed"] and s["qb_changed"] and s["hc_changed"])
         self.assertEqual(s["metric_basis"], "2025_CHI")
         self.assertIn("NEW_HC", s["flags"])

@@ -52,13 +52,17 @@ INSERT INTO `{project_id}.{dataset_id}.{TABLE_NAME}`
    player_name, position, team_from, team_to, team_changed, games_prev, ppg_prev, ppg_next,
    qb_from, qb_to, qb_quality_from, qb_quality_to, qb_quality_delta, qb_changed,
    age_at_season, head_coach, offensive_coordinator, flags_json, metric_basis, created_at,
-   hc_changed, oc_changed)
+   hc_changed, oc_changed,
+   gng_ppg_prev, gng_ppg_next, qb_quality_from_gng, qb_quality_to_gng, qb_quality_delta_gng)
 WITH player_season AS (
   -- Identity note: player_id_internal changed schemes mid-history in the
   -- profile points mart (2015-2024 rows use bare gsis, 2025 rows use
   -- 'gsis:'-prefixed ids), which silently breaks cross-season joins. The
   -- normalized gsis key below is the stable identity; it also matches
   -- player_identity_bridge.gsis_id directly.
+  --
+  -- GNG parity: standard and GNG Keeper PPG come from the same pass. The
+  -- unsuffixed ppg stays standard scoring; gng_ppg is the owners' league.
   SELECT
     COALESCE(source_player_key, REGEXP_REPLACE(player_id_internal, r'^gsis:', '')) AS player_id_internal,
     season,
@@ -66,16 +70,18 @@ WITH player_season AS (
     ANY_VALUE(position) AS position,
     APPROX_TOP_COUNT(team, 1)[OFFSET(0)].value AS team,
     COUNT(DISTINCT week) AS games,
-    ROUND(AVG(total_fantasy_points), 2) AS ppg
+    ROUND(AVG(IF(scoring_profile_id = 'standard', total_fantasy_points, NULL)), 2) AS ppg,
+    ROUND(AVG(IF(scoring_profile_id = 'gng_keeper', total_fantasy_points, NULL)), 2) AS gng_ppg
   FROM `{project_id}.{dataset_id}.analytics_player_fantasy_points_by_profile`
-  WHERE scoring_profile_id = 'standard'
+  WHERE scoring_profile_id IN ('standard', 'gng_keeper')
     AND position IN ('QB', 'RB', 'WR', 'TE')
   GROUP BY 1, 2
 ),
 team_qb AS (
   -- The QB who led each team-season, with his PPG that season as the quality
   -- measure other seasons reference.
-  SELECT season, team, player_id_internal AS qb_id, player_name AS qb_name, ppg AS qb_ppg
+  SELECT season, team, player_id_internal AS qb_id, player_name AS qb_name,
+         ppg AS qb_ppg, gng_ppg AS qb_gng_ppg
   FROM player_season
   WHERE position = 'QB'
   QUALIFY ROW_NUMBER() OVER (PARTITION BY season, team ORDER BY games DESC, ppg DESC) = 1
@@ -102,10 +108,14 @@ historical AS (
     prev.games AS games_prev,
     prev.ppg AS ppg_prev,
     nxt.ppg AS ppg_next,
+    prev.gng_ppg AS gng_ppg_prev,
+    nxt.gng_ppg AS gng_ppg_next,
     qb_prev.qb_name AS qb_from,
     qb_next_person.qb_name AS qb_to,
     qb_prev.qb_ppg AS qb_quality_from,
     qb_next_prior.ppg AS qb_quality_to,
+    qb_prev.qb_gng_ppg AS qb_quality_from_gng,
+    qb_next_prior.gng_ppg AS qb_quality_to_gng,
     qb_next_person.qb_id AS qb_to_id
   FROM player_season prev
   JOIN player_season nxt
@@ -163,10 +173,14 @@ current_rows AS (
     prev.games AS games_prev,
     prev.ppg AS ppg_prev,
     CAST(NULL AS FLOAT64) AS ppg_next,
+    prev.gng_ppg AS gng_ppg_prev,
+    CAST(NULL AS FLOAT64) AS gng_ppg_next,
     qb_prev.qb_name AS qb_from,
     board_qb.qb_name AS qb_to,
     qb_prev.qb_ppg AS qb_quality_from,
     qb_now_prior.ppg AS qb_quality_to,
+    qb_prev.qb_gng_ppg AS qb_quality_from_gng,
+    qb_now_prior.gng_ppg AS qb_quality_to_gng,
     CAST(NULL AS STRING) AS qb_to_id
   FROM player_season prev
   JOIN bridge b ON b.gsis_id = prev.player_id_internal
@@ -191,6 +205,7 @@ enriched AS (
     u.player_id_internal AS gsis_id,
     b.sleeper_player_id,
     ROUND(u.qb_quality_to - u.qb_quality_from, 2) AS qb_quality_delta,
+    ROUND(u.qb_quality_to_gng - u.qb_quality_from_gng, 2) AS qb_quality_delta_gng,
     COALESCE(u.qb_to != u.qb_from, FALSE) AS qb_changed_calc,
     ROUND(SAFE_DIVIDE(DATE_DIFF(DATE(u.situation_for_season, 9, 1), b.birth_date, DAY), 365.25), 1) AS age_at_season,
     IF(u.situation_for_season = {CURRENT_SEASON}, staff.head_coach, NULL) AS head_coach_now,
@@ -248,7 +263,12 @@ SELECT
   CONCAT(CAST(e.stats_season AS STRING), '_', COALESCE(e.team_from, 'UNK')) AS metric_basis,
   CURRENT_TIMESTAMP() AS created_at,
   e.hc_changed_calc AS hc_changed,
-  CAST(NULL AS BOOL) AS oc_changed
+  CAST(NULL AS BOOL) AS oc_changed,
+  e.gng_ppg_prev,
+  e.gng_ppg_next,
+  e.qb_quality_from_gng,
+  e.qb_quality_to_gng,
+  e.qb_quality_delta_gng
 FROM enriched e;
 
 COMMIT TRANSACTION;

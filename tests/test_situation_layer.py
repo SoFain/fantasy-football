@@ -32,13 +32,20 @@ class BuildSituationSqlTest(unittest.TestCase):
             self.assertIn(flag, self.sql)
 
     def test_insert_uses_explicit_column_list(self):
-        # The table gained hc_changed/oc_changed via ALTER; a positional INSERT
+        # The table gained columns via ALTER (0047, 0048); a positional INSERT
         # would silently misalign columns.
         self.assertIn("(situation_for_season, stats_season, player_id_internal", self.sql)
-        self.assertIn("hc_changed, oc_changed)", self.sql)
+        self.assertIn("hc_changed, oc_changed,", self.sql)
+        self.assertIn("qb_quality_to_gng, qb_quality_delta_gng)", self.sql)
 
     def test_coaching_baseline_joined(self):
         self.assertIn("coaching_staff_history", self.sql)
+
+    def test_gng_parity(self):
+        # Owner rule: GNG is included wherever Standard is.
+        for col in ("gng_ppg_prev", "gng_ppg_next", "qb_quality_delta_gng"):
+            self.assertIn(col, self.sql)
+        self.assertIn("scoring_profile_id IN ('standard', 'gng_keeper')", self.sql)
 
     def test_age_cliff_bands_are_position_specific(self):
         for pos, age in sl.AGE_CLIFF.items():

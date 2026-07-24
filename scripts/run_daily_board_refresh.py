@@ -235,12 +235,17 @@ def write_situation_review() -> None:
     markdown artifact carries the list.
     """
     rows = bq_rows(f"""
-        SELECT s.player_name, s.position, r.rank, s.team_from, s.team_to,
-               s.qb_to, s.qb_quality_delta, s.head_coach, s.hc_changed, s.flags_json
+        SELECT s.player_name, s.position, r.rank, g.rank AS gng_rank,
+               s.team_from, s.team_to,
+               s.qb_to, s.qb_quality_delta, s.qb_quality_delta_gng,
+               s.head_coach, s.hc_changed, s.flags_json
         FROM `{PROJECT}.{BRAIN}.analytics_player_situation` s
         JOIN `{PROJECT}.{BRAIN}.analytics_pigskin_rankings` r
           ON r.player_id = s.player_id_internal AND r.is_active
          AND r.scoring_profile_id = 'standard' AND r.position = s.position
+        LEFT JOIN `{PROJECT}.{BRAIN}.analytics_pigskin_rankings` g
+          ON g.player_id = s.player_id_internal AND g.is_active
+         AND g.scoring_profile_id = 'gng_keeper' AND g.position = s.position
         WHERE s.situation_for_season = 2026 AND s.flags_json != '[]'
         ORDER BY s.position, r.rank
     """)
@@ -254,14 +259,19 @@ def write_situation_review() -> None:
         f"{len(rows)} ranked players carry situation flags. Flags are context,",
         "never rank movement; Phase-3 adjustments require owner-approved policy.",
         "",
-        "| Player | Pos | Rank | Move | QB (delta) | HC | Flags |",
-        "| --- | --- | ---: | --- | --- | --- | --- |",
+        "| Player | Pos | Std | GNG | Move | QB (std/gng delta) | HC | Flags |",
+        "| --- | --- | ---: | ---: | --- | --- | --- | --- |",
     ]
     for r in rows:
         move = f"{r['team_from']}->{r['team_to']}" if r["team_from"] != r["team_to"] else r["team_to"]
-        qb = f"{r['qb_to']} ({r['qb_quality_delta']:+.1f})" if r["qb_quality_delta"] is not None else (r["qb_to"] or "")
+        if r["qb_quality_delta"] is not None:
+            gng_part = f"/{r['qb_quality_delta_gng']:+.1f}" if r["qb_quality_delta_gng"] is not None else ""
+            qb = f"{r['qb_to']} ({r['qb_quality_delta']:+.1f}{gng_part})"
+        else:
+            qb = r["qb_to"] or ""
         hc = f"{r['head_coach']} (new)" if r["hc_changed"] else (r["head_coach"] or "")
-        lines.append(f"| {r['player_name']} | {r['position']} | {r['rank']} | {move} | {qb} | {hc} | {r['flags_json']} |")
+        gng_rank = r["gng_rank"] if r["gng_rank"] is not None else "-"
+        lines.append(f"| {r['player_name']} | {r['position']} | {r['rank']} | {gng_rank} | {move} | {qb} | {hc} | {r['flags_json']} |")
     artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"--- situation review: {len(rows)} flagged ranked players -> {artifact}", flush=True)
 

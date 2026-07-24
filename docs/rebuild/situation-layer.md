@@ -10,20 +10,21 @@ Doctrine (mirrors the runbook's injury contract): **facts → flags → owner-ga
 
 | Piece | Location |
 | --- | --- |
-| Table | `analytics_player_situation` — migrations 0046/0047. One table, two slices: 2016–2025 transitions with outcomes (ML training set), and the 2026 slice (live context). |
+| Table | `analytics_player_situation` — migrations 0046/0047/0048. One table, two slices: 2016–2025 transitions with outcomes (ML training set), and the 2026 slice (live context). |
 | Builder | [src/situation_layer.py](../../src/situation_layer.py), job `build-situation-layer` |
 | Public dataset | `datasets.player_situation` in the feed manifest — [src/situation_feed.py](../../src/situation_feed.py), job `situation-feed` |
 | Board blocks | Schema **1.3**: every board player may carry `situation` + `metrics` objects (publisher `fetch_player_context`, main checkout) |
 | Coaching baseline | `coaching_staff_history` (2025 head coaches from Wikipedia season pages) — [scripts/populate_coaching_staff_2025_csv.py](../../scripts/populate_coaching_staff_2025_csv.py), loaded via `ingest-coaching-staff --history-season 2025` |
 | Review queue | `output\daily-publish\situation-review-<date>.md`, written by the daily board-refresh chain |
-| ML study | [scripts/run_situation_ml_study.py](../../scripts/run_situation_ml_study.py) → models `situation_effect_v0_{wr,rb,te}` in the metrics dataset |
+| ML study | [scripts/run_situation_ml_study.py](../../scripts/run_situation_ml_study.py) → models `situation_effect_v0[_gng]_{wr,rb,te}` in the metrics dataset (both scoring scales) |
 | Validations | 156–160 |
 
 ## What a `situation` block says
 
 ```json
 {"team": "BUF", "team_2025": "CHI", "team_changed": true,
- "qb": "Josh Allen", "qb_2025": "Caleb Williams", "qb_quality_delta_ppg": 4.87,
+ "qb": "Josh Allen", "qb_2025": "Caleb Williams",
+ "qb_quality_delta_ppg": 4.87, "qb_quality_delta_gng_ppg": 4.13,
  "head_coach": "Joe Brady", "hc_changed": true, "age": 29.4,
  "flags": ["NEW_TEAM", "QB_CHANGED", "QB_UPGRADE_MAJOR", "NEW_HC"],
  "metric_basis": "2025_CHI"}
@@ -31,7 +32,11 @@ Doctrine (mirrors the runbook's injury contract): **facts → flags → owner-ga
 
 `metric_basis` is the honesty field: it names the team-season every metric describes. Article rules in the GNG repo's AGENTS.md require stating changes and attributing metrics to their basis.
 
-QB quality convention: a QB's quality entering season S+1 is his season-S standard PPG (knowable at decision time). `qb_to` is the platform's own board QB1 for the player's current team.
+QB quality convention: a QB's quality entering season S+1 is his season-S PPG (knowable at decision time). `qb_to` is the platform's own board QB1 for the player's current team.
+
+## GNG parity (owner rule)
+
+**GNG rankings are included in anything Standard Scoring is included in.** Unsuffixed columns/fields are standard scoring; the `_gng` suffix is GNG Keeper. In this layer that means: `gng_ppg_prev/next` and `qb_quality_*_gng` on the table (migration 0048), `gng_ppg` in the `metrics` block and `qb_quality_delta_gng_ppg` in the `situation` block (dataset schema 1.1, boards 1.3), a GNG rank column plus std/gng QB deltas in the review queue, and a full `_gng` model set in the study. The two scales can disagree usefully — Kyler Murray is QB7 standard but QB20 GNG, so a WR inheriting him reads +2.0 std / +0.5 gng.
 
 ## Daily flow
 
@@ -39,15 +44,15 @@ The 07:30 chain rebuilds the layer after boards promote (stage 8.5), emits fresh
 
 ## The ML study (Phase-3 input)
 
-Linear models per position over 2016–2025 transitions (n=3,362, 925 movers), controlling for prior PPG, games, and age. First results (r² 0.53–0.57):
+Linear models per position **and per scoring scale** over 2016–2025 transitions (n=3,362, 925 movers), controlling for prior PPG, games, and age. First results (r² 0.48–0.57; standard / gng):
 
 | Effect | WR | RB | TE |
 | --- | --- | --- | --- |
-| Team change (avg) | −0.78 PPG | −0.59 | −0.42 |
-| Per +1.0 PPG QB upgrade | +0.02 | +0.06 | +0.02 |
-| Age per year | −0.02 | −0.22 | −0.03 |
+| Team change (avg) | −0.78 / −0.56 PPG | −0.59 / −0.33 | −0.42 / −0.33 |
+| Per +1.0 PPG QB upgrade | +0.02 / +0.02 | +0.06 / +0.06 | +0.02 / +0.01 |
+| Age per year | −0.02 / −0.01 | −0.22 / −0.15 | −0.03 / −0.02 |
 
-Read: movers mildly underperform on average, QB upgrades claw back only a fraction, the RB age cliff is real. Candidate magnitudes are small and mostly conservative. Phase 3 converts these into a bounded, coded post-formula adjustment policy (same `llm_adjustment_*` provenance and cutline guards as the acknowledged-crossing machinery) after owner sign-off; v1 study ideas: interaction terms (qb_delta × prior target share), boosted trees, quantile effects.
+Read: movers mildly underperform on average, QB upgrades claw back only a fraction, the RB age cliff is real — and both scales agree on direction, with GNG magnitudes proportionally smaller (its scoring compresses skill-player PPG). Candidate magnitudes are small and mostly conservative. Phase 3 converts these into a bounded, coded post-formula adjustment policy (same `llm_adjustment_*` provenance and cutline guards as the acknowledged-crossing machinery) after owner sign-off; v1 study ideas: interaction terms (qb_delta × prior target share), boosted trees, quantile effects.
 
 ## Known limits
 

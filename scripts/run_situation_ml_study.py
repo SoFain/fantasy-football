@@ -39,57 +39,69 @@ MIN_GAMES = 4
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 
 
-def model_id(position: str) -> str:
-    return f"{PROJECT}.{METRICS}.situation_effect_v0_{position.lower()}"
+# GNG parity: every study runs in both scoring scales. Unsuffixed columns are
+# standard scoring; the gng scale swaps in GNG Keeper PPG for the label, the
+# persistence control, and the QB-quality delta.
+SCALES = {
+    "standard": {"label": "ppg_next", "prev": "ppg_prev", "qb_delta": "qb_quality_delta", "suffix": ""},
+    "gng": {"label": "gng_ppg_next", "prev": "gng_ppg_prev", "qb_delta": "qb_quality_delta_gng", "suffix": "_gng"},
+}
 
 
-def training_sql(position: str) -> str:
+def model_id(position: str, scale: str = "standard") -> str:
+    suffix = SCALES[scale]["suffix"]
+    return f"{PROJECT}.{METRICS}.situation_effect_v0{suffix}_{position.lower()}"
+
+
+def training_sql(position: str, scale: str = "standard") -> str:
+    cols = SCALES[scale]
     return f"""
     SELECT
-      ppg_next,
-      ppg_prev,
+      {cols['label']} AS ppg_next,
+      {cols['prev']} AS ppg_prev,
       games_prev,
       age_at_season,
       CAST(team_changed AS INT64) AS team_changed_i,
-      IFNULL(qb_quality_delta, 0.0) AS qb_delta,
+      IFNULL({cols['qb_delta']}, 0.0) AS qb_delta,
       CAST(qb_changed AS INT64) AS qb_changed_i
     FROM `{PROJECT}.{BRAIN}.analytics_player_situation`
     WHERE situation_for_season < 2026
       AND position = '{position}'
-      AND ppg_next IS NOT NULL
-      AND ppg_prev IS NOT NULL
+      AND {cols['label']} IS NOT NULL
+      AND {cols['prev']} IS NOT NULL
       AND age_at_season IS NOT NULL
       AND games_prev >= {MIN_GAMES}
     """
 
 
-def train(client, position: str) -> None:
+def train(client, position: str, scale: str = "standard") -> None:
     sql = f"""
-    CREATE OR REPLACE MODEL `{model_id(position)}`
+    CREATE OR REPLACE MODEL `{model_id(position, scale)}`
     OPTIONS (
       model_type = 'linear_reg',
       input_label_cols = ['ppg_next'],
       data_split_method = 'NO_SPLIT'
-    ) AS {training_sql(position)}
+    ) AS {training_sql(position, scale)}
     """
     client.query(sql).result()
 
 
-def report(client, position: str) -> dict:
+def report(client, position: str, scale: str = "standard") -> dict:
     weights = {
         row["processed_input"]: round(row["weight"], 4)
         for row in client.query(
-            f"SELECT processed_input, weight FROM ML.WEIGHTS(MODEL `{model_id(position)}`)"
+            f"SELECT processed_input, weight FROM ML.WEIGHTS(MODEL `{model_id(position, scale)}`)"
         ).result()
     }
     evaluation = dict(next(iter(client.query(
-        f"SELECT * FROM ML.EVALUATE(MODEL `{model_id(position)}`, ({training_sql(position)}))"
+        f"SELECT * FROM ML.EVALUATE(MODEL `{model_id(position, scale)}`, ({training_sql(position, scale)}))"
     ).result())))
     sample = dict(next(iter(client.query(
-        f"SELECT COUNT(*) AS n, COUNTIF(team_changed_i = 1) AS movers FROM ({training_sql(position)})"
+        f"SELECT COUNT(*) AS n, COUNTIF(team_changed_i = 1) AS movers FROM ({training_sql(position, scale)})"
     ).result())))
     return {
         "position": position,
+        "scale": scale,
         "n": int(sample["n"]),
         "movers": int(sample["movers"]),
         "r2": round(float(evaluation.get("r2_score", 0.0)), 3),
@@ -107,11 +119,12 @@ def main() -> int:
 
     client = bigquery.Client(project=PROJECT)
     results = []
-    for position in POSITIONS:
-        if not args.report_only:
-            print(f"training situation_effect_v0_{position.lower()}...", flush=True)
-            train(client, position)
-        results.append(report(client, position))
+    for scale in SCALES:
+        for position in POSITIONS:
+            if not args.report_only:
+                print(f"training {model_id(position, scale).split('.')[-1]}...", flush=True)
+                train(client, position, scale)
+            results.append(report(client, position, scale))
 
     out_dir = BRANCH_ROOT / "build" / "situation-study"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +138,7 @@ def main() -> int:
     for r in results:
         w = r["weights"]
         print(
-            f"\n{r['position']}: n={r['n']} (movers={r['movers']}), r2={r['r2']}, mae={r['mae_ppg']} ppg\n"
+            f"\n{r['position']} [{r['scale']}]: n={r['n']} (movers={r['movers']}), r2={r['r2']}, mae={r['mae_ppg']} ppg\n"
             f"  team_changed:  {w.get('team_changed_i'):+.3f} ppg\n"
             f"  qb_delta:      {w.get('qb_delta'):+.3f} ppg per +1.0 QB ppg\n"
             f"  qb_changed:    {w.get('qb_changed_i'):+.3f} ppg\n"

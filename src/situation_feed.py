@@ -23,11 +23,20 @@ from src.coaching_staff import canonical_json_bytes, sha256_hex
 logger = logging.getLogger("situation_feed")
 
 DATASET_ID = "player_situation"
-DATASET_SCHEMA_VERSION = "1.0"
+DATASET_SCHEMA_VERSION = "1.1"
 DEFAULT_BUCKET = "fantasy-football-498121-public-rankings"
 
 CONTEXT_SQL = """
-WITH metrics AS (
+WITH gng_points AS (
+  -- GNG parity: GNG Keeper PPG rides alongside standard everywhere.
+  SELECT
+    COALESCE(source_player_key, REGEXP_REPLACE(player_id_internal, r'^gsis:', '')) AS player_id,
+    ROUND(AVG(total_fantasy_points), 2) AS gng_ppg_2025
+  FROM `{project}.{dataset}.analytics_player_fantasy_points_by_profile`
+  WHERE scoring_profile_id = 'gng_keeper' AND season = 2025
+  GROUP BY 1
+),
+metrics AS (
   SELECT
     player_id,
     COUNT(DISTINCT week) AS games_2025,
@@ -71,9 +80,15 @@ SELECT
   s.metric_basis,
   s.games_prev,
   s.ppg_prev,
+  s.gng_ppg_prev,
+  s.qb_quality_from_gng,
+  s.qb_quality_to_gng,
+  s.qb_quality_delta_gng,
+  g.gng_ppg_2025,
   m.* EXCEPT (player_id)
 FROM `{project}.{dataset}.analytics_player_situation` s
 LEFT JOIN metrics m ON m.player_id = s.player_id_internal
+LEFT JOIN gng_points g ON g.player_id = s.player_id_internal
 WHERE s.situation_for_season = 2026
 ORDER BY s.position, s.player_name
 """
@@ -98,6 +113,7 @@ def player_entry(row: dict) -> dict:
         "games": row.get("games_2025"),
         "std_ppg": _round_opt(row.get("std_ppg_2025")),
         "ppr_ppg": _round_opt(row.get("ppr_ppg_2025")),
+        "gng_ppg": _round_opt(row.get("gng_ppg_2025")),
         "targets_per_game": _round_opt(row.get("targets_per_game")),
         "target_share_pct": _round_opt(row.get("target_share_pct"), 1),
         "wopr": _round_opt(row.get("wopr"), 3),
@@ -124,6 +140,7 @@ def player_entry(row: dict) -> dict:
             "qb_quality_2025_ppg": _round_opt(row.get("qb_quality_to")),
             "qb_quality_prior_ppg": _round_opt(row.get("qb_quality_from")),
             "qb_quality_delta_ppg": _round_opt(row.get("qb_quality_delta")),
+            "qb_quality_delta_gng_ppg": _round_opt(row.get("qb_quality_delta_gng")),
             "age": _round_opt(row.get("age_at_season"), 1),
             "head_coach": row.get("head_coach"),
             "offensive_coordinator": row.get("offensive_coordinator"),
