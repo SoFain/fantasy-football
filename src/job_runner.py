@@ -26,6 +26,7 @@ VALID_JOB_NAMES = (
     "ingest-context-events",
     "ingest-market-values",
     "ingest-college-stats",
+    "ingest-rookie-scouting",
     "materialize-analytics",
     "generate-pigskin-rankings",
     "generate-evidence-packets",
@@ -48,7 +49,7 @@ def get_bigquery_dataset() -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run AI vs Meatbags warehouse jobs.")
+    parser = argparse.ArgumentParser(description="Run Pigskin warehouse jobs.")
     parser.add_argument("--job-name", required=True, choices=VALID_JOB_NAMES)
     parser.add_argument("--project", default=get_bigquery_project())
     parser.add_argument("--dataset", default=get_bigquery_dataset())
@@ -73,7 +74,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--query", help="Explicit external verification query.")
     parser.add_argument("--team", help="Optional team context for external verification.")
     parser.add_argument("--max-results", type=int)
-    parser.add_argument("--csv", help="CSV path for ingest-context-events.")
+    parser.add_argument("--csv", help="CSV path for ingest-context-events and ingest-rookie-scouting.")
+    parser.add_argument(
+        "--replace-season",
+        action="store_true",
+        help="For ingest-rookie-scouting: replace the CSV's seasons instead of appending.",
+    )
     parser.add_argument("--roster-id")
     parser.add_argument("--username")
     parser.add_argument("--display-name")
@@ -177,9 +183,29 @@ def start_job_run(client: Any, args: argparse.Namespace, job_run_id: str, starte
         "created_by": os.environ.get("K_SERVICE") or "job_runner",
         "metadata_json": json.dumps(_args_metadata(args), sort_keys=True),
     }
-    errors = client.insert_rows_json(_table_id(client.project, args.dataset, JOB_RUNS_TABLE), [row])
-    if errors:
-        raise RuntimeError(f"Failed to insert job run {job_run_id}: {errors}")
+    # Load job, not insert_rows_json. A streaming insert parks the row in the
+    # streaming buffer for up to ~90 minutes, and BigQuery rejects UPDATE or
+    # DELETE against buffered rows -- which would make finish_job_run fail on
+    # every single run. A load job lands the row in managed storage where the
+    # completion UPDATE works immediately.
+    table_id = _table_id(client.project, args.dataset, JOB_RUNS_TABLE)
+    try:
+        from google.cloud import bigquery
+
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        )
+    except ImportError:
+        job_config = None
+
+    load = client.load_table_from_json([row], table_id, job_config=job_config)
+    # A load job raises on failure rather than returning an error list, which is
+    # the opposite of insert_rows_json.
+    try:
+        load.result()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to insert job run {job_run_id}: {exc}") from exc
 
 
 def finish_job_run(
@@ -301,6 +327,21 @@ def dispatch_ingest_college_stats(args: argparse.Namespace, client: Any) -> dict
         args.dataset,
     ])
     return {"row_count": 0, "season": args.season}
+
+
+def dispatch_ingest_rookie_scouting(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    del client
+    csv_path = args.csv or _default_rookie_scouting_csv()
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "csv": csv_path}
+    from src.ingest_rookie_scouting import load_rookie_scouting
+
+    table = load_rookie_scouting(
+        csv_path,
+        dataset_name=args.dataset,
+        replace_season=bool(getattr(args, "replace_season", False)),
+    )
+    return {"row_count": getattr(table, "num_rows", 0) if table is not None else 0}
 
 
 def dispatch_materialize_analytics(args: argparse.Namespace, client: Any) -> dict[str, Any]:
@@ -537,6 +578,7 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "ingest-context-events": dispatch_ingest_context_events,
     "ingest-market-values": dispatch_ingest_market_values,
     "ingest-college-stats": dispatch_ingest_college_stats,
+    "ingest-rookie-scouting": dispatch_ingest_rookie_scouting,
     "materialize-analytics": dispatch_materialize_analytics,
     "generate-pigskin-rankings": dispatch_generate_pigskin_rankings,
     "generate-evidence-packets": dispatch_generate_evidence_packets,
@@ -618,6 +660,10 @@ def _current_season() -> int:
 
 def _default_context_csv() -> str:
     return os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "context_events.csv")
+
+
+def _default_rookie_scouting_csv() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "sample_rookie_scouting.csv")
 
 
 def main(argv: list[str] | None = None) -> None:
