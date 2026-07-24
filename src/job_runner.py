@@ -30,6 +30,7 @@ VALID_JOB_NAMES = (
     "detect-player-changes",
     "ingest-coaching-staff",
     "coaching-staff-feed",
+    "build-situation-layer",
     "materialize-analytics",
     "generate-pigskin-rankings",
     "generate-evidence-packets",
@@ -409,6 +410,17 @@ def dispatch_coaching_staff_feed(args: argparse.Namespace, client: Any) -> dict[
     }
 
 
+def dispatch_build_situation_layer(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.situation_layer import build_situation_layer
+
+    return build_situation_layer(
+        project_id=args.project,
+        dataset_id=args.dataset,
+        client=client,
+        dry_run=args.dry_run,
+    )
+
+
 def dispatch_materialize_analytics(args: argparse.Namespace, client: Any) -> dict[str, Any]:
     from src.materialize import materialize_all
     from src.materialize_fantasy_points import materialize_fantasy_points
@@ -647,6 +659,7 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "detect-player-changes": dispatch_detect_player_changes,
     "ingest-coaching-staff": dispatch_ingest_coaching_staff,
     "coaching-staff-feed": dispatch_coaching_staff_feed,
+    "build-situation-layer": dispatch_build_situation_layer,
     "materialize-analytics": dispatch_materialize_analytics,
     "generate-pigskin-rankings": dispatch_generate_pigskin_rankings,
     "generate-evidence-packets": dispatch_generate_evidence_packets,

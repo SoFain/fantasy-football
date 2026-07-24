@@ -1,0 +1,260 @@
+"""Build the player situation layer: team/QB/coaching/age context per season.
+
+One deterministic SQL build populates analytics_player_situation with:
+
+  * Historical transition rows (2016-2025): each player-season pair from the
+    profile-aware points history (2015-2025, standard scoring), with the
+    next-season outcome attached. This is the ML training set for estimating
+    situation effect sizes.
+  * Current rows (2026): the same shape for the upcoming season, where
+    team_to comes from today's Sleeper snapshot, qb_to from the platform's own
+    active standard QB board, and coaching from coaching_staff_current.
+    ppg_next is NULL until the season is played.
+
+QB quality is always the QB's PRIOR-season standard PPG: what was knowable at
+decision time. The situation layer never moves a ranking; it produces facts,
+flags, and training data. Adjustment magnitudes come later, from the BQML
+study over the historical rows, and require owner review per the runbook.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+logger = logging.getLogger("situation_layer")
+
+TABLE_NAME = "analytics_player_situation"
+FIRST_TRANSITION_SEASON = 2016
+CURRENT_SEASON = 2026
+STATS_SEASON = 2025
+MIN_GAMES_PREV = 1
+
+# Flag thresholds, v0. Editorial knobs surfaced as constants so the owners can
+# tune them; the ML study informs whether these bands are the right ones.
+QB_UPGRADE_MAJOR_PPG = 4.0
+QB_UPGRADE_PPG = 1.5
+AGE_CLIFF = {"RB": 28.0, "WR": 30.0, "TE": 31.0, "QB": 37.0}
+
+
+def build_situation_sql(project_id: str, dataset_id: str) -> str:
+    age_cliff_sql = " ".join(
+        f"WHEN e.position = '{pos}' AND e.age_at_season >= {age} THEN 'AGE_CLIFF'"
+        for pos, age in AGE_CLIFF.items()
+    )
+    return f"""
+BEGIN TRANSACTION;
+
+TRUNCATE TABLE `{project_id}.{dataset_id}.{TABLE_NAME}`;
+
+INSERT INTO `{project_id}.{dataset_id}.{TABLE_NAME}`
+WITH player_season AS (
+  -- Identity note: player_id_internal changed schemes mid-history in the
+  -- profile points mart (2015-2024 rows use bare gsis, 2025 rows use
+  -- 'gsis:'-prefixed ids), which silently breaks cross-season joins. The
+  -- normalized gsis key below is the stable identity; it also matches
+  -- player_identity_bridge.gsis_id directly.
+  SELECT
+    COALESCE(source_player_key, REGEXP_REPLACE(player_id_internal, r'^gsis:', '')) AS player_id_internal,
+    season,
+    ANY_VALUE(player_display_name) AS player_name,
+    ANY_VALUE(position) AS position,
+    APPROX_TOP_COUNT(team, 1)[OFFSET(0)].value AS team,
+    COUNT(DISTINCT week) AS games,
+    ROUND(AVG(total_fantasy_points), 2) AS ppg
+  FROM `{project_id}.{dataset_id}.analytics_player_fantasy_points_by_profile`
+  WHERE scoring_profile_id = 'standard'
+    AND position IN ('QB', 'RB', 'WR', 'TE')
+  GROUP BY 1, 2
+),
+team_qb AS (
+  -- The QB who led each team-season, with his PPG that season as the quality
+  -- measure other seasons reference.
+  SELECT season, team, player_id_internal AS qb_id, player_name AS qb_name, ppg AS qb_ppg
+  FROM player_season
+  WHERE position = 'QB'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY season, team ORDER BY games DESC, ppg DESC) = 1
+),
+bridge AS (
+  -- Keyed by gsis so it joins the normalized player_season identity.
+  SELECT gsis_id,
+         ANY_VALUE(sleeper_player_id) AS sleeper_player_id,
+         ANY_VALUE(birth_date) AS birth_date
+  FROM `{project_id}.{dataset_id}.player_identity_bridge`
+  WHERE gsis_id IS NOT NULL
+  GROUP BY gsis_id
+),
+historical AS (
+  SELECT
+    nxt.season AS situation_for_season,
+    prev.season AS stats_season,
+    prev.player_id_internal,
+    prev.player_name,
+    prev.position,
+    prev.team AS team_from,
+    nxt.team AS team_to,
+    prev.team != nxt.team AS team_changed,
+    prev.games AS games_prev,
+    prev.ppg AS ppg_prev,
+    nxt.ppg AS ppg_next,
+    qb_prev.qb_name AS qb_from,
+    qb_next_person.qb_name AS qb_to,
+    qb_prev.qb_ppg AS qb_quality_from,
+    qb_next_prior.ppg AS qb_quality_to,
+    qb_next_person.qb_id AS qb_to_id
+  FROM player_season prev
+  JOIN player_season nxt
+    ON nxt.player_id_internal = prev.player_id_internal
+   AND nxt.season = prev.season + 1
+  LEFT JOIN team_qb qb_prev
+    ON qb_prev.season = prev.season AND qb_prev.team = prev.team
+  LEFT JOIN team_qb qb_next_person
+    ON qb_next_person.season = nxt.season AND qb_next_person.team = nxt.team
+  LEFT JOIN player_season qb_next_prior
+    ON qb_next_prior.player_id_internal = qb_next_person.qb_id
+   AND qb_next_prior.season = prev.season
+  WHERE nxt.season BETWEEN {FIRST_TRANSITION_SEASON} AND {STATS_SEASON}
+    AND prev.games >= {MIN_GAMES_PREV}
+),
+board_qb AS (
+  -- The platform's own view of each team's 2026 QB1: best-ranked active
+  -- standard-board QB per current team.
+  SELECT current_team AS team, player_name AS qb_name, player_id AS qb_gsis
+  FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings`
+  WHERE is_active AND scoring_profile_id = 'standard' AND position = 'QB'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY current_team ORDER BY rank) = 1
+),
+staff AS (
+  SELECT team_abbr,
+         MAX(IF(role = 'head_coach', coach_name, NULL)) AS head_coach,
+         MAX(IF(role = 'offensive_coordinator', coach_name, NULL)) AS offensive_coordinator
+  FROM `{project_id}.{dataset_id}.coaching_staff_current`
+  GROUP BY team_abbr
+),
+sleeper_now AS (
+  SELECT sleeper_player_id, team
+  FROM `{project_id}.{dataset_id}.sleeper_players_current`
+  WHERE snapshot_at = (SELECT MAX(snapshot_at) FROM `{project_id}.{dataset_id}.sleeper_players_current`)
+    AND team IS NOT NULL
+),
+current_rows AS (
+  SELECT
+    {CURRENT_SEASON} AS situation_for_season,
+    prev.season AS stats_season,
+    prev.player_id_internal,
+    prev.player_name,
+    prev.position,
+    prev.team AS team_from,
+    sleeper_now.team AS team_to,
+    prev.team != sleeper_now.team AS team_changed,
+    prev.games AS games_prev,
+    prev.ppg AS ppg_prev,
+    CAST(NULL AS FLOAT64) AS ppg_next,
+    qb_prev.qb_name AS qb_from,
+    board_qb.qb_name AS qb_to,
+    qb_prev.qb_ppg AS qb_quality_from,
+    qb_now_prior.ppg AS qb_quality_to,
+    CAST(NULL AS STRING) AS qb_to_id
+  FROM player_season prev
+  JOIN bridge b ON b.gsis_id = prev.player_id_internal
+  JOIN sleeper_now ON sleeper_now.sleeper_player_id = b.sleeper_player_id
+  LEFT JOIN team_qb qb_prev
+    ON qb_prev.season = prev.season AND qb_prev.team = prev.team
+  LEFT JOIN board_qb ON board_qb.team = sleeper_now.team
+  LEFT JOIN player_season qb_now_prior
+    ON qb_now_prior.player_id_internal = board_qb.qb_gsis
+   AND qb_now_prior.season = prev.season
+  WHERE prev.season = {STATS_SEASON}
+    AND prev.games >= {MIN_GAMES_PREV}
+),
+unioned AS (
+  SELECT * FROM historical
+  UNION ALL
+  SELECT * FROM current_rows
+),
+enriched AS (
+  SELECT
+    u.*,
+    u.player_id_internal AS gsis_id,
+    b.sleeper_player_id,
+    ROUND(u.qb_quality_to - u.qb_quality_from, 2) AS qb_quality_delta,
+    COALESCE(u.qb_to != u.qb_from, FALSE) AS qb_changed_calc,
+    ROUND(SAFE_DIVIDE(DATE_DIFF(DATE(u.situation_for_season, 9, 1), b.birth_date, DAY), 365.25), 1) AS age_at_season
+  FROM unioned u
+  LEFT JOIN bridge b ON b.gsis_id = u.player_id_internal
+)
+SELECT
+  e.situation_for_season,
+  e.stats_season,
+  e.player_id_internal,
+  e.gsis_id,
+  e.sleeper_player_id,
+  e.player_name,
+  e.position,
+  e.team_from,
+  e.team_to,
+  e.team_changed,
+  e.games_prev,
+  e.ppg_prev,
+  e.ppg_next,
+  e.qb_from,
+  e.qb_to,
+  e.qb_quality_from,
+  e.qb_quality_to,
+  e.qb_quality_delta,
+  e.qb_changed_calc AS qb_changed,
+  e.age_at_season,
+  IF(e.situation_for_season = {CURRENT_SEASON}, staff.head_coach, NULL) AS head_coach,
+  IF(e.situation_for_season = {CURRENT_SEASON}, staff.offensive_coordinator, NULL) AS offensive_coordinator,
+  TO_JSON_STRING(ARRAY(
+    SELECT flag FROM UNNEST([
+      IF(e.team_changed, 'NEW_TEAM', NULL),
+      IF(e.qb_changed_calc AND e.position != 'QB', 'QB_CHANGED', NULL),
+      IF(e.position != 'QB' AND e.qb_quality_delta >= {QB_UPGRADE_MAJOR_PPG}, 'QB_UPGRADE_MAJOR',
+        IF(e.position != 'QB' AND e.qb_quality_delta >= {QB_UPGRADE_PPG}, 'QB_UPGRADE', NULL)),
+      IF(e.position != 'QB' AND e.qb_quality_delta <= -{QB_UPGRADE_MAJOR_PPG}, 'QB_DOWNGRADE_MAJOR',
+        IF(e.position != 'QB' AND e.qb_quality_delta <= -{QB_UPGRADE_PPG}, 'QB_DOWNGRADE', NULL)),
+      IF(e.position != 'QB' AND e.qb_to IS NOT NULL AND e.qb_quality_to IS NULL, 'QB_NO_PRIOR_SEASON', NULL),
+      CASE
+        {age_cliff_sql}
+        ELSE NULL
+      END
+    ]) AS flag WHERE flag IS NOT NULL
+  )) AS flags_json,
+  CONCAT(CAST(e.stats_season AS STRING), '_', COALESCE(e.team_from, 'UNK')) AS metric_basis,
+  CURRENT_TIMESTAMP() AS created_at
+FROM enriched e
+LEFT JOIN staff ON e.situation_for_season = {CURRENT_SEASON} AND staff.team_abbr = e.team_to;
+
+COMMIT TRANSACTION;
+"""
+
+
+def build_situation_layer(
+    project_id: str = "fantasy-football-498121",
+    dataset_id: str = "fantasy_football_brain",
+    client: Any | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    if client is None:
+        from google.cloud import bigquery
+
+        from src.load import get_bigquery_project
+
+        client = bigquery.Client(project=get_bigquery_project())
+
+    sql = build_situation_sql(project_id or client.project, dataset_id)
+    if dry_run:
+        return {"row_count": 0, "dry_run": True, "sql_bytes": len(sql)}
+
+    client.query(sql).result()
+    summary_sql = f"""
+    SELECT situation_for_season, COUNT(*) AS n, COUNTIF(team_changed) AS moved
+    FROM `{project_id}.{dataset_id}.{TABLE_NAME}`
+    GROUP BY situation_for_season ORDER BY situation_for_season
+    """
+    seasons = {int(r["situation_for_season"]): {"rows": int(r["n"]), "moved": int(r["moved"])}
+               for r in client.query(summary_sql).result()}
+    total = sum(v["rows"] for v in seasons.values())
+    logger.info("Situation layer built: %s rows across %s seasons.", total, len(seasons))
+    return {"row_count": total, "seasons": seasons}
