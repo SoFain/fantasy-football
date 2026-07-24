@@ -17,6 +17,7 @@ Doctrine (mirrors the runbook's injury contract): **facts → flags → owner-ga
 | Coaching baseline | `coaching_staff_history` (2025 head coaches from Wikipedia season pages) — [scripts/populate_coaching_staff_2025_csv.py](../../scripts/populate_coaching_staff_2025_csv.py), loaded via `ingest-coaching-staff --history-season 2025` |
 | Review queue | `output\daily-publish\situation-review-<date>.md`, written by the daily board-refresh chain |
 | ML study | [scripts/run_situation_ml_study.py](../../scripts/run_situation_ml_study.py) → models `situation_effect_v0[_gng]_{wr,rb,te}` in the metrics dataset (both scoring scales) |
+| Backtest | [scripts/backtest_situation_effects.py](../../scripts/backtest_situation_effects.py) — walk-forward (fit ≤S−1, predict S), read-only, local OLS → `build/situation-study/situation_backtest_report.json` |
 | Validations | 156–160 |
 
 ## What a `situation` block says
@@ -52,7 +53,17 @@ Linear models per position **and per scoring scale** over 2016–2025 transition
 | Per +1.0 PPG QB upgrade | +0.02 / +0.02 | +0.06 / +0.06 | +0.02 / +0.01 |
 | Age per year | −0.02 / −0.01 | −0.22 / −0.15 | −0.03 / −0.02 |
 
-Read: movers mildly underperform on average, QB upgrades claw back only a fraction, the RB age cliff is real — and both scales agree on direction, with GNG magnitudes proportionally smaller (its scoring compresses skill-player PPG). Candidate magnitudes are small and mostly conservative. Phase 3 converts these into a bounded, coded post-formula adjustment policy (same `llm_adjustment_*` provenance and cutline guards as the acknowledged-crossing machinery) after owner sign-off; v1 study ideas: interaction terms (qb_delta × prior target share), boosted trees, quantile effects.
+Read: movers mildly underperform on average, QB upgrades claw back only a fraction, the RB age cliff is real — and both scales agree on direction, with GNG magnitudes proportionally smaller (its scoring compresses skill-player PPG).
+
+### Walk-forward backtest (out-of-sample check)
+
+The table above is in-sample. The backtest fits only on seasons before each holdout year (2020–2025) and predicts forward — the situation the 2026 board is actually in. Results, both scales:
+
+- **On movers — the only players an adjustment would touch — the situation model beat the baseline in 22 of 24 position/scale/year cells** (WR and RB: 6/6 years in both scales), cutting mover error ~4–8% (e.g. WR standard MAE 1.96 → 1.84 PPG).
+- Overall error never got worse on average; rank order (Spearman) improved slightly for WR/RB, flat for TE.
+- Coefficient signs held in **all 36 training windows** (team change always negative, QB delta always positive) — the effects are stable, not artifacts of one fit.
+
+This is the Phase-3 evidence bar: the findings generalize forward, so small bounded mover adjustments are justified; TE is the weakest case. Board-level backtests (would the *ranks* have been better) can't reach before 2026 — no historical fable boards exist — but the content-addressed feed archives every published board from launch onward, so a true board backtest accrues one season per year from here. Candidate magnitudes are small and mostly conservative. Phase 3 converts these into a bounded, coded post-formula adjustment policy (same `llm_adjustment_*` provenance and cutline guards as the acknowledged-crossing machinery) after owner sign-off; v1 study ideas: interaction terms (qb_delta × prior target share), boosted trees, quantile effects.
 
 ## Known limits
 
