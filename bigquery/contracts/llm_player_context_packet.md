@@ -17,9 +17,9 @@ Helper:
 
 Production compatibility layer for Pigskin chat and the future writing AI.
 
-This packet is the future replacement for arbitrary model-generated SQL in `render_ai_cohost`, `app.py:2525-2796`. It gives Pigskin a compact, bounded, source-attributed player evidence packet instead of letting the model inspect raw tables.
+This packet is the future replacement for arbitrary model-generated SQL in `render_ai_cohost`. It gives Pigskin a compact, bounded, source-attributed player evidence packet instead of letting the model inspect raw tables.
 
-`app.py` is not wired to this object by default yet. Current Pigskin chat behavior remains unchanged until a later default-off feature flag migration.
+No consumer reads this object yet. Current Pigskin chat behavior remains unchanged until a later default-off feature flag migration.
 
 ## Backing Object
 
@@ -205,6 +205,6 @@ Pigskin should not treat external leads as truth by themselves. The packet expli
 
 ## Runtime Status
 
-Not wired into `app.py` by default.
+No consumer reads this object yet.
 
 Future chat migration should use a default-off flag such as `USE_LLM_CONTEXT_PACKET=false`, then replace arbitrary SQL with parameterized packet functions after validation.

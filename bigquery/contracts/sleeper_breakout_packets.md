@@ -98,7 +98,7 @@ If missing flags exist, Pigskin should say the gap out loud instead of inventing
 - This table does not replace future weekly, rest-of-season, dynasty, or best-ball projection tables.
 - Breakout scores are deterministic baseline scores, not an LLM ranking.
 - Teammate opportunity and richer injury context should only be added after curated marts exist.
-- No Streamlit runtime behavior is wired to this table yet.
+- No consumer reads this table yet.
 
 ## Source Rules
 
@@ -112,4 +112,4 @@ The helper must not read raw `weekly_metrics`, `play_by_play`, NGS, FTN, snap, i
 
 ## Runtime Status
 
-No Streamlit runtime behavior is wired to this table yet.
+No consumer reads this table yet.

@@ -1,6 +1,6 @@
 # Backtesting V1
 
-This document defines the first projection-evaluation framework for AI vs. Meatbags.
+This document defines the first projection-evaluation framework for Pigskin.
 
 ## Status
 

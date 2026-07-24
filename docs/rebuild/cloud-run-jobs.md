@@ -1,6 +1,6 @@
 # Cloud Run Jobs
 
-This document defines the Cloud Run Job-ready path for long-running warehouse work. The Streamlit Cloud Run service remains the admin/UI surface. These jobs use the same container image unless a later cost or dependency split is justified.
+This document defines the Cloud Run Job path for long-running warehouse work. Jobs are the only runtime. These jobs use the same container image unless a later cost or dependency split is justified.
 
 No Cloud infrastructure is created by this document. The commands below are operator commands.
 
@@ -287,11 +287,11 @@ Recommended starting point:
 - Keep scheduled jobs conservative until warehouse freshness and row counts are visible.
 - Store only metadata in `cloud_run_job_runs`; put large logs or artifacts in Cloud Storage if needed.
 
-## Streamlit Data Ops Compatibility
+## Local Execution Compatibility
 
-Do not remove current Streamlit subprocess buttons yet.
+Local subprocess execution remains the default so jobs can be run without live Cloud Run access.
 
-Streamlit now has a default-off Cloud Run Jobs preview and trigger panel in Data Ops.
+`src/cloud_run_jobs.py` provides default-off preview and trigger helpers.
 
 Feature flags:
 
@@ -311,7 +311,7 @@ CLOUD_RUN_JOB_SERVICE_ACCOUNT=<job-service-account>
 
 Behavior:
 
-- With the default flags, Streamlit shows configured jobs and dry-run previews only.
+- With the default flags, only configured-job listing and dry-run previews are available.
 - Actual triggering requires `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true` and `DATA_OPS_ALLOW_JOB_TRIGGER=true`.
 - The user must confirm the trigger in the dashboard before any job is started.
 - Unknown job names and unsupported args are rejected by `src/cloud_run_jobs.py`.

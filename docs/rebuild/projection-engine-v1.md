@@ -1,6 +1,6 @@
 # Projection Engine V1
 
-This document defines the first deterministic projection layer for AI vs. Meatbags.
+This document defines the first deterministic projection layer for Pigskin.
 
 ## Status
 

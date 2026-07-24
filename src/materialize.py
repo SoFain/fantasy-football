@@ -1493,7 +1493,7 @@ def materialize_all(client, dataset_id="fantasy_football_brain", dry_run=False):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Materialize AI vs Vibes fantasy analytics tables.")
+    parser = argparse.ArgumentParser(description="Materialize Pigskin fantasy analytics tables.")
     parser.add_argument(
         "--dataset",
         default="fantasy_football_brain",
@@ -1518,7 +1518,7 @@ def main():
     args = parser.parse_args()
 
     client = bigquery.Client(project=args.project)
-    print("Materializing AI vs Vibes analytics tables...")
+    print("Materializing Pigskin analytics tables...")
     if args.only == "player-weekly-truth":
         jobs = [materialize_player_weekly_truth(client, dataset_id=args.dataset, dry_run=args.dry_run)]
     elif args.only == "pigskin-rankings":

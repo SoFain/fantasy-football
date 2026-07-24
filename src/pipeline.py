@@ -187,9 +187,9 @@ def run_pipeline(seasons, write_disposition="WRITE_TRUNCATE", dataset_name="fant
         # Load depth charts
         load_df_to_partitioned_table(client=bq_client, df=depth_charts_clean, dataset_id=dataset_id, table_name="depth_charts", write_disposition=write_disposition)
 
-        logger.info("--- Starting Step 4: Materializing AI vs Vibes truth table ---")
+        logger.info("--- Starting Step 4: Materializing Pigskin truth table ---")
         materialize_all(bq_client, dataset_id=dataset_name)
-        logger.info("Successfully materialized AI vs Vibes analytics tables.")
+        logger.info("Successfully materialized Pigskin analytics tables.")
 
         logger.info("=" * 60)
         logger.info(f"NFL Data Pipeline finished successfully at {datetime.now()}!")

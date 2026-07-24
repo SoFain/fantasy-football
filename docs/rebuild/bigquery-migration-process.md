@@ -185,7 +185,7 @@ The initial helper checks for the migration ledger table:
 - `134_content_briefs_source_freshness_exists.sql`
 - `135_content_briefs_missing_flags_exist.sql`
 
-Validation SQL files are not automatically run by the migration runner yet. They are tracked here so future PRs can add explicit checks without mixing validation and migration execution.
+Validation SQL files are deliberately not run by the migration runner. They have their own runner and their own process; see [bigquery-validation-process.md](bigquery-validation-process.md).
 
 ## Safety Notes
 
@@ -197,7 +197,6 @@ Validation SQL files are not automatically run by the migration runner yet. They
 
 ## Prioritized Migration-Debt List
 
-1. Add a validation runner for `bigquery/validations`.
 2. Apply `0004` and keep Pigskin ranking generation writing `model_run_id`.
 3. Add `player_identity_bridge` before wiring Player Profiles to compatibility views.
 4. Convert compatibility placeholder views into production views or tables in small PRs.

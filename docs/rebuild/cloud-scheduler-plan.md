@@ -4,7 +4,7 @@ This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does 
 
 ## Scheduler Principles
 
-- Trigger Cloud Run Jobs, not Streamlit request handlers.
+- Trigger Cloud Run Jobs directly.
 - Use least-privilege service accounts.
 - Keep early schedules conservative.
 - Prefer explicit job args over hidden defaults.
@@ -79,9 +79,9 @@ gcloud scheduler jobs create http validate-warehouse-daily `
 - Store large logs in Cloud Storage only when needed.
 - Review `cloud_run_job_runs` weekly for failures, duration spikes, and repeated reruns.
 
-## Deferred Streamlit Wiring
+## Deferred Operator Tooling
 
-The Streamlit Data Ops buttons stay in place for now.
+Local CLI execution stays the default for now.
 
 Future UI triggering should be guarded by:
 
@@ -89,4 +89,4 @@ Future UI triggering should be guarded by:
 USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=false
 ```
 
-When enabled, Streamlit should call a narrow job trigger helper and display recent `cloud_run_job_runs` rows instead of waiting for long subprocesses.
+When enabled, operator tooling should call a narrow job trigger helper and read recent `cloud_run_job_runs` rows instead of waiting for long subprocesses.
