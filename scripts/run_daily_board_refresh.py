@@ -162,7 +162,16 @@ def validate_positional() -> None:
             if row["missing_verdicts"]:
                 problems.append(f"{profile}/{position}: {row['missing_verdicts']} missing verdicts")
             if position in ("RB", "WR", "TE") and row["min_skill_score"] is not None:
-                if row["min_skill_score"] < 50 or row["max_skill_score"] > 99:
+                # The 50-99 normalization is the fable profiles' contract. GNG
+                # uses its own scale (the live published boards carry 99.5), so
+                # it is held to sane bounds only.
+                if profile == "gng_keeper":
+                    if row["min_skill_score"] <= 0 or row["max_skill_score"] > 100:
+                        problems.append(
+                            f"{profile}/{position}: score range "
+                            f"{row['min_skill_score']}-{row['max_skill_score']} outside 0-100"
+                        )
+                elif row["min_skill_score"] < 50 or row["max_skill_score"] > 99:
                     problems.append(
                         f"{profile}/{position}: score range "
                         f"{row['min_skill_score']}-{row['max_skill_score']} outside 50-99"
@@ -282,6 +291,11 @@ def main() -> int:
     run("4 apply half_ppr positional", [PYTHON, script("promote_ppr_fable_v1_positional.py"), "--scoring-profile", "half_ppr", "--apply"],
         env_extra={"ALLOW_PPR_FABLE_POSITIONAL_PROMOTION": "true"})
     run("4 apply gng candidates", [PYTHON, script("build_gng_2026_candidate_boards.py"), "--apply"])
+    # The GNG unified review table must rebuild from today's candidates BEFORE
+    # the GNG promote: its preflight joins unified_gng_2026_top150_review
+    # against the fresh positional boards and fails on any rank mismatch.
+    gng_board = OUT / "unified-gng-top150.json"
+    run("4 apply gng unified board table", [PYTHON, script("build_unified_gng_2026_top100.py"), "--output", str(gng_board), "--apply"])
     run("4 apply gng promote", [PYTHON, script("promote_gng_2026_rankings.py"), "--apply"],
         env_extra={"ALLOW_GNG_2026_PRODUCTION_PROMOTION": "true"})
 
@@ -292,7 +306,6 @@ def main() -> int:
     standard_board = OUT / "unified-standard-top150.json"
     ppr_board = OUT / "unified-ppr-top150.json"
     half_board = OUT / "unified-half-ppr-top150.json"
-    gng_board = OUT / "unified-gng-top150.json"
     run("6 build unified standard", [
         PYTHON, script("build_unified_fable_v1_top100.py"),
         "--json-output", str(standard_board), "--markdown-output", str(OUT / "unified-standard-top150.md"),
@@ -310,7 +323,6 @@ def main() -> int:
     run("6 dry promote unified ppr", [PYTHON, script("promote_unified_ppr_fable_v1_top100.py"), "--scoring-profile", "ppr", "--board", str(ppr_board)])
     run("6 dry promote unified half_ppr", [PYTHON, script("promote_unified_ppr_fable_v1_top100.py"), "--scoring-profile", "half_ppr", "--board", str(half_board)])
     run("6 dry promote unified gng", [PYTHON, script("promote_unified_gng_2026_top150.py"), "--board", str(gng_board)])
-    run("6 apply unified gng board table", [PYTHON, script("build_unified_gng_2026_top100.py"), "--output", str(gng_board), "--apply"])
     run("6 apply unified standard", [PYTHON, script("promote_unified_fable_v1_standard_top100.py"), "--board", str(standard_board), "--apply"],
         env_extra={"ALLOW_UNIFIED_FABLE_V1_TOP100_PROMOTION": "true"})
     run("6 apply unified ppr", [PYTHON, script("promote_unified_ppr_fable_v1_top100.py"), "--scoring-profile", "ppr", "--board", str(ppr_board), "--apply"],
