@@ -32,6 +32,7 @@ class PigskinRankingModelRunTests(unittest.TestCase):
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}), \
             patch.object(rankings.bigquery, "Client", return_value=fake_client), \
+            patch.object(rankings, "require_current_sleeper_pool"), \
             patch.object(rankings, "materialize_pigskin_rankings") as materialize, \
             patch.object(rankings, "fetch_generation_context", return_value={"season": 2026, "week": None}), \
             patch.object(rankings, "create_source_freshness_snapshot", return_value="fresh-1") as snapshot, \
@@ -87,6 +88,7 @@ class PigskinRankingModelRunTests(unittest.TestCase):
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}), \
             patch.object(rankings.bigquery, "Client", return_value=fake_client), \
+            patch.object(rankings, "require_current_sleeper_pool"), \
             patch.object(rankings, "materialize_pigskin_rankings"), \
             patch.object(rankings, "fetch_generation_context", return_value={"season": 2026, "week": None}), \
             patch.object(rankings, "create_source_freshness_snapshot", return_value="fresh-1"), \

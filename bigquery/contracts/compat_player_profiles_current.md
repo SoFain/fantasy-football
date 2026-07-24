@@ -158,7 +158,7 @@ Pigskin ranking context:
 Profile context:
 
 - `contract_summary_json`
-- `depth_chart_summary_json`
+- `depth_chart_summary_json` (historical, from nflreadpy `depth_charts`; current depth is Sleeper `depth_chart_position` / `depth_chart_order`)
 - `college_summary_json`
 - `rookie_scouting_summary_json`
 - `prospect_summary_json`

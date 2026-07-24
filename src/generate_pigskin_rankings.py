@@ -404,6 +404,40 @@ def write_rankings(client, dataset_id, rows):
     logger.info("Loaded %s LLM-authored Pigskin ranking rows.", len(df))
 
 
+def require_current_sleeper_pool(client, dataset_id, *, allow_stale=False):
+    """Fail unless sleeper_players_current holds today's snapshot.
+
+    Enforces the "run Sleeper first" rule: the daily Sleeper pull defines the
+    eligible, active player pool, so rankings must not run against a stale or
+    empty snapshot. In dry-run mode this downgrades to a warning so the pipeline
+    can be exercised without a live snapshot.
+    """
+    table_id = f"{client.project}.{dataset_id}.sleeper_players_current"
+    row = next(iter(client.query(
+        f"SELECT MAX(DATE(snapshot_at)) AS latest, COUNT(1) AS n FROM `{table_id}`"
+    ).result()))
+    today = datetime.now(timezone.utc).date()
+
+    if not row.n or row.latest is None:
+        message = (
+            "sleeper_players_current is empty. Run the ingest-sleeper-news job before "
+            "generating rankings: the Sleeper snapshot defines the eligible active player pool."
+        )
+    elif row.latest < today:
+        message = (
+            f"sleeper_players_current is stale (latest snapshot {row.latest}, expected {today}). "
+            "Run ingest-sleeper-news first: rankings must be built from today's active player pool."
+        )
+    else:
+        logger.info("Sleeper pool is current as of %s.", row.latest)
+        return
+
+    if allow_stale:
+        logger.warning("%s Proceeding because this is a dry run.", message)
+        return
+    raise RuntimeError(message)
+
+
 def generate_rankings(
     dataset_id=DEFAULT_DATASET,
     project_id=None,
@@ -428,7 +462,13 @@ def generate_rankings(
 
     if refresh_sleeper:
         logger.info("Refreshing Sleeper current player map before ranking generation.")
-        load_realtime_news()
+        load_realtime_news(client=client)
+
+    # Hard rule: rankings are built from today's Sleeper active pool. The
+    # snapshot defines who is eligible, and only Sleeper-active players are
+    # rankable, so a stale or missing snapshot must stop the run rather than
+    # silently rank last-known players.
+    require_current_sleeper_pool(client, dataset_id, allow_stale=dry_run)
 
     logger.info("Materializing Pigskin ranking candidate evidence.")
     materialize_pigskin_rankings(client, dataset_id=dataset_id, dry_run=False)

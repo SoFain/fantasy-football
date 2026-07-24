@@ -26,6 +26,15 @@ Hard architectural rules:
 10. Add tests or validation queries for every transformation.
 11. Prefer small, reviewable pull requests.
 12. Do not remove existing behavior unless the task explicitly asks for a migration/removal plan.
+13. Only Sleeper-active players may appear in rankings. A player without an `active` tag in the Sleeper snapshot is never rankable. The Sleeper players endpoint is fetched with `?active=true`, so non-active players are absent from `sleeper_players_current` entirely, and the ranking candidate mart additionally filters `active IS TRUE`. Enforced by validations 148-150.
+14. Rankings run once per day, and the daily Sleeper pull runs first. The snapshot defines the eligible pool, so `generate-pigskin-rankings` refuses to run without a current-day `sleeper_players_current` snapshot.
+15. Current depth chart position comes from Sleeper. nflreadpy `depth_charts` is a historical seasonal archive, not a current source; do not treat it as current depth. Rankings already use `sleeper_depth_chart_position` / `sleeper_depth_chart_order`.
+
+Sleeper API discipline:
+
+- `/v1/players/` is ~5MB and rate-limited by Sleeper to once per day. `src/ingest_news.py` is its only caller; it fetches with `?active=true` and skips if today's snapshot already exists. Every other job reads the saved `sleeper_players_current` snapshot, never the endpoint.
+- All other Sleeper endpoints (trending, league, rosters, matchups) have no such limit and may be called live.
+- Always honor the published Sleeper API rules at https://docs.sleeper.com/.
 
 Documentation rules:
 

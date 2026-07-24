@@ -34,7 +34,7 @@ Classification values:
 | `ftn_charting` | raw/source | Loaded by `src/pipeline.py:run_pipeline`. | Not safe directly. |
 | `weekly_snap_counts` | raw/source | Loaded by `src/pipeline.py:run_pipeline`; read by `src/materialize.py:build_player_weekly_truth_sql`. | Not safe directly. |
 | `injury_reports` | raw/source | Loaded by `src/pipeline.py:run_pipeline`; read by `src/materialize.py:build_player_weekly_truth_sql`. | Not safe directly. |
-| `depth_charts` | raw/source | Loaded by `src/pipeline.py:run_pipeline`; read directly by Player Profiles at `src/player_profiles.py`. | Not safe directly. |
+| `depth_charts` | raw/source, historical | Loaded by `src/pipeline.py:run_pipeline`; read by Player Profiles at `src/player_profiles.py`. Historical seasonal archive; current depth comes from Sleeper. | Not safe directly. Not a current-depth source. |
 | `sleeper_players_current` | staging | Current Sleeper player snapshot written by `src/ingest_news.py:load_realtime_news`; read by ranking candidates at `src/materialize.py:build_pigskin_rankings_sql`. | Safe only behind identity/ranking marts. |
 | `realtime_player_news` | staging | Sleeper add/drop snapshot written by `src/ingest_news.py:load_realtime_news`; read by `src/materialize.py:build_player_weekly_truth_sql`. | Safe only as signal after wrapping. |
 | `sleeper_leagues` | raw/source | Schema in `src/ingest_sleeper_league.py:SLEEPER_TABLE_SCHEMAS`; rows assembled at `src/ingest_sleeper_league.py:build_records`. | Not safe directly. |
