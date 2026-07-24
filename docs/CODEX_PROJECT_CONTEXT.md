@@ -30,6 +30,12 @@ Hard architectural rules:
 14. Rankings run once per day, and the daily Sleeper pull runs first. The snapshot defines the eligible pool, so `generate-pigskin-rankings` refuses to run without a current-day `sleeper_players_current` snapshot.
 15. Current depth chart position comes from Sleeper. nflreadpy `depth_charts` is a historical seasonal archive, not a current source; do not treat it as current depth. Rankings already use `sleeper_depth_chart_position` / `sleeper_depth_chart_order`.
 
+Coaching staff:
+
+- `coaching_staff_current` is the first coaching layer: current staff only, curated from Wikipedia via `data/coaching_staff.csv`. Coaching styles and historical records are later layers.
+- The public feed is JSON and content-addressed (not XML), published by the ranking project's `scripts/publish_public_rankings.py` to the `fantasy-football-498121-public-rankings` bucket. `v1/manifest.json` is the single mutable object; never write it from more than one place. The `coaching-staff-feed` job emits an immutable dataset object and a manifest entry for that publisher to merge.
+- This branch is a stale fork; the main `E:\Fantasy Football` checkout owns the feed publisher and migrations 0025-0043. Migrations added here start at 0044 to avoid colliding with the live ledger.
+
 Sleeper API discipline:
 
 - `/v1/players/` is ~5MB and rate-limited by Sleeper to once per day. `src/ingest_news.py` is its only caller; it fetches with `?active=true` and skips if today's snapshot already exists. Every other job reads the saved `sleeper_players_current` snapshot, never the endpoint.

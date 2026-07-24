@@ -70,6 +70,22 @@ Team feeds are commentary, not an authoritative injury source. Sleeper's `status
 
 **Sleeper API discipline.** The `/v1/players/` map is ~5MB and Sleeper limits it to once per day, so `ingest-sleeper-news` is its only caller, fetches it with `?active=true`, and skips if today's snapshot already exists (`--force` overrides). Every other job — including on-demand `ingest-sleeper-league` — reads the saved `sleeper_players_current` snapshot rather than calling the endpoint again. Per-league endpoints (`/league`, `/rosters`, `/matchups`) have no such limit and stay live. Run `ingest-sleeper-news` before `ingest-sleeper-league`, or the league job errors that the snapshot is empty.
 
+## Coaching Staff
+
+First coaching layer: current staff for all 32 teams across eight roles, for agent context. Curated from the Wikipedia current-staffs page via a reviewed CSV; coaching styles and historical records are later layers.
+
+| Document | Purpose |
+| --- | --- |
+| [rebuild/coaching-staff-layer.md](rebuild/coaching-staff-layer.md) | The layer: table, curation, and feed integration. |
+| [../bigquery/contracts/coaching_staff_current.md](../bigquery/contracts/coaching_staff_current.md) | The `coaching_staff_current` table. |
+
+```bash
+python -m src.job_runner --job-name ingest-coaching-staff
+python -m src.job_runner --job-name coaching-staff-feed
+```
+
+The public feed is JSON, content-addressed, published to a Cloud Storage bucket the ranking project owns (`.../v1/manifest.json`). The coaching-staff-feed job emits an immutable dataset object plus a manifest entry; the ranking project's `publish_public_rankings.py` merges that entry, since it is the single writer of the mutable manifest.
+
 ## Modeling and Evidence
 
 | Document | Purpose |

@@ -28,6 +28,8 @@ VALID_JOB_NAMES = (
     "ingest-college-stats",
     "ingest-rookie-scouting",
     "detect-player-changes",
+    "ingest-coaching-staff",
+    "coaching-staff-feed",
     "materialize-analytics",
     "generate-pigskin-rankings",
     "generate-evidence-packets",
@@ -102,6 +104,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--job-run-id")
     parser.add_argument("--backtest-name")
     parser.add_argument("--allow-large-backtest", action="store_true")
+    parser.add_argument("--source-url", help="Provenance/source URL for coaching staff jobs.")
+    parser.add_argument("--out", help="Local artifact directory for feed jobs.")
+    parser.add_argument(
+        "--publish-feed",
+        action="store_true",
+        help="For coaching-staff-feed: upload the immutable object to Cloud Storage. Never updates the manifest.",
+    )
     parser.add_argument("--log-level", default=os.environ.get("LOG_LEVEL", "INFO"))
     return parser.parse_args(argv)
 
@@ -365,6 +374,41 @@ def dispatch_detect_player_changes(args: argparse.Namespace, client: Any) -> dic
     )
 
 
+def dispatch_ingest_coaching_staff(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.ingest_coaching_staff import DEFAULT_SOURCE_URL, load_coaching_staff
+
+    csv_path = args.csv or _default_coaching_staff_csv()
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "csv": csv_path}
+    return load_coaching_staff(
+        csv_path,
+        dataset_name=args.dataset,
+        source_url=args.source_url or DEFAULT_SOURCE_URL,
+        client=client,
+    )
+
+
+def dispatch_coaching_staff_feed(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.coaching_staff_feed import build_coaching_staff_feed
+
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "note": "would render coaching_staff_current to a JSON feed object"}
+    result = build_coaching_staff_feed(
+        dataset_name=args.dataset,
+        out_dir=args.out,
+        source_url=args.source_url or "",
+        publish=args.publish_feed,
+        client=client,
+    )
+    # The manifest entry is an artifact + log line; return scalars only.
+    return {
+        "row_count": result["row_count"],
+        "object": result["object"],
+        "sha256": result["sha256"],
+        "published": result["published"],
+    }
+
+
 def dispatch_materialize_analytics(args: argparse.Namespace, client: Any) -> dict[str, Any]:
     from src.materialize import materialize_all
     from src.materialize_fantasy_points import materialize_fantasy_points
@@ -601,6 +645,8 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "ingest-college-stats": dispatch_ingest_college_stats,
     "ingest-rookie-scouting": dispatch_ingest_rookie_scouting,
     "detect-player-changes": dispatch_detect_player_changes,
+    "ingest-coaching-staff": dispatch_ingest_coaching_staff,
+    "coaching-staff-feed": dispatch_coaching_staff_feed,
     "materialize-analytics": dispatch_materialize_analytics,
     "generate-pigskin-rankings": dispatch_generate_pigskin_rankings,
     "generate-evidence-packets": dispatch_generate_evidence_packets,
@@ -678,6 +724,10 @@ def _generate_job_run_id(job_name: str) -> str:
 
 def _current_season() -> int:
     return datetime.now(timezone.utc).year
+
+
+def _default_coaching_staff_csv() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "coaching_staff.csv")
 
 
 def _default_context_csv() -> str:

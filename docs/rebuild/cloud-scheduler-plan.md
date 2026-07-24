@@ -17,6 +17,8 @@ This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does 
 | --- | --- | --- |
 | `ingest-sleeper-news` | daily at 07:00 America/New_York | Snapshots the Sleeper player map (`/v1/players/?active=true`) and appends to `sleeper_players_history`. This is the only caller of `/v1/players/`, which Sleeper limits to once per day; the job skips if today's snapshot already exists. Other jobs read the saved snapshot. |
 | `detect-player-changes` | daily at 07:15 America/New_York | Runs after the snapshot. Diffs the two most recent snapshots and pulls team news for injury, team, depth-chart, and deactivation changes. |
+| `ingest-coaching-staff` | weekly, and on coaching changes | Loads the curated coaching CSV. Small and cheap; refresh after editing the CSV. |
+| `coaching-staff-feed` | after ingest-coaching-staff | Emits the JSON dataset object and manifest entry for the ranking publisher to merge. |
 | `ingest-nflverse` | after game days | Run by explicit season. Avoid repeated full truncation during live show prep unless intended. |
 | `materialize-analytics` | after successful ingestion | Use after source tables are refreshed. |
 | `generate-pigskin-rankings` | daily at 07:30 America/New_York | Runs after the Sleeper snapshot. Refuses to run without a current-day `sleeper_players_current` snapshot, since that defines the eligible active pool. Watch the Gemini budget. |
