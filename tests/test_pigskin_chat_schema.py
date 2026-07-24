@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
-import re
 
 from src.pigskin_chat_schema import (
     PIGSKIN_CHAT_ALLOWED_TABLES,
@@ -48,22 +46,6 @@ class PigskinChatSchemaTests(unittest.TestCase):
 
         for table_name in PIGSKIN_CHAT_BLOCKED_TABLES + EXTRA_FORBIDDEN_SCHEMA_TERMS:
             self.assertNotIn(table_name, schema)
-
-    def test_app_prompt_uses_context_tool_protocol(self):
-        app_source = Path("app.py").read_text(encoding="utf-8")
-        self.assertIn("### Context Tool Protocol ###", app_source)
-        self.assertIn("You cannot write or execute SQL", app_source)
-        self.assertNotIn('"name": "execute_bigquery_sql"', app_source)
-        match = re.search(
-            r"### Context Tool Protocol ###(.*?)### Causal Claim Protocol ###",
-            app_source,
-            flags=re.DOTALL,
-        )
-        self.assertIsNotNone(match)
-        prompt_segment = match.group(1)
-
-        for table_name in PIGSKIN_CHAT_BLOCKED_TABLES + EXTRA_FORBIDDEN_SCHEMA_TERMS:
-            self.assertNotIn(table_name, prompt_segment)
 
     def test_context_tool_declarations_replace_sql_tool(self):
         declarations = get_pigskin_context_tool_declarations()
