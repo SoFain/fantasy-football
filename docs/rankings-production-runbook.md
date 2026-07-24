@@ -244,6 +244,17 @@ Do not pass a single `--profile` during a normal production release. The manifes
 
 The publisher uploads content-addressed board objects first, then an immutable versioned manifest, and updates `v1/manifest.json` last.
 
+## Daily automated publish and site import
+
+Since 2026-07-24 a scheduled task, `PigskinDailyPublishImport`, runs daily at 07:30 America/New_York (this machine's local time) as the final leg of the 7am chain (07:00 `ingest-sleeper-news` and 07:15 `detect-player-changes` run on Cloud Run):
+
+1. `scripts/publish_public_rankings.py --publish --gcloud-auth` — republish all four profiles. Idempotent: unchanged boards resolve to the same content-addressed objects, so a quiet day only refreshes `published_at`.
+2. `scripts/run_remote_php.py --file scripts/trigger_site_rankings_import.php` (from `E:\cbs-league-history`) — the IONOS site mirrors changed boards into MySQL; unchanged profiles are skipped by sha256. The import never runs after a failed publish.
+
+The manifest carries `datasets` entries (currently `coaching_staff`) forward from the live manifest on every publish; passing `--dataset-entry` overrides or adds one. Logs: `output\daily-publish\`. The task runs the wrapper `scripts/daily_publish_and_import.ps1`; remove with `schtasks /delete /tn "PigskinDailyPublishImport" /f`.
+
+This automates publication only. Board regeneration (the fable formula pipeline) remains manual and runbook-governed; the daily task publishes whatever the canonical tables hold.
+
 ### 11. Verify anonymously
 
 Fetch the public manifest without credentials:

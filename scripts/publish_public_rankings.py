@@ -190,6 +190,51 @@ def public_url(bucket_name: str, object_name: str) -> str:
     return f"https://storage.googleapis.com/{bucket_name}/{quote(object_name, safe='/')}"
 
 
+def fetch_current_datasets(bucket: storage.Bucket | None, bucket_name: str) -> dict[str, dict[str, Any]]:
+    """Carry forward the datasets listed in the current live manifest.
+
+    The manifest is rebuilt in full on every publish. Without carry-forward, a
+    scheduled publish that passes no --dataset-entry would silently drop
+    previously published datasets (coaching_staff). Entries supplied via
+    --dataset-entry override carried ones of the same name.
+    """
+    raw: bytes | None = None
+    if bucket is not None:
+        try:
+            raw = bucket.blob("v1/manifest.json").download_as_bytes()
+        except NotFound:
+            return {}
+    else:
+        from urllib.request import Request, urlopen
+
+        try:
+            request = Request(
+                public_url(bucket_name, "v1/manifest.json"),
+                headers={"User-Agent": "publish-public-rankings"},
+            )
+            with urlopen(request, timeout=30) as response:
+                raw = response.read()
+        except Exception:
+            return {}
+    try:
+        manifest = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    datasets = manifest.get("datasets")
+    if not isinstance(datasets, dict):
+        return {}
+    carried: dict[str, dict[str, Any]] = {}
+    for name, entry in datasets.items():
+        if (
+            isinstance(name, str)
+            and IDENTIFIER_RE.fullmatch(name)
+            and isinstance(entry, dict)
+            and all(key in entry for key in ("object", "url", "sha256", "bytes"))
+        ):
+            carried[name] = entry
+    return carried
+
+
 def active_gcloud_credentials() -> Credentials:
     executable = shutil.which("gcloud") or shutil.which("gcloud.cmd")
     if not executable:
@@ -295,7 +340,7 @@ def main() -> int:
             "warnings": payload["warnings"],
         }
 
-    dataset_entries: dict[str, dict[str, Any]] = {}
+    dataset_entries: dict[str, dict[str, Any]] = fetch_current_datasets(bucket, args.bucket)
     for entry_path in args.dataset_entry or []:
         entry = json.loads(entry_path.read_text(encoding="utf-8"))
         name = entry.get("dataset")
@@ -334,6 +379,7 @@ def main() -> int:
         "manifest": public_url(args.bucket, "v1/manifest.json") if bucket else None,
         "immutable_manifest": public_url(args.bucket, immutable_manifest_name) if bucket else None,
         "profiles": profile_entries,
+        "datasets": sorted(dataset_entries),
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
