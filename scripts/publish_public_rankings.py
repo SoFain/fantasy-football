@@ -201,7 +201,15 @@ def fetch_player_context(
     the boards then ship without the blocks, exactly as before schema 1.3.
     """
     sql = f"""
-    WITH metrics AS (
+    WITH gng_points AS (
+      SELECT
+        COALESCE(source_player_key, REGEXP_REPLACE(player_id_internal, r'^gsis:', '')) AS player_id,
+        ROUND(AVG(total_fantasy_points), 2) AS gng_ppg
+      FROM `{project_id}.{dataset_id}.analytics_player_fantasy_points_by_profile`
+      WHERE scoring_profile_id = 'gng_keeper' AND season = 2025
+      GROUP BY 1
+    ),
+    metrics AS (
       SELECT
         player_id,
         COUNT(DISTINCT week) AS games,
@@ -224,12 +232,13 @@ def fetch_player_context(
       s.team_from, s.team_to, s.team_changed,
       s.qb_from, s.qb_to, s.qb_changed, s.qb_quality_delta,
       s.age_at_season, s.head_coach, s.offensive_coordinator,
-      s.hc_changed, s.flags_json, s.metric_basis,
-      m.games, m.std_ppg, m.ppr_ppg, m.targets_per_game, m.target_share_pct,
+      s.hc_changed, s.flags_json, s.metric_basis, s.qb_quality_delta_gng,
+      m.games, m.std_ppg, m.ppr_ppg, g.gng_ppg, m.targets_per_game, m.target_share_pct,
       m.wopr, m.carries_per_game, m.red_zone_touches_per_game, m.touchdowns,
       m.epa_per_opportunity
     FROM `{project_id}.{dataset_id}.analytics_player_situation` s
     LEFT JOIN metrics m ON m.player_id = s.player_id_internal
+    LEFT JOIN gng_points g ON g.player_id = s.player_id_internal
     WHERE s.situation_for_season = 2026
     """
     try:
@@ -247,7 +256,7 @@ def fetch_player_context(
         metrics = {
             key: row.get(key)
             for key in (
-                "games", "std_ppg", "ppr_ppg", "targets_per_game", "target_share_pct",
+                "games", "std_ppg", "ppr_ppg", "gng_ppg", "targets_per_game", "target_share_pct",
                 "wopr", "carries_per_game", "red_zone_touches_per_game", "touchdowns",
                 "epa_per_opportunity",
             )
@@ -262,6 +271,7 @@ def fetch_player_context(
                 "qb_2025": row.get("qb_from"),
                 "qb_changed": bool(row.get("qb_changed")),
                 "qb_quality_delta_ppg": row.get("qb_quality_delta"),
+                "qb_quality_delta_gng_ppg": row.get("qb_quality_delta_gng"),
                 "age": row.get("age_at_season"),
                 "head_coach": row.get("head_coach"),
                 "offensive_coordinator": row.get("offensive_coordinator"),
