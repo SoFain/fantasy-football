@@ -1,6 +1,6 @@
 # sleeper_players_history Contract
 
-Base SQL: [bigquery/migrations/0025__player_status_watch.sql](../migrations/0025__player_status_watch.sql)
+Base SQL: [bigquery/migrations/0044__player_status_watch.sql](../migrations/0044__player_status_watch.sql)
 
 Written by [src/ingest_news.py](../../src/ingest_news.py).
 

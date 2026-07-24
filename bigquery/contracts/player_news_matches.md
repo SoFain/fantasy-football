@@ -1,6 +1,6 @@
 # player_news_matches Contract
 
-Base SQL: [bigquery/migrations/0025__player_status_watch.sql](../migrations/0025__player_status_watch.sql)
+Base SQL: [bigquery/migrations/0044__player_status_watch.sql](../migrations/0044__player_status_watch.sql)
 
 Written by [src/detect_player_changes.py](../../src/detect_player_changes.py).
 
