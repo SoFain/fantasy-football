@@ -19,7 +19,12 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.sleeper_player_snapshot import SLEEPER_PLAYERS_URL, fetch_sleeper_players
+try:
+    from src.sleeper_player_snapshot import SLEEPER_PLAYERS_URL
+except ImportError:  # archive image vendors only this script
+    SLEEPER_PLAYERS_URL = "https://api.sleeper.app/v1/players/nfl"
+
+WAREHOUSE_SOURCE_URL = "warehouse:fantasy_football_brain.sleeper_players_current"
 
 DEFAULT_PROJECT = "fantasy-football-498121"
 DEFAULT_DATASET = "fantasy_football_advanced_metrics"
@@ -33,7 +38,9 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def build_context_rows(players: dict[str, Any], *, fetched_at: datetime) -> list[dict[str, Any]]:
+def build_context_rows(
+    players: dict[str, Any], *, fetched_at: datetime, source_url: str = SLEEPER_PLAYERS_URL
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for sleeper_player_id, player in players.items():
         if not isinstance(player, dict):
@@ -60,16 +67,79 @@ def build_context_rows(players: dict[str, Any], *, fetched_at: datetime) -> list
             "active": player.get("active"),
             "metadata_json": _json_dumps(player.get("metadata") or {}),
             "raw_payload_hash": hashlib.sha256(raw_json.encode("utf-8")).hexdigest(),
-            "source_url": SLEEPER_PLAYERS_URL,
+            "source_url": source_url,
             "fetched_at": fetched_at.isoformat(),
         })
     return rows
+
+
+def load_players_from_warehouse(project: str, brain_dataset: str) -> tuple[dict[str, Any], datetime, str]:
+    """Build the player map from today's saved Sleeper snapshot; zero API calls.
+
+    Sleeper limits /v1/players/ to once per day and the 07:00 ingest-sleeper-news
+    job is its single caller. This reads that saved snapshot and reshapes it to
+    the API map shape build_context_rows expects, so the safety context can be
+    refreshed daily without a second fetch. Fields the warehouse does not store
+    (first/last name, metadata) are derived or empty; every field the safety
+    view and promoters consume is present.
+    """
+    import re as _re
+
+    from google.cloud import bigquery
+
+    client = bigquery.Client(project=project)
+    sql = f"""
+    SELECT *
+    FROM `{project}.{brain_dataset}.sleeper_players_current`
+    WHERE snapshot_at = (
+        SELECT MAX(snapshot_at) FROM `{project}.{brain_dataset}.sleeper_players_current`
+    )
+    """
+    players: dict[str, Any] = {}
+    fetched_at: datetime | None = None
+    for row in client.query(sql).result():
+        record = dict(row)
+        fetched_at = record["snapshot_at"]
+        name = record.get("player_name") or ""
+        first, _, last = name.partition(" ")
+        try:
+            fantasy_positions = json.loads(record.get("fantasy_positions_json") or "[]")
+        except ValueError:
+            fantasy_positions = []
+        age = record.get("age")
+        players[str(record["sleeper_player_id"])] = {
+            "full_name": name or None,
+            "first_name": first or None,
+            "last_name": last or None,
+            "search_full_name": _re.sub(r"[^a-z]", "", name.lower()) or None,
+            "gsis_id": record.get("gsis_id"),
+            "team": record.get("team"),
+            "position": record.get("position"),
+            "fantasy_positions": fantasy_positions,
+            "status": record.get("status"),
+            "injury_status": record.get("injury_status"),
+            "injury_body_part": record.get("injury_body_part"),
+            "injury_notes": record.get("injury_notes"),
+            "depth_chart_position": record.get("depth_chart_position"),
+            "depth_chart_order": record.get("depth_chart_order"),
+            "years_exp": record.get("years_exp"),
+            "age": int(age) if age is not None else None,
+            "active": record.get("active"),
+            "metadata": {},
+        }
+    if not players or fetched_at is None:
+        raise RuntimeError(
+            "sleeper_players_current is empty; run the ingest-sleeper-news job first."
+        )
+    return players, fetched_at, "warehouse"
 
 
 def load_players(cache_path: Path, *, refresh: bool) -> tuple[dict[str, Any], datetime, str]:
     if cache_path.exists() and not refresh:
         cached = json.loads(cache_path.read_text(encoding="utf-8"))
         return cached["players"], datetime.fromisoformat(cached["fetched_at"]), "cache"
+    from src.sleeper_player_snapshot import fetch_sleeper_players
+
     players = fetch_sleeper_players()
     fetched_at = datetime.now(timezone.utc)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +292,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--brain-dataset", default=DEFAULT_BRAIN_DATASET)
     parser.add_argument("--cache-path", type=Path, default=DEFAULT_CACHE)
     parser.add_argument("--refresh", action="store_true", help="Force one network fetch even when the cache exists.")
+    parser.add_argument(
+        "--from-warehouse",
+        action="store_true",
+        help=(
+            "Build the player map from fantasy_football_brain.sleeper_players_current "
+            "(today's saved snapshot) instead of fetching or reading the cache. "
+            "Honors the once-per-day /v1/players/ limit: zero Sleeper API calls."
+        ),
+    )
     parser.add_argument("--archive", action="store_true",
                         help="Also append to sleeper_player_snapshot_history (weekly archive) and refresh the status-changes view.")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -229,8 +308,14 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--apply", action="store_true", help="Write the research table and review view.")
     args = parser.parse_args(argv)
 
-    players, fetched_at, origin = load_players(args.cache_path, refresh=args.refresh)
-    rows = build_context_rows(players, fetched_at=fetched_at)
+    if args.from_warehouse and args.refresh:
+        parser.error("--from-warehouse and --refresh are mutually exclusive")
+    if args.from_warehouse:
+        players, fetched_at, origin = load_players_from_warehouse(args.project, args.brain_dataset)
+        rows = build_context_rows(players, fetched_at=fetched_at, source_url=WAREHOUSE_SOURCE_URL)
+    else:
+        players, fetched_at, origin = load_players(args.cache_path, refresh=args.refresh)
+        rows = build_context_rows(players, fetched_at=fetched_at)
     summary = {
         "players_origin": origin,
         "fetched_at": fetched_at.isoformat(),
