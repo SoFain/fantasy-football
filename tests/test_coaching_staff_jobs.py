@@ -55,8 +55,14 @@ class IngestTest(unittest.TestCase):
             client=client,
         )
         self.assertEqual(result["row_count"], 256)
-        # The shipped scaffold has no names yet, so every row is vacant.
-        self.assertEqual(result["vacant"], 256)
+        # The shipped CSV is populated from the Wikipedia source; vacancy must
+        # match its actual unfilled rows and stay well below the full grid.
+        csv_rows = ingest.read_csv_rows(
+            Path(__file__).resolve().parents[1] / "data" / "coaching_staff.csv"
+        )
+        expected_vacant = sum(1 for r in csv_rows if not (r["coach_name"] or "").strip())
+        self.assertEqual(result["vacant"], expected_vacant)
+        self.assertLess(result["vacant"], 64)
         rows, table_id = client.loaded
         self.assertTrue(table_id.endswith("coaching_staff_current"))
         self.assertEqual(len(rows), 256)
