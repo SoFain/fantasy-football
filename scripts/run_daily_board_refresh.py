@@ -56,6 +56,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MAIN_ROOT = Path(os.environ.get("PIGSKIN_MAIN_ROOT", r"E:\Fantasy Football"))
+BRANCH_ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
 OUT = MAIN_ROOT / "output" / "board-refresh"
 
@@ -90,6 +91,7 @@ def run(
     *,
     env_extra: dict[str, str] | None = None,
     ok_codes: tuple[int, ...] = (0,),
+    cwd: Path | None = None,
 ) -> None:
     """Run one stage command from the main checkout; raise on failure.
 
@@ -100,7 +102,7 @@ def run(
     if env_extra:
         env.update(env_extra)
     print(f"--- {label}: {' '.join(args)}", flush=True)
-    result = subprocess.run(args, cwd=MAIN_ROOT, env=env)
+    result = subprocess.run(args, cwd=cwd or MAIN_ROOT, env=env)
     if result.returncode not in ok_codes:
         raise RuntimeError(f"stage failed: {label} (exit {result.returncode})")
 
@@ -225,6 +227,45 @@ def validate_local_publish() -> None:
     print("--- local publish validation passes (4 profiles, 150 rows, zero warnings)", flush=True)
 
 
+def write_situation_review() -> None:
+    """The daily owner-review queue: flagged situations for ranked players.
+
+    Same surfacing philosophy as the cutline guardrails: facts stop for owner
+    eyes, they do not move ranks. The chain log carries the summary; the
+    markdown artifact carries the list.
+    """
+    rows = bq_rows(f"""
+        SELECT s.player_name, s.position, r.rank, s.team_from, s.team_to,
+               s.qb_to, s.qb_quality_delta, s.head_coach, s.hc_changed, s.flags_json
+        FROM `{PROJECT}.{BRAIN}.analytics_player_situation` s
+        JOIN `{PROJECT}.{BRAIN}.analytics_pigskin_rankings` r
+          ON r.player_id = s.player_id_internal AND r.is_active
+         AND r.scoring_profile_id = 'standard' AND r.position = s.position
+        WHERE s.situation_for_season = 2026 AND s.flags_json != '[]'
+        ORDER BY s.position, r.rank
+    """)
+    review_dir = MAIN_ROOT / "output" / "daily-publish"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    artifact = review_dir / f"situation-review-{stamp}.md"
+    lines = [
+        f"# Situation review queue {stamp}",
+        "",
+        f"{len(rows)} ranked players carry situation flags. Flags are context,",
+        "never rank movement; Phase-3 adjustments require owner-approved policy.",
+        "",
+        "| Player | Pos | Rank | Move | QB (delta) | HC | Flags |",
+        "| --- | --- | ---: | --- | --- | --- | --- |",
+    ]
+    for r in rows:
+        move = f"{r['team_from']}->{r['team_to']}" if r["team_from"] != r["team_to"] else r["team_to"]
+        qb = f"{r['qb_to']} ({r['qb_quality_delta']:+.1f})" if r["qb_quality_delta"] is not None else (r["qb_to"] or "")
+        hc = f"{r['head_coach']} (new)" if r["hc_changed"] else (r["head_coach"] or "")
+        lines.append(f"| {r['player_name']} | {r['position']} | {r['rank']} | {move} | {qb} | {hc} | {r['flags_json']} |")
+    artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"--- situation review: {len(rows)} flagged ranked players -> {artifact}", flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -339,6 +380,13 @@ def main() -> int:
     run("8 dry gng context", [PYTHON, script("build_gng_rank_context.py")])
     run("8 apply gng context", [PYTHON, script("build_gng_rank_context.py"), "--apply"],
         env_extra={"ALLOW_GNG_RANK_CONTEXT_PUBLISH": "true"})
+
+    # Stage 8.5: refresh the situation layer from the just-promoted boards and
+    # today's Sleeper snapshot, emit the public dataset artifacts for the
+    # wrapper to upload, and write the owner-review queue.
+    run("8.5 rebuild situation layer", [PYTHON, "-m", "src.job_runner", "--job-name", "build-situation-layer"], cwd=BRANCH_ROOT)
+    run("8.6 situation feed artifacts", [PYTHON, "-m", "src.job_runner", "--job-name", "situation-feed"], cwd=BRANCH_ROOT)
+    write_situation_review()
 
     # Stage 9: local publish validation. The wrapper publishes only after this.
     run("9 local publish validation", [PYTHON, script("publish_public_rankings.py")])

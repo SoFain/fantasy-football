@@ -48,6 +48,11 @@ BEGIN TRANSACTION;
 TRUNCATE TABLE `{project_id}.{dataset_id}.{TABLE_NAME}`;
 
 INSERT INTO `{project_id}.{dataset_id}.{TABLE_NAME}`
+  (situation_for_season, stats_season, player_id_internal, gsis_id, sleeper_player_id,
+   player_name, position, team_from, team_to, team_changed, games_prev, ppg_prev, ppg_next,
+   qb_from, qb_to, qb_quality_from, qb_quality_to, qb_quality_delta, qb_changed,
+   age_at_season, head_coach, offensive_coordinator, flags_json, metric_basis, created_at,
+   hc_changed, oc_changed)
 WITH player_season AS (
   -- Identity note: player_id_internal changed schemes mid-history in the
   -- profile points mart (2015-2024 rows use bare gsis, 2025 rows use
@@ -131,6 +136,14 @@ staff AS (
   FROM `{project_id}.{dataset_id}.coaching_staff_current`
   GROUP BY team_abbr
 ),
+staff_prev AS (
+  -- Prior-season head coach baseline (head-coach-only; see migration 0047).
+  -- Mid-season changes carry both names, so the change test asks whether the
+  -- current head coach appears anywhere in the baseline string.
+  SELECT team_abbr, coach_name AS hc_prev
+  FROM `{project_id}.{dataset_id}.coaching_staff_history`
+  WHERE season = {STATS_SEASON} AND role = 'head_coach'
+),
 sleeper_now AS (
   SELECT sleeper_player_id, team
   FROM `{project_id}.{dataset_id}.sleeper_players_current`
@@ -179,9 +192,19 @@ enriched AS (
     b.sleeper_player_id,
     ROUND(u.qb_quality_to - u.qb_quality_from, 2) AS qb_quality_delta,
     COALESCE(u.qb_to != u.qb_from, FALSE) AS qb_changed_calc,
-    ROUND(SAFE_DIVIDE(DATE_DIFF(DATE(u.situation_for_season, 9, 1), b.birth_date, DAY), 365.25), 1) AS age_at_season
+    ROUND(SAFE_DIVIDE(DATE_DIFF(DATE(u.situation_for_season, 9, 1), b.birth_date, DAY), 365.25), 1) AS age_at_season,
+    IF(u.situation_for_season = {CURRENT_SEASON}, staff.head_coach, NULL) AS head_coach_now,
+    IF(u.situation_for_season = {CURRENT_SEASON}, staff.offensive_coordinator, NULL) AS oc_now,
+    IF(
+      u.situation_for_season = {CURRENT_SEASON}
+        AND staff.head_coach IS NOT NULL AND staff_prev.hc_prev IS NOT NULL,
+      STRPOS(staff_prev.hc_prev, staff.head_coach) = 0,
+      NULL
+    ) AS hc_changed_calc
   FROM unioned u
   LEFT JOIN bridge b ON b.gsis_id = u.player_id_internal
+  LEFT JOIN staff ON u.situation_for_season = {CURRENT_SEASON} AND staff.team_abbr = u.team_to
+  LEFT JOIN staff_prev ON u.situation_for_season = {CURRENT_SEASON} AND staff_prev.team_abbr = u.team_to
 )
 SELECT
   e.situation_for_season,
@@ -204,8 +227,8 @@ SELECT
   e.qb_quality_delta,
   e.qb_changed_calc AS qb_changed,
   e.age_at_season,
-  IF(e.situation_for_season = {CURRENT_SEASON}, staff.head_coach, NULL) AS head_coach,
-  IF(e.situation_for_season = {CURRENT_SEASON}, staff.offensive_coordinator, NULL) AS offensive_coordinator,
+  e.head_coach_now AS head_coach,
+  e.oc_now AS offensive_coordinator,
   TO_JSON_STRING(ARRAY(
     SELECT flag FROM UNNEST([
       IF(e.team_changed, 'NEW_TEAM', NULL),
@@ -215,6 +238,7 @@ SELECT
       IF(e.position != 'QB' AND e.qb_quality_delta <= -{QB_UPGRADE_MAJOR_PPG}, 'QB_DOWNGRADE_MAJOR',
         IF(e.position != 'QB' AND e.qb_quality_delta <= -{QB_UPGRADE_PPG}, 'QB_DOWNGRADE', NULL)),
       IF(e.position != 'QB' AND e.qb_to IS NOT NULL AND e.qb_quality_to IS NULL, 'QB_NO_PRIOR_SEASON', NULL),
+      IF(e.hc_changed_calc IS TRUE, 'NEW_HC', NULL),
       CASE
         {age_cliff_sql}
         ELSE NULL
@@ -222,9 +246,10 @@ SELECT
     ]) AS flag WHERE flag IS NOT NULL
   )) AS flags_json,
   CONCAT(CAST(e.stats_season AS STRING), '_', COALESCE(e.team_from, 'UNK')) AS metric_basis,
-  CURRENT_TIMESTAMP() AS created_at
-FROM enriched e
-LEFT JOIN staff ON e.situation_for_season = {CURRENT_SEASON} AND staff.team_abbr = e.team_to;
+  CURRENT_TIMESTAMP() AS created_at,
+  e.hc_changed_calc AS hc_changed,
+  CAST(NULL AS BOOL) AS oc_changed
+FROM enriched e;
 
 COMMIT TRANSACTION;
 """

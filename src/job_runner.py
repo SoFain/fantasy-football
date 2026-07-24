@@ -31,6 +31,7 @@ VALID_JOB_NAMES = (
     "ingest-coaching-staff",
     "coaching-staff-feed",
     "build-situation-layer",
+    "situation-feed",
     "materialize-analytics",
     "generate-pigskin-rankings",
     "generate-evidence-packets",
@@ -106,6 +107,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--backtest-name")
     parser.add_argument("--allow-large-backtest", action="store_true")
     parser.add_argument("--source-url", help="Provenance/source URL for coaching staff jobs.")
+    parser.add_argument(
+        "--history-season", type=int,
+        help="For ingest-coaching-staff: load a season baseline into coaching_staff_history instead of the current table.",
+    )
     parser.add_argument("--out", help="Local artifact directory for feed jobs.")
     parser.add_argument(
         "--publish-feed",
@@ -376,7 +381,15 @@ def dispatch_detect_player_changes(args: argparse.Namespace, client: Any) -> dic
 
 
 def dispatch_ingest_coaching_staff(args: argparse.Namespace, client: Any) -> dict[str, Any]:
-    from src.ingest_coaching_staff import DEFAULT_SOURCE_URL, load_coaching_staff
+    from src.ingest_coaching_staff import DEFAULT_SOURCE_URL, load_coaching_history, load_coaching_staff
+
+    if args.history_season:
+        csv_path = args.csv or os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "data", f"coaching_staff_{args.history_season}.csv"
+        )
+        if args.dry_run:
+            return {"row_count": 0, "dry_run": True, "csv": csv_path, "season": args.history_season}
+        return load_coaching_history(csv_path, args.history_season, dataset_name=args.dataset, client=client)
 
     csv_path = args.csv or _default_coaching_staff_csv()
     if args.dry_run:
@@ -419,6 +432,15 @@ def dispatch_build_situation_layer(args: argparse.Namespace, client: Any) -> dic
         client=client,
         dry_run=args.dry_run,
     )
+
+
+def dispatch_situation_feed(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.situation_feed import build_situation_feed
+
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "note": "would render the player situation dataset"}
+    result = build_situation_feed(dataset_name=args.dataset, out_dir=args.out, client=client)
+    return {"row_count": result["row_count"], "object": result["object"], "sha256": result["sha256"]}
 
 
 def dispatch_materialize_analytics(args: argparse.Namespace, client: Any) -> dict[str, Any]:
@@ -660,6 +682,7 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "ingest-coaching-staff": dispatch_ingest_coaching_staff,
     "coaching-staff-feed": dispatch_coaching_staff_feed,
     "build-situation-layer": dispatch_build_situation_layer,
+    "situation-feed": dispatch_situation_feed,
     "materialize-analytics": dispatch_materialize_analytics,
     "generate-pigskin-rankings": dispatch_generate_pigskin_rankings,
     "generate-evidence-packets": dispatch_generate_evidence_packets,

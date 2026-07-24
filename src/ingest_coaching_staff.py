@@ -87,6 +87,68 @@ def load_coaching_staff(
     return {"row_count": len(rows), "vacant": vacancies}
 
 
+HISTORY_TABLE = "coaching_staff_history"
+
+HISTORY_SCHEMA = [
+    bigquery.SchemaField("season", "INT64", mode="REQUIRED"),
+    bigquery.SchemaField("team_abbr", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("role", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("coach_name", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("verification_status", "STRING"),
+    bigquery.SchemaField("source", "STRING"),
+    bigquery.SchemaField("notes", "STRING"),
+    bigquery.SchemaField("loaded_at", "TIMESTAMP", mode="REQUIRED"),
+]
+
+
+def load_coaching_history(
+    csv_path,
+    season: int,
+    dataset_name: str = "fantasy_football_brain",
+    client=None,
+):
+    """Load one season's staff baseline; re-running a season replaces it."""
+    path = Path(csv_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Coaching history CSV not found: {path}")
+    loaded_at = datetime.now(timezone.utc).isoformat()
+    rows = []
+    with path.open(encoding="utf-8", newline="") as handle:
+        for raw in csv.DictReader(handle):
+            if int(raw["season"]) != season:
+                continue
+            rows.append({
+                "season": season,
+                "team_abbr": raw["team_abbr"].strip().upper(),
+                "role": raw["role"].strip(),
+                "coach_name": raw["coach_name"].strip(),
+                "verification_status": (raw.get("verification_status") or "pending").strip(),
+                "source": DEFAULT_SOURCE,
+                "notes": (raw.get("notes") or "").strip() or None,
+                "loaded_at": loaded_at,
+            })
+    if not rows:
+        raise ValueError(f"No rows for season {season} in {path}")
+
+    client = client or bigquery.Client(project=get_bigquery_project())
+    table_id = f"{client.project}.{dataset_name}.{HISTORY_TABLE}"
+    delete = client.query(
+        f"DELETE FROM `{table_id}` WHERE season = @season",
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("season", "INT64", season)]
+        ),
+    )
+    delete.result()
+    job_config = bigquery.LoadJobConfig(
+        schema=HISTORY_SCHEMA,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+    )
+    client.load_table_from_json(rows, table_id, job_config=job_config).result()
+    logger.info("Loaded %s coaching history rows for season %s into %s.", len(rows), season, table_id)
+    return {"row_count": len(rows), "season": season}
+
+
 def _default_csv() -> str:
     return str(Path(__file__).resolve().parents[1] / "data" / "coaching_staff.csv")
 

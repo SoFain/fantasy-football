@@ -63,8 +63,31 @@ if ($refreshExit -eq 0) {
     exit 1
 }
 
-$publishExit = Invoke-Logged 'publish-public-rankings' "$root\venv\Scripts\python.exe" `
-    ('"{0}\scripts\publish_public_rankings.py" --publish --gcloud-auth' -f $root) $root
+# Stage 1b: the refresh emits a fresh player-situation dataset artifact.
+# Upload the immutable object (content-addressed: a re-upload of identical
+# bytes fails the precondition harmlessly), then hand the manifest entry to
+# the publisher. If the artifact is missing (gate-tripped day), the publisher
+# carries yesterday's datasets forward and nothing is lost.
+$situationEntry = Join-Path $branchRoot 'build\feeds\player_situation.manifest-entry.json'
+$situationObject = Join-Path $branchRoot 'build\feeds\player_situation.json'
+$publisherArgs = ('"{0}\scripts\publish_public_rankings.py" --publish --gcloud-auth' -f $root)
+if ((Test-Path $situationEntry) -and (Test-Path $situationObject)) {
+    try {
+        $entry = Get-Content $situationEntry -Raw | ConvertFrom-Json
+        $null = Invoke-Logged 'upload-situation-object' 'gcloud' `
+            ('storage cp "{0}" "gs://fantasy-football-498121-public-rankings/{1}" --content-type="application/json; charset=utf-8" --cache-control="public, max-age=31536000, immutable" --if-generation-match=0' -f $situationObject, $entry.object) $root
+        # A nonzero exit here is expected when the object already exists;
+        # content addressing guarantees identical bytes, so proceed either way.
+        $publisherArgs = $publisherArgs + (' --dataset-entry "{0}"' -f $situationEntry)
+        Write-Log ('situation dataset entry attached: {0}' -f $entry.object)
+    } catch {
+        Write-Log ('situation dataset skipped (unreadable entry): {0}' -f $_.Exception.Message)
+    }
+} else {
+    Write-Log 'situation dataset artifacts absent; publisher will carry forward the prior datasets.'
+}
+
+$publishExit = Invoke-Logged 'publish-public-rankings' "$root\venv\Scripts\python.exe" $publisherArgs $root
 if ($publishExit -ne 0) {
     Write-Log 'PUBLISH FAILED; skipping site import so the site never imports a partial publish.'
     exit 1

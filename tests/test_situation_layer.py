@@ -28,8 +28,17 @@ class BuildSituationSqlTest(unittest.TestCase):
         self.assertIn("qb_next_prior.season = prev.season", self.sql)
 
     def test_flags_cover_the_editorial_set(self):
-        for flag in ("NEW_TEAM", "QB_CHANGED", "QB_UPGRADE_MAJOR", "QB_DOWNGRADE", "AGE_CLIFF"):
+        for flag in ("NEW_TEAM", "QB_CHANGED", "QB_UPGRADE_MAJOR", "QB_DOWNGRADE", "AGE_CLIFF", "NEW_HC"):
             self.assertIn(flag, self.sql)
+
+    def test_insert_uses_explicit_column_list(self):
+        # The table gained hc_changed/oc_changed via ALTER; a positional INSERT
+        # would silently misalign columns.
+        self.assertIn("(situation_for_season, stats_season, player_id_internal", self.sql)
+        self.assertIn("hc_changed, oc_changed)", self.sql)
+
+    def test_coaching_baseline_joined(self):
+        self.assertIn("coaching_staff_history", self.sql)
 
     def test_age_cliff_bands_are_position_specific(self):
         for pos, age in sl.AGE_CLIFF.items():

@@ -86,6 +86,20 @@ python -m src.job_runner --job-name coaching-staff-feed
 
 The public feed is JSON, content-addressed, published to a Cloud Storage bucket the ranking project owns (`.../v1/manifest.json`). The coaching-staff-feed job emits an immutable dataset object plus a manifest entry; the ranking project's `publish_public_rankings.py` merges that entry, since it is the single writer of the mutable manifest.
 
+## Situation Layer
+
+Team/QB/coaching/age context per player — what production metrics can't see. Facts and flags only; rank adjustments are Phase 3, gated on the BQML effect study. Boards are schema 1.3 with per-player `situation` + `metrics` blocks; the manifest carries `datasets.player_situation`; the daily chain writes an owner-review queue of flagged ranked players.
+
+| Document | Purpose |
+| --- | --- |
+| [rebuild/situation-layer.md](rebuild/situation-layer.md) | The layer: table, feed, review queue, ML study results. |
+
+```bash
+python -m src.job_runner --job-name build-situation-layer
+python -m src.job_runner --job-name situation-feed
+python scripts/run_situation_ml_study.py --report-only
+```
+
 ## Modeling and Evidence
 
 | Document | Purpose |
