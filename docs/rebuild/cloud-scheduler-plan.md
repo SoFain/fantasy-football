@@ -1,6 +1,6 @@
 # Cloud Scheduler Plan
 
-Status: the daily player watch is **deployed and live** as of 2026-07-24. Cloud Scheduler runs `ingest-sleeper-news-daily` at 07:00 America/New_York and `detect-player-changes-daily` at 07:15, triggering Cloud Run Jobs built from this branch (image tag `pigskin-jobs-*`). `generate-pigskin-rankings` is deliberately NOT scheduled: it truncates `analytics_pigskin_rankings`, which the public feed publisher reads for the fable positional boards. Daily site publication runs through `scripts/publish_public_rankings.py` (main checkout) followed by the site importer.
+Status: the daily player watch is **deployed and live** as of 2026-07-24. Cloud Scheduler runs `ingest-sleeper-news-daily` at 07:00 America/New_York and `detect-player-changes-daily` at 07:15, triggering Cloud Run Jobs built from this branch (image tag `pigskin-jobs-*`). `generate-pigskin-rankings` is deliberately NOT scheduled: it truncates `analytics_pigskin_rankings`, which the public feed publisher reads for the fable positional boards. Daily site publication is the 07:30 America/New_York leg: the scheduled task `PigskinDailyPublishImport` (this machine, local time = Eastern) runs `scripts/publish_public_rankings.py --publish --gcloud-auth` in the main checkout, then triggers the IONOS site import via `run_remote_php`. The publisher carries manifest `datasets` entries forward, so coaching staff stays listed without a `--dataset-entry` flag. See the main checkout's `docs/rankings-production-runbook.md`.
 
 The remainder of this plan describes triggers not yet created.
 
