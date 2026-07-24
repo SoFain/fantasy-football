@@ -29,4 +29,6 @@ pipeline_execution.log
 
 # Google Cloud credentials keys
 *.json
+!config/public_rankings_cors.json
 !requirements.txt
+Advanced Metrics/

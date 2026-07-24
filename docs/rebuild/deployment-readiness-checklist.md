@@ -52,6 +52,15 @@ Every live trigger still requires user confirmation in the dashboard.
 - Confirm `GEMINI_API_KEY` is available only where Gemini is called.
 - Confirm missing-secret behavior fails clearly before partial output is written.
 
+## Login Persistence
+
+- App-level login must survive a normal page refresh, WebSocket reconnect, and opening another dashboard tab.
+- Do not rely on `st.session_state` as the only authentication record. It is scoped to a Streamlit session and can force repeated logins.
+- Use a signed, expiration-bound secure cookie for the persistent session. Restore only the minimum authenticated identity into `st.session_state` after validating the cookie.
+- Set `Secure`, `HttpOnly`, and an appropriate `SameSite` policy. Rotate or invalidate the signing secret through Secret Manager.
+- Cloud Run session affinity may reduce reconnect churn, but it is not a substitute for a verifiable application session.
+- Test logout, expiry, invalid signatures, deploy/revision changes, refresh, reconnect, and multiple tabs before production rollout.
+
 ## IAM
 
 - Runtime service accounts have project `roles/bigquery.jobUser`.

@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 
 from src.load import get_bigquery_project
+from src.sleeper_injury_reviews import build_injury_review_events
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('ingest_news')
@@ -134,9 +135,23 @@ def load_realtime_news():
     client = bigquery.Client(project=get_bigquery_project())
     project_id = client.project
 
+    previous_statuses = {}
+    injury_events = []
+    current_players_table_id = f"{project_id}.fantasy_football_brain.sleeper_players_current"
+    try:
+        previous_query = f"""
+        SELECT sleeper_player_id, injury_status
+        FROM `{current_players_table_id}`
+        """
+        previous_statuses = {
+            str(row.sleeper_player_id): row.injury_status
+            for row in client.query(previous_query).result()
+        }
+    except Exception as ex:
+        logger.info("No prior Sleeper player snapshot available for injury review: %s", ex)
+
     current_players_df = pd.DataFrame(current_player_records)
     if not current_players_df.empty:
-        current_players_table_id = f"{project_id}.fantasy_football_brain.sleeper_players_current"
         current_players_schema = [
             bigquery.SchemaField("snapshot_at", "TIMESTAMP"),
             bigquery.SchemaField("sleeper_player_id", "STRING"),
@@ -166,10 +181,27 @@ def load_realtime_news():
             current_players_table_id,
         )
 
+        injury_events = build_injury_review_events(
+            previous_statuses,
+            current_player_records,
+            snapshot_at,
+        )
+        if injury_events:
+            review_table_id = f"{project_id}.fantasy_football_brain.sleeper_injury_review_queue"
+            review_job = client.load_table_from_json(
+                injury_events,
+                review_table_id,
+                job_config=bigquery.LoadJobConfig(
+                    write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                ),
+            )
+            review_job.result()
+            logger.info("Queued %s OUT/IR Sleeper injury reviews.", len(injury_events))
+
     df = pd.DataFrame(records)
     if df.empty:
         logger.warning("No valid trending records found after validation.")
-        return
+        return {"current_player_count": len(current_player_records), "injury_review_count": len(injury_events) if current_player_records else 0}
 
     # Convert to appropriate types
     df['trend_count'] = df['trend_count'].astype(int)
@@ -189,6 +221,7 @@ def load_realtime_news():
     
     table = client.get_table(table_id)
     logger.info(f"Successfully loaded {table.num_rows} rows and {len(table.schema)} columns to {table_id}")
+    return {"current_player_count": len(current_player_records), "injury_review_count": len(injury_events) if current_player_records else 0}
 
 if __name__ == "__main__":
     load_realtime_news()

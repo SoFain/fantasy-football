@@ -1,6 +1,6 @@
 # Cloud Scheduler Plan
 
-This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does not create live scheduler resources.
+This plan describes Cloud Scheduler triggers for Cloud Run Jobs. The Sleeper refresh schedule is active; all other schedules remain plans until separately authorized.
 
 ## Scheduler Principles
 
@@ -15,7 +15,7 @@ This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does 
 
 | Job | Cadence | Seasonality | Triggering identity | Dependencies | Cost caution | Retry policy | Rollout |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ingest-sleeper-news` | daily, then every 2 to 4 hours in active season if needed | active season higher frequency | `scheduler-invoker-sa` | Sleeper API available | API quota and rate limit | 2 retries, exponential backoff | disabled by default |
+| `ingest-sleeper-news` | daily at 10:00 America/New_York | active season higher frequency only after review | `scheduler-invoker-sa` | Sleeper API available | API quota and rate limit | 2 retries, exponential backoff | enabled 2026-07-10 |
 | `ingest-nflverse` | after game days | active season plus manual offseason refresh | `scheduler-invoker-sa` | nflverse source refresh | BigQuery load cost | 1 retry | disabled by default |
 | `materialize-analytics` | after successful ingestion | active season daily or weekly | `scheduler-invoker-sa` | source tables refreshed | BigQuery processing | 1 retry | disabled by default |
 | `generate-pigskin-rankings` | weekly or manual | active draft and season windows | `scheduler-invoker-sa` | analytics materialized, Gemini secret available | LLM cost | no automatic retry until quality gates exist | disabled by default |
@@ -26,6 +26,7 @@ This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does 
 | `grade-claims` | weekly after games | active season and offseason review batches | `scheduler-invoker-sa` | claim ledger and actuals current | BigQuery processing | 1 retry | disabled by default |
 | `generate-content-briefs` | show prep days | active season and draft season | `scheduler-invoker-sa` | evidence packets, rankings, claims current | BigQuery processing, no LLM by default | 1 retry | disabled by default |
 | `verify-external-context` | manual or queued only | player-specific | `scheduler-invoker-sa` | external provider configured | external search cost and quota | no automatic retry | disabled by default |
+| `archive-sleeper-player-snapshot` | weekly, Tuesday 09:00 UTC | all year | `scheduler-invoker-sa` | digest-pinned archive image and BigQuery writer identity | Sleeper API availability | 2 retries, exponential backoff | enabled 2026-07-11 |
 
 ## Example Commands
 
@@ -47,18 +48,49 @@ Pause immediately after creation during rollout:
 gcloud scheduler jobs pause validate-warehouse-daily --location us-central1
 ```
 
-Create a disabled Sleeper news trigger:
+The active Sleeper status refresh trigger is:
 
 ```powershell
 gcloud scheduler jobs create http ingest-sleeper-news-daily `
   --location us-central1 `
-  --schedule "0 8 * * *" `
+  --schedule "0 10 * * *" `
+  --time-zone "America/New_York" `
   --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/ingest-sleeper-news:run" `
   --http-method POST `
   --oauth-service-account-email scheduler-invoker-sa@fantasy-football-498121.iam.gserviceaccount.com
 ```
 
-Do not create or unpause scheduler jobs until a live rollout is explicitly authorized.
+Do not create or unpause any additional scheduler job without a separately authorized rollout.
+
+## Sleeper Player Snapshot Archive Preview
+
+The weekly archive uses a narrow derivative of the reviewed application image because the shared image does not package this script. Build it with `cloudbuild-sleeper-archive.yaml`, then deploy the resulting digest:
+
+```powershell
+gcloud run jobs deploy archive-sleeper-player-snapshot `
+  --project fantasy-football-498121 `
+  --region us-central1 `
+  --image <digest-pinned-sleeper-archive-image> `
+  --command python `
+  --args scripts/build_sleeper_current_player_context.py,--apply,--refresh,--archive,--project,fantasy-football-498121,--dataset,fantasy_football_advanced_metrics `
+  --service-account <least-privilege-job-service-account>
+```
+
+After one successful manual execution, create the enabled scheduler:
+
+```powershell
+gcloud scheduler jobs create http archive-sleeper-player-snapshot-weekly `
+  --project fantasy-football-498121 `
+  --location us-central1 `
+  --schedule "0 9 * * 2" `
+  --time-zone UTC `
+  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/archive-sleeper-player-snapshot:run" `
+  --http-method POST `
+  --oauth-service-account-email scheduler-invoker-sa@fantasy-football-498121.iam.gserviceaccount.com `
+  --max-retry-attempts 2
+```
+
+Verify one successful manual execution before enabling the scheduler. Do not replace the service account placeholder without a reviewed deployment phase.
 
 ## Staged Rollout
 

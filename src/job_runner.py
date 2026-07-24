@@ -256,8 +256,7 @@ def dispatch_ingest_sleeper_news(args: argparse.Namespace, client: Any) -> dict[
         return {"row_count": 0, "dry_run": True, "skipped": "Sleeper news ingest has no dry-run mode"}
     from src.ingest_news import load_realtime_news
 
-    load_realtime_news()
-    return {"row_count": 0}
+    return load_realtime_news()
 
 
 def dispatch_ingest_sleeper_league(args: argparse.Namespace, client: Any) -> dict[str, Any]:

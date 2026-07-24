@@ -292,6 +292,73 @@ class PigskinRankingModelRunTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "estimated_regular_season_games_missed"):
             rankings.validate_adjustment(row)
 
+    def test_suspension_adjustment_requires_source_backed_games_missed(self):
+        row = {
+            "llm_adjustment_code": "SUSPENSION_3_5",
+            "llm_rank_delta": -3,
+            "llm_estimated_games_missed": 4,
+            "llm_adjustment_detail": "League suspension removes four regular-season games.",
+            "llm_adjustment_evidence": "source=league transaction; games=4",
+        }
+
+        rankings.validate_adjustment(row)
+
+    def test_suspension_rationale_preserves_formula_and_absence_provenance(self):
+        rationale = rankings.build_scientific_rank_rationale({
+            "position": "RB",
+            "candidate_rank": 6,
+            "rank": 10,
+            "rank_rationale": "Formula v3 placed the player at RB6.",
+            "llm_adjustment_code": "SUSPENSION_3_5",
+            "llm_adjustment_detail": "League suspension removes four games.",
+            "llm_adjustment_evidence": "source=league transaction; announced=2026-07-19",
+            "llm_estimated_games_missed": 4,
+            "llm_rank_delta": -4,
+        })
+
+        self.assertIn("Formula v3 placed the player at RB6.", rationale)
+        self.assertIn("Post-formula suspension adjustment", rationale)
+        self.assertIn("Estimated regular-season games missed: 4", rationale)
+        self.assertIn("announced=2026-07-19", rationale)
+        self.assertIn("Candidate RB6 became final RB10 (-4 ranks)", rationale)
+
+    def test_final_rationale_preserves_formula_and_explains_injury_movement(self):
+        candidates = pd.DataFrame([
+            {
+                "player_id": f"p{i}", "player_name": f"Player {i}", "position": "WR",
+                "rank": i, "ranking_score": 100 - i,
+                "rank_rationale": f"Formula v2 placed Player {i} at WR{i}.",
+                "data_snapshot_label": "snapshot", "sleeper_injury_status": None,
+            }
+            for i in range(1, 4)
+        ])
+        payload = {"rankings": [
+            {
+                "player_id": "p1", "adjustment_code": "INJURY_1_2", "requested_rank_delta": -2,
+                "adjustment_detail": "Team timetable projects a two-game absence.",
+                "adjustment_evidence": "source=team announcement; expected_games_missed=2",
+                "estimated_regular_season_games_missed": 2,
+            },
+            {"player_id": "p2", "adjustment_code": "NO_ADJUSTMENT", "requested_rank_delta": 0},
+            {"player_id": "p3", "adjustment_code": "NO_ADJUSTMENT", "requested_rank_delta": 0},
+        ]}
+        rows = rankings.normalize_model_rankings(
+            "WR", candidates, payload, "v2", "test-model",
+            {
+                "model_run_id": "run", "scoring_profile_id": "standard",
+                "league_type_id": "redraft", "roster_format_id": "one_qb",
+                "feature_config_version_id": None, "source_freshness_snapshot_id": "fresh",
+                "prompt_version": "scientific-adjustment-v1",
+            },
+        )
+        adjusted = next(row for row in rows if row["player_id"] == "p1")
+
+        self.assertIn("Formula v2 placed Player 1 at WR1.", adjusted["rank_rationale"])
+        self.assertIn("Post-formula injury adjustment", adjusted["rank_rationale"])
+        self.assertIn("Estimated regular-season games missed: 2", adjusted["rank_rationale"])
+        self.assertIn("source=team announcement", adjusted["rank_rationale"])
+        self.assertIn("Candidate WR1 became final WR2 (-1 ranks)", adjusted["rank_rationale"])
+
     def test_no_adjustment_cannot_move_a_rank(self):
         row = {
             "llm_adjustment_code": "NO_ADJUSTMENT",

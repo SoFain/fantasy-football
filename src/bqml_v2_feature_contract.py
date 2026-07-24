@@ -1011,6 +1011,8 @@ final_dataset AS (
     -- Target labels
     mart.target_fantasy_points,
     mart.value_over_replacement,
+    mart.actual_position_rank,
+    mart.actual_overall_rank,
     IF(mart.actual_position_rank <= CASE mart.position WHEN 'QB' THEN 6 WHEN 'RB' THEN 12 WHEN 'WR' THEN 12 WHEN 'TE' THEN 6 END, 1, 0) AS elite_finish_label,
     IF(mart.actual_position_rank <= CASE mart.position WHEN 'QB' THEN 12 WHEN 'RB' THEN 24 WHEN 'WR' THEN 36 WHEN 'TE' THEN 12 END, 1, 0) AS starter_finish_label,
     IF(

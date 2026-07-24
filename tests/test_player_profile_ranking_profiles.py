@@ -81,16 +81,17 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
             "Rankings for this scoring system have not been generated yet.",
         )
 
-    def test_app_defaults_to_all_board_and_score_sorted_all_view(self):
+    def test_app_defaults_to_all_board_and_unified_all_view(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
 
         self.assertIn('st.session_state.selected_pos = "ALL"', app_source)
         self.assertIn('positions = ["ALL", "QB", "RB", "WR", "TE"]', app_source)
         self.assertIn('if selected_pos == "ALL":', app_source)
-        self.assertIn('by=["display_score_sort", "display_rank_sort", "position", "player_display_name"]', app_source)
+        self.assertIn('sort_player_profile_board(df_pos, selected_pos)', app_source)
+        self.assertIn('fetch_unified_rankings_data', app_source)
         self.assertNotIn('by=["position", "display_rank_sort", "display_score_sort"]', app_source)
 
-    def test_all_board_sort_preserves_observed_standard_top_ten_order(self):
+    def test_all_board_uses_unified_overall_rank(self):
         observed_rows = [
             ("Jaxon Smith-Njigba", "WR", 1, 99.8),
             ("Puka Nacua", "WR", 2, 98.7),
@@ -110,10 +111,11 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
                     "position": position,
                     "display_rank": rank,
                     "display_score": score,
+                    "unified_overall_rank": index,
                 }
-                for name, position, rank, score in reversed(observed_rows)
+                for index, (name, position, rank, score) in enumerate(observed_rows, 1)
             ]
-        )
+        ).sample(frac=1, random_state=7)
 
         sorted_df = profiles.sort_player_profile_board(df, "ALL")
 
@@ -122,6 +124,21 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
             [name for name, _, _, _ in observed_rows],
         )
         self.assertEqual(sorted_df["board_rank"].tolist(), list(range(1, 11)))
+
+    def test_unified_query_is_scoring_profile_scoped(self):
+        sql, job_config = profiles.build_unified_rankings_query("project", "dataset", "standard")
+        self.assertIn("unified_draft_rankings_current", sql)
+        self.assertIn("overall_rank AS unified_overall_rank", sql)
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["scoring_profile_id"], "standard")
+
+    def test_adjustment_labels_are_readable(self):
+        self.assertEqual(profiles.format_adjustment_label("NO_ADJUSTMENT", 0), "Formula rank")
+        self.assertEqual(profiles.format_adjustment_label(None, None), "Formula rank")
+        self.assertEqual(profiles.format_adjustment_label("CURRENT_ROLE_UPGRADE", 2), "Role upgrade +2")
+        self.assertEqual(profiles.format_adjustment_label("INJURY_UNCERTAIN", 0), "Injury noted, no move")
+        self.assertEqual(profiles.format_adjustment_label("SUSPENSION_UNCERTAIN", 0), "Suspension review, no move")
+        self.assertEqual(profiles.format_adjustment_label("SUSPENSION_3_5", -4), "Suspension adjustment -4")
 
     def test_live_ranking_context_query_uses_player_profile_source_and_depths(self):
         sql, job_config = profiles.build_live_ranking_context_query(
@@ -133,8 +150,9 @@ class PlayerProfileRankingProfileTests(unittest.TestCase):
         )
 
         self.assertIn("analytics_pigskin_rankings", sql)
+        self.assertIn("unified_draft_rankings_current", sql)
         self.assertIn("ROW_NUMBER() OVER", sql)
-        self.assertIn("CASE WHEN @position IS NULL THEN pigskin_score END DESC", sql)
+        self.assertIn("CASE WHEN @position IS NULL THEN unified_overall_rank END ASC", sql)
         self.assertIn("WHEN 'TE' THEN 35", sql)
         self.assertNotIn("Formula Review", sql)
         self.assertNotIn("analytics_pigskin_rankings_candidates", sql)

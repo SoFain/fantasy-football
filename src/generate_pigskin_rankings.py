@@ -69,7 +69,17 @@ LLM_ADJUSTMENT_RULES = {
     "INJURY_6_8": {"min_movement": -10, "max_movement": -1, "games_min": 6, "games_max": 8},
     "INJURY_9_PLUS": {"min_movement": -15, "max_movement": -1, "games_min": 9, "games_max": 17},
     "INJURY_UNCERTAIN": {"max_movement": 0},
+    "SUSPENSION_1_2": {"min_movement": -2, "max_movement": -1, "games_min": 1, "games_max": 2},
+    "SUSPENSION_3_5": {"min_movement": -5, "max_movement": -1, "games_min": 3, "games_max": 5},
+    "SUSPENSION_6_8": {"min_movement": -10, "max_movement": -1, "games_min": 6, "games_max": 8},
+    "SUSPENSION_9_PLUS": {"min_movement": -15, "max_movement": -1, "games_min": 9, "games_max": 17},
+    "SUSPENSION_UNCERTAIN": {"max_movement": 0},
     "ORDER_REBALANCE": {"min_movement": -15, "max_movement": 15, "application_only": True},
+}
+NON_SUBSTANTIVE_ADJUSTMENT_CODES = {
+    "NO_ADJUSTMENT",
+    "INJURY_UNCERTAIN",
+    "SUSPENSION_UNCERTAIN",
 }
 MAX_ADJUSTMENT_SHARE = 0.15
 MAX_TOTAL_REQUESTED_MOVEMENT = 12
@@ -230,12 +240,12 @@ Hard rules:
 5. Do not rank a backup QB as a normal QB1. If `depth` is greater than 1, the player must be a backup or handcuff and should rank behind every current QB1 with a credible sample unless the evidence contains an obvious current starter path.
 6. Do not put backup QBs in elite QB1 or QB1 tiers. A player can be talented and still be a fantasy bench stash if the role says bench.
 7. Do not reinterpret formula metrics, sustainability, efficiency, touchdown regression, age, or opportunity. The deterministic formula already owns those judgments.
-8. Valid model adjustment codes are: NO_ADJUSTMENT, CURRENT_ROLE_UPGRADE, CURRENT_ROLE_DOWNGRADE, ROOKIE_CONTEXT, INJURY_1_2, INJURY_3_5, INJURY_6_8, INJURY_9_PLUS, INJURY_UNCERTAIN. ORDER_REBALANCE is application-only and must never be returned.
+8. Valid model adjustment codes are: NO_ADJUSTMENT, CURRENT_ROLE_UPGRADE, CURRENT_ROLE_DOWNGRADE, ROOKIE_CONTEXT, INJURY_1_2, INJURY_3_5, INJURY_6_8, INJURY_9_PLUS, INJURY_UNCERTAIN, SUSPENSION_1_2, SUSPENSION_3_5, SUSPENSION_6_8, SUSPENSION_9_PLUS, SUSPENSION_UNCERTAIN. ORDER_REBALANCE is application-only and must never be returned.
 9. Current-role upgrades are limited to three ranks. Current-role downgrades are limited to eight. Rookie context is limited to three ranks in either direction. Injury adjustments can only lower a player: one to two estimated missed regular-season games permits two ranks, three to five permits five, six to eight permits ten, and nine or more permits fifteen.
 10. Request no more than {max(3, math.ceil(player_count * MAX_ADJUSTMENT_SHARE))} substantive adjustments. The sum of absolute requested movements cannot exceed {MAX_TOTAL_REQUESTED_MOVEMENT}.
-13. Use an injury adjustment only when the supplied evidence explicitly states an estimated regular-season games-missed count. A Sleeper injury status alone is not enough. If injury information is unresolved, use INJURY_UNCERTAIN and do not move the player for injury.
+11. Use an injury or suspension adjustment only when the supplied evidence explicitly states an estimated regular-season games-missed count. A Sleeper injury status or unverified suspension report alone is not enough. If the absence is unresolved, use the matching UNCERTAIN code and do not move the player for it.
 12. Preseason Questionable status alone has zero rank effect. Use INJURY_UNCERTAIN with requested_rank_delta 0 if it deserves a visible warning.
-13. NO_ADJUSTMENT and INJURY_UNCERTAIN require requested_rank_delta 0. Every other request must have non-empty adjustment detail and evidence copied from supplied fields.
+13. NO_ADJUSTMENT, INJURY_UNCERTAIN, and SUSPENSION_UNCERTAIN require requested_rank_delta 0. Every code except NO_ADJUSTMENT must have non-empty adjustment detail and evidence copied from supplied fields.
 
 Return strict JSON only. Do not include markdown. The JSON shape must be:
 {{
@@ -329,7 +339,10 @@ def normalize_model_rankings(position, candidates_df, model_payload, ranking_ver
     if len(normalized) != len(candidates_df):
         raise ValueError(f"{position} model returned {len(normalized)} rows for {len(candidates_df)} candidates.")
 
-    substantive = [row for row in normalized if row["llm_adjustment_code"] not in {"NO_ADJUSTMENT", "INJURY_UNCERTAIN"}]
+    substantive = [
+        row for row in normalized
+        if row["llm_adjustment_code"] not in NON_SUBSTANTIVE_ADJUSTMENT_CODES
+    ]
     max_adjustments = max(3, math.ceil(len(normalized) * MAX_ADJUSTMENT_SHARE))
     if len(substantive) > max_adjustments:
         raise ValueError(f"{position} model requested {len(substantive)} adjustments; maximum is {max_adjustments}.")
@@ -347,11 +360,12 @@ def normalize_model_rankings(position, candidates_df, model_payload, ranking_ver
     for index, row in enumerate(normalized, start=1):
         row["rank"] = index
         row["llm_rank_delta"] = safe_int(row.get("candidate_rank")) - index
-        if row["llm_adjustment_code"] in {"NO_ADJUSTMENT", "INJURY_UNCERTAIN"} and row["llm_rank_delta"] != 0:
+        if row["llm_adjustment_code"] in NON_SUBSTANTIVE_ADJUSTMENT_CODES and row["llm_rank_delta"] != 0:
             row["llm_adjustment_code"] = "ORDER_REBALANCE"
             row["llm_adjustment_detail"] = "Mechanical displacement caused by a separate coded repair."
             row["llm_adjustment_evidence"] = "application deterministic reorder"
         validate_adjustment(row)
+        row["rank_rationale"] = build_scientific_rank_rationale(row)
         row.pop("_requested_rank_delta", None)
         row["is_active"] = True
 
@@ -423,6 +437,45 @@ def parse_optional_int(value):
         raise ValueError("estimated_regular_season_games_missed must be an integer or null.")
 
 
+def build_scientific_rank_rationale(row):
+    base = str(row.get("rank_rationale") or "").strip()
+    code = str(row.get("llm_adjustment_code") or "").strip().upper()
+    if not code or code == "NO_ADJUSTMENT":
+        return base
+
+    detail = str(row.get("llm_adjustment_detail") or "").strip().rstrip(".")
+    evidence = str(row.get("llm_adjustment_evidence") or "").strip().rstrip(".")
+    position = str(row.get("position") or "").strip().upper()
+    candidate_rank = safe_int(row.get("candidate_rank"), 0)
+    final_rank = safe_int(row.get("rank"), 0)
+    movement = safe_int(row.get("llm_rank_delta"), 0)
+
+    if code == "ORDER_REBALANCE":
+        adjustment = "Post-formula mechanical reorder"
+    elif code.startswith("INJURY_"):
+        adjustment = "Post-formula injury review" if code == "INJURY_UNCERTAIN" else "Post-formula injury adjustment"
+    elif code.startswith("SUSPENSION_"):
+        adjustment = "Post-formula suspension review" if code == "SUSPENSION_UNCERTAIN" else "Post-formula suspension adjustment"
+    else:
+        adjustment = f"Post-formula {code.lower().replace('_', ' ')} adjustment"
+
+    parts = [base, f"{adjustment}: {detail or code}."]
+    games_missed = row.get("llm_estimated_games_missed")
+    if games_missed is not None:
+        parts.append(f"Estimated regular-season games missed: {int(games_missed)}.")
+    elif code in {"INJURY_UNCERTAIN", "SUSPENSION_UNCERTAIN"}:
+        parts.append("No absence penalty was applied because missed time is unconfirmed.")
+    if evidence:
+        parts.append(f"Evidence: {evidence}.")
+    if candidate_rank > 0 and final_rank > 0:
+        rank_prefix = position if position else "rank "
+        parts.append(
+            f"Candidate {rank_prefix}{candidate_rank} became final {rank_prefix}{final_rank} "
+            f"({movement:+d} ranks); formula score unchanged."
+        )
+    return " ".join(part for part in parts if part)
+
+
 def validate_adjustment(row, *, requested=False):
     code = row.get("llm_adjustment_code")
     if code not in LLM_ADJUSTMENT_RULES:
@@ -453,7 +506,7 @@ def validate_adjustment(row, *, requested=False):
     if injury_status == "questionable" and code.startswith("INJURY_") and code != "INJURY_UNCERTAIN":
         raise ValueError("Preseason Questionable status cannot move a rank.")
 
-    if code not in {"NO_ADJUSTMENT", "INJURY_UNCERTAIN"} and (
+    if code != "NO_ADJUSTMENT" and (
         not row.get("llm_adjustment_detail") or not row.get("llm_adjustment_evidence")
     ):
         raise ValueError(f"{code} requires adjustment detail and evidence.")

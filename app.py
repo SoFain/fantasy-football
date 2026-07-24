@@ -2913,6 +2913,22 @@ def fetch_pigskin_rankings_data(scoring_profile_id=PLAYER_PROFILE_SCORING_PROFIL
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_unified_rankings_data(scoring_profile_id=PLAYER_PROFILE_SCORING_PROFILE_DEFAULT):
+    import pandas as pd
+    from google.cloud import bigquery
+
+    sql_query, job_config = profile_ranking_profiles.build_unified_rankings_query(
+        BIGQUERY_PROJECT_ID, "fantasy_football_brain", scoring_profile_id
+    )
+    try:
+        client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+        return client.query(sql_query, job_config=job_config).result().to_dataframe()
+    except Exception as ex:
+        logging.getLogger("app.rankings").warning(f"Could not load unified draft rankings: {ex}")
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=3600, show_spinner="Loading player weekly history...")
 def fetch_player_weekly_history(player_id: str):
     from google.cloud import bigquery
@@ -3095,6 +3111,9 @@ def render_player_profiles_tab():
     rankings_df = fetch_pigskin_rankings_data(selected_scoring_option["scoring_profile_id"])
     if not rankings_df.empty:
         df = df.merge(rankings_df, on=["player_id", "position"], how="left")
+    unified_df = fetch_unified_rankings_data(selected_scoring_option["scoring_profile_id"])
+    if not unified_df.empty:
+        df = df.merge(unified_df, on=["player_id", "position"], how="left")
 
     ranking_defaults = {
         "pigskin_rank": pd.NA,
@@ -3141,6 +3160,11 @@ def render_player_profiles_tab():
         "llm_rank_delta": pd.NA,
         "adjudicated_at": pd.NA,
         "ranking_eligibility": pd.NA,
+        "unified_overall_rank": pd.NA,
+        "unified_board_version": pd.NA,
+        "unified_replacement_rank": pd.NA,
+        "position_source_version": pd.NA,
+        "position_rank_source": pd.NA,
     }
     for col_name, default_value in ranking_defaults.items():
         if col_name not in df.columns:
@@ -3647,21 +3671,31 @@ def render_player_profiles_tab():
         if has_pigskin_rankings:
             df_pos = df_pos[df_pos["pigskin_rank"].notna()]
 
-        df_pos["display_rank_sort"] = pd.to_numeric(df_pos["display_rank"], errors="coerce").fillna(9999)
-        df_pos["display_score_sort"] = pd.to_numeric(df_pos["display_score"], errors="coerce").fillna(0)
-        if selected_pos == "ALL":
-            df_pos = df_pos.sort_values(
-                by=["display_score_sort", "display_rank_sort", "position", "player_display_name"],
-                ascending=[False, True, True, True],
-            )
-            df_pos["board_rank"] = range(1, len(df_pos) + 1)
-        else:
-            df_pos = df_pos.sort_values(by=["display_rank_sort", "display_score_sort"], ascending=[True, False])
-            df_pos["board_rank"] = df_pos["display_rank"]
+        df_pos = profile_ranking_profiles.sort_player_profile_board(df_pos, selected_pos)
 
         if df_pos.empty:
             st.info("No players found matching the selected position.")
             return
+
+        if selected_pos == "ALL":
+            board_versions = [str(value) for value in df_pos["unified_board_version"].dropna().unique()]
+            source_rows = (
+                df_pos[["position", "position_rank_source", "unified_replacement_rank"]]
+                .dropna(subset=["position_rank_source"])
+                .drop_duplicates()
+                .sort_values("position")
+            )
+            sources = "; ".join(
+                f"{row.position}: {row.position_rank_source} (replacement {int(row.unified_replacement_rank)})"
+                for row in source_rows.itertuples()
+            )
+            st.info(
+                f"**Current formula:** position-locked unified VORP interleaver. {sources}. "
+                f"Board version: `{board_versions[0] if board_versions else 'unknown'}`."
+            )
+        else:
+            sources = sorted({str(value) for value in df_pos["rank_source"].dropna().unique()})
+            st.info(f"**Current formula:** {', '.join(sources) if sources else 'Formula metadata unavailable'}.")
 
         # Format columns for rankings display
         display_ranks = df_pos.copy()
@@ -3670,7 +3704,11 @@ def render_player_profiles_tab():
         display_ranks["display_score"] = display_ranks["display_score"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
         display_ranks["pigskin_tier"] = display_ranks["pigskin_tier"].fillna("legacy grade")
         display_ranks["pigskin_verdict"] = display_ranks["pigskin_verdict"].fillna("Pigskin ranking not materialized yet.")
-        display_ranks["llm_adjustment_code"] = display_ranks["llm_adjustment_code"].fillna("No overlay")
+        display_ranks["llm_adjustment_code"] = display_ranks.apply(
+            lambda row: profile_ranking_profiles.format_adjustment_label(
+                row.get("llm_adjustment_code"), row.get("llm_rank_delta")
+            ), axis=1
+        )
         display_ranks["sleeper_injury_status"] = display_ranks["sleeper_injury_status"].apply(
             lambda value: str(value).title() if not pd.isna(value) and str(value).strip() else "No flag"
         )
@@ -3687,7 +3725,7 @@ def render_player_profiles_tab():
             "display_score": "Pigskin Score",
             "pigskin_tier": "Tier",
             "pigskin_verdict": "Pigskin Verdict",
-            "llm_adjustment_code": "Adjustment",
+            "llm_adjustment_code": "Rank Change",
             "sleeper_injury_status": "Injury",
             "avg_ppr": "Avg PPR",
             "contract_apy": "Salary APY",
@@ -3696,14 +3734,13 @@ def render_player_profiles_tab():
         })
 
         st.dataframe(
-            display_ranks[[("Board Rank" if selected_pos == "ALL" else "Rank"), "Player", "Team", "College", "Injury", "Pigskin Score", "Tier", "Adjustment", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
+            display_ranks[[("Board Rank" if selected_pos == "ALL" else "Rank"), "Player", "Team", "College", "Injury", "Pigskin Score", "Tier", "Rank Change", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
             width="stretch",
             hide_index=True
         )
         st.caption(
-            "Adjustment key: CURRENT_ROLE codes repair verified role changes. ROOKIE_CONTEXT covers bounded information unavailable to the formula. "
-            "INJURY codes require a source-backed estimated regular-season games-missed range. INJURY_UNCERTAIN records unresolved injury context "
-            "without moving the rank. ORDER_REBALANCE is application-generated mechanical movement."
+            "Rank Change explains whether Pigskin kept the formula order or made a bounded current-context move. "
+            "Formula rank means no movement. Role, rookie, injury, and queue labels state why a player moved and show the signed rank change when applicable."
         )
 
         st.markdown("---")

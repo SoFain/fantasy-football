@@ -59,6 +59,10 @@ Phase 32.38 set v1.0 live defaults without changing ranking data. Current Pigski
 
 Phase 33.10 tested Standard-only overall-board rules. The conservative overlay is ready for owner champion-selection review with warnings, but no champion is active and Current Pigskin remains live.
 
+Phase 33.31 tested targeted QB/WR tripwire cleanup candidates. The best read is conservative: QB/WR anchors reduce some movement risk, but no candidate is live-safe. Current Pigskin holds as the production baseline. The next top-100 owner-review pass needs a prospect-lane decision for market-only prospects, a Breece Hall Half PPR refresh, and exact `Marvin Harrison Jr.` identity/display verification.
+
+Phase 33.32 tested transparent Standard RB formulas only. `standard_rb_elite_receiving_back_protection_v0` is episode-ready as a discussion concept because it improved 2024 validation top-12 hit rate and pairwise draft win rate without increasing elite misses. It is not owner-review or live-ready because the 2025 holdout slice was thin, VOR was unavailable there, and Current Pigskin still beat it on NDCG and pairwise rate.
+
 ## Historical Seasons Covered
 
 Target seasons: 2017 through 2025.
@@ -1722,3 +1726,256 @@ Summary:
 The BQML v2 feature contract has been rebuilt to map positional predictors directly to the audited `advanced_player_metrics_v1` warehouse table using rolling 3-year historical averages. Dry-run query check successfully passed on BigQuery with 100% features/labels coverage, zero duplicate grain, and zero future data leakage.
 
 Scorecard decision: The advanced feature contract `bqml_v2_advanced_training_dataset_v0` is verified and ready to power future BQML v2 training iterations.
+
+## Phase 33.18 / 33.18B Advanced BQML v2 Scorecard Completion
+
+Live status: Current Pigskin remains live. No champion is active. No live ranking row changed.
+
+Summary persistence:
+
+| Formula version | Runs | Summaries | Detail rows | Champions |
+|---|---:|---:|---:|---:|
+| `ranking_backtest_sql_native_bqml_v2_advanced_profile_positional_v0` | 12 | 256 | 0 | 0 |
+
+Advanced owner-review finalists (Phase 33.18B):
+
+| Profile | QB | RB | WR | TE |
+|---|---|---|---|---|
+| standard | `adv_standard_qb_logistic_bust` | `adv_standard_rb_linear_points` | `adv_standard_wr_logistic_elite` | `adv_standard_te_linear_points` |
+| half_ppr | `adv_half_ppr_qb_logistic_bust` | `adv_half_ppr_rb_linear_vor` | `adv_half_ppr_wr_logistic_elite` | `adv_half_ppr_te_logistic_elite` |
+| ppr | `adv_ppr_qb_logistic_bust` | `adv_ppr_rb_logistic_elite` | `adv_ppr_wr_logistic_elite` | `adv_ppr_te_logistic_bust` |
+| gng_keeper | `adv_gng_keeper_qb_linear_points` | `adv_gng_keeper_rb_linear_points` | `adv_gng_keeper_wr_logistic_bust` | `adv_gng_keeper_te_logistic_bust` |
+
+Scorecard decision: `ADVANCED BQML V2 FINALISTS READY FOR OWNER REVIEW`.
+
+- Advanced models improve rank correlation in 14/16 validation slices (2024) and 15/16 holdout slices (2025).
+- Sourced and audited play participation data. Confirmed that true route run metrics (`routes_run`, `yprr`, `tprr`) are blocked due to missing denominators in public data.
+- Recommended next phase: Phase 33.19 — Advanced BQML v2 owner-review boards.
+
+## Phase 33.18C BQML v2 Advanced Finalist Comparison Correction
+
+Live status: Current Pigskin remains live. No champion is active. No live ranking row changed. No new model training was performed.
+
+Summary:
+- Corrected the Phase 33.18B comparison baseline to use the true Phase 33.13 finalists from `docs/rebuild/bqml-v2-positional-formula-finalists.md`.
+- Confirmed that Phase 33.13 prior finalists for `half_ppr`, `ppr`, and `gng_keeper` contain a buggy evaluator mismatch (extremely low points capture hit rates and ~52% missingness). These baselines are flagged as evaluator-incompatible. Direct points/VOR capture comparisons are invalid.
+- Applied validation warnings:
+  - Standard TE: Flagged with warning because its validation (2024) correlation declined by `-0.0342` (`0.4687` vs baseline `0.5029`) despite holdout improvement.
+  - GNG Keeper QB: Flagged with warning because combined predictive correlation remains below 0.45 (`0.4217`).
+- Confirmed that route metrics remain strictly **BLOCKED** and mapped to `NULL`.
+
+Advanced owner-review finalists (Phase 33.18C corrected):
+
+| Profile | QB | RB | WR | TE |
+|---|---|---|---|---|
+| standard | `adv_standard_qb_logistic_bust` | `adv_standard_rb_linear_points` | `adv_standard_wr_logistic_elite` | `adv_standard_te_linear_points` |
+| half_ppr | `adv_half_ppr_qb_logistic_bust` | `adv_half_ppr_rb_linear_vor` | `adv_half_ppr_wr_logistic_elite` | `adv_half_ppr_te_logistic_elite` |
+| ppr | `adv_ppr_qb_logistic_bust` | `adv_ppr_rb_logistic_elite` | `adv_ppr_wr_logistic_elite` | `adv_ppr_te_logistic_bust` |
+| gng_keeper | `adv_gng_keeper_qb_linear_points` | `adv_gng_keeper_rb_linear_points` | `adv_gng_keeper_wr_logistic_bust` | `adv_gng_keeper_te_logistic_bust` |
+
+Scorecard decision: `ADVANCED BQML V2 OWNER REVIEW BOARDS READY WITH WARNINGS`.
+
+## Phase 33.19 Advanced BQML v2 Owner-Review Boards
+
+Live status: Current Pigskin remains live. No champion is active. No live ranking row changed. No new model training was performed.
+
+Summary:
+- Generated owner-review boards for the 16 positional BQML v2 finalists and alternates using active 2026 player contexts.
+- Generated riser/faller lists, cutline promote/demote movements, high-risk sparse feature moves, and alternate disagreements.
+- Warnings:
+  - Standard RB and TE models have validation/holdout weakness.
+  - GNG Keeper QB combined predictive correlation is below 0.45.
+  - Route metrics remain strictly **BLOCKED** and mapped to `NULL`.
+- Recommended next phase: Phase 33.20 — Owner review of advanced positional boards.
+
+## Phase 33.20 Owner Review of Advanced Positional Boards
+
+Scorecard decision: `ADVANCED POSITIONAL BOARDS ACCEPTED WITH GUARDRAILS`.
+
+Summary:
+- Reviewed the 16 positional BQML v2 candidate boards and alternate models on active 2026 player contexts.
+- Accepted 12 positional boards for owner review with guardrails. QB boards require running QB bias capping; Standard TE requires Current Pigskin floor.
+- Held 4 positional boards behind Current Pigskin (Half PPR TE, PPR TE, GNG Keeper QB, GNG Keeper TE) due to weak predictive signals.
+- Proposed rookie draft capital floor cap (-15 ranks) and sparse feature upward movement cap (+10 ranks).
+- Confirmed route metrics remain strictly **BLOCKED** and mapped to `NULL`.
+- Recommended next phase: Phase 33.21 — Implement review-board guardrails.
+
+## Phase 33.21B Guardrail Identity and History Fix
+
+Scorecard decision: `GUARDRAILS READY FOR OWNER APPROVAL PACKET`.
+
+Summary:
+- Corrected the rookie/low-history guardrail classification logic. Sourced total career games count pre-2026 (`hist_games_3yr`) to evaluate history volume.
+- Removed false-positive rookie flags from established veterans (Brock Purdy, Mike Evans, Garrett Wilson, James Conner, Rashee Rice, Jayden Reed, Sam LaPorta, Chris Godwin, Malik Nabers).
+- Kept true rookies (Omarion Hampton, Travis Hunter) under `ROOKIE_NO_HISTORY` and low-history players (Cam Skattebo, Casey Washington) under `LOW_HISTORY`, anchoring them to Current Pigskin.
+- Disabled model-disagreement lock for QB boards (rejected `linear_points` alternate is hidden/rejected).
+- Created corrected report `docs/rebuild/validation/phase-33-21b-guardrail-identity-history-fix-report.md`.
+- Recommended next phase: Phase 33.22 — Owner approval packet for guarded positional boards.
+
+## Phase 33.22 Owner Approval Packet
+
+Scorecard decision: `OWNER APPROVAL PACKET READY`.
+
+Summary:
+- Generated owner-facing approval packet `docs/rebuild/advanced-bqml-v2-owner-approval-packet.md` presenting the top-level recommendation table, guardrail settings, label policy, and player movement examples.
+- Documented Cal QB Fernando Mendoza as the remaining join-failed item (safely anchored).
+- Created validation report `docs/rebuild/validation/phase-33-22-owner-approval-packet-report.md`.
+- Recommended next phase: Phase 33.23 — Position-locked top-100 planning only after owner accepts positional boards.
+
+## Phase 33.23 Owner Decision for Guarded Positional Boards
+
+Scorecard decision: `OWNER APPROVED TOP-100 PLANNING`.
+
+Summary:
+- Formally recorded owner decision in `docs/rebuild/validation/phase-33-23-owner-decision-guarded-positional-boards.md` accepting the guarded positional boards and holding weak-correlation boards.
+- Completed label policy cleanup by reclassifying Marvin Harrison (Jr.) as `PROSPECT_HISTORY` and removing him from the true rookie/no-history category.
+- Formulated position-locked top-100 planner rules (no live activation, no reordering, preserve held boards, route metrics blocked).
+- Recommended next phase: Phase 33.24 — Position-locked top-100 interleaver planning.
+
+## Phase 33.24 Position-Locked Top-100 Interleaver Planning
+
+Scorecard decision: `POSITION-LOCKED TOP-100 PLAN READY`.
+
+Summary:
+- Formulated the technical plan `docs/rebuild/position-locked-top-100-interleaver-plan.md` for position-locked queues, preflight identity audits, and VOR selection strategy options.
+- Documented Marvin Harrison Jr. identity collision preflight checks.
+- Created validation report `docs/rebuild/validation/phase-33-24-position-locked-top-100-planning-report.md`.
+- Recommended next phase: Phase 33.25 — Top-100 identity preflight.
+
+## Phase 33.25 Top-100 Player Identity Preflight
+
+Scorecard decision: `TOP-100 IDENTITY PREFLIGHT PASSED`.
+
+Summary:
+- Formulated the identity gate check rules and collision matrices in [top-100-identity-preflight.md](file:///e:/Fantasy%20Football/docs/rebuild/top-100-identity-preflight.md).
+- Resolved Marvin Harrison Jr. identity collision via manual override in `player_identity_overrides` mapping Sleeper `11628` to `00-0039849`. Verified Marvin Harrison Jr. career stats (29 games, 2 seasons) and correct review board WR34/35 rankings.
+- Created validation report `docs/rebuild/validation/phase-33-25-top-100-identity-preflight-report.md`.
+- Recommended next phase: Phase 33.26 — Position-locked top-100 prototype, review-only.
+
+## Phase 33.26 Position-Locked Top-100 Prototype
+
+Scorecard decision: `POSITION-LOCKED TOP-100 PROTOTYPE READY FOR REVIEW`.
+
+Summary:
+- Evaluated three queue-selection strategies and three replacement baselines over 2024 and 2025 seasonal data.
+- Selected Option 2 (QB15 / RB36 / WR55 / TE12) with Strategy C (Guarded Hybrid) as the best balanced mix and hit-rate configuration.
+- Compiled the prototype overall top-100 review boards in [position-locked-top-100-prototype-review.md](file:///e:/Fantasy%20Football/docs/rebuild/position-locked-top-100-prototype-review.md).
+- Created validation report [phase-33-26-position-locked-top-100-prototype-report.md](file:///e:/Fantasy%20Football/docs/rebuild/validation/phase-33-26-position-locked-top-100-prototype-report.md).
+- Recommended next phase: Phase 33.27 — Owner review of top-100 prototype.
+
+## Phase 33.26B Position-Locked Top-100 Calibration
+
+Scorecard decision: `TOP-100 PROTOTYPE CALIBRATED FOR POSITION MIX`.
+
+Summary:
+- Diagnosed WR raw VOR scale inflation (max 36.8) vs. RB VOR (max 6.95) due to model family differences (probabilities vs. linear scores).
+- Tested six selector strategies, five baseline variants, anti-monopoly sanity gates, and elite RB protection guardrails.
+- Re-calibrated overall boards using Option 2 baseline (QB12/RB30/WR42/TE12) and `prototype_v2_mix_guarded_hybrid` strategy.
+- Verified standard top 12 has 3 WR, standard top 24 has 10 WR, and elite RBs (Barkley, Henry, Robinson, McCaffrey) are placed in the top 24.
+- Generated calibrated boards in [position-locked-top-100-prototype-review.md](file:///e:/Fantasy%20Football/docs/rebuild/position-locked-top-100-prototype-review.md).
+- Created validation report [phase-33-26b-top-100-positional-mix-calibration-report.md](file:///e:/Fantasy%20Football/docs/rebuild/validation/phase-33-26b-top-100-positional-mix-calibration-report.md).
+- Recommended next phase: Phase 33.27 — Owner review of calibrated top-100 prototype.
+
+## Phase 33.26C Position-Locked Top-100 Weighting Calibration
+
+Scorecard decision: `TOP-100 PROTOTYPE WEIGHTS CALIBRATED`.
+
+Summary:
+- Replaced hard look-ahead mix constraints with soft penalties and boosts ($+/- 8$ to $+/- 40$ on a 100-point scale).
+- Enforced draft-band movement caps (force-pulling top-12 overall players before they exceed rank 24/36) and elite RB/WR caps (forcing top-6 RB before rank 24).
+- Capped QB counts at 1 in top 12, and 3 in top 24. Enforced TE rising limits (no TE in top 6 unless Pigskin top 12).
+- Generated calibrated prototype overall boards using Option 2 baseline (QB12/RB30/WR42/TE12) and `prototype_v3_balanced` strategy.
+- Verified Standard top 12 mix is calibrated to 4 WR, 5 RB, 1 QB, 2 TE, and Standard top 24 mix is 10 WR, 8 RB, 3 QB, 3 TE.
+- Generated review tables in [position-locked-top-100-prototype-review.md](file:///e:/Fantasy%20Football/docs/rebuild/position-locked-top-100-prototype-review.md).
+- Created validation report [phase-33-26c-top-100-weighting-calibration-report.md](file:///e:/Fantasy%20Football/docs/rebuild/validation/phase-33-26c-top-100-weighting-calibration-report.md).
+- Recommended next phase: Phase 33.27 — Owner review of weighted calibrated top-100 prototype.
+
+## Phase 33.26D Elite Market-Miss Audit
+
+Scorecard decision: `RB POSITIONAL BOARD NEEDS REFINEMENT`.
+
+Summary:
+- Audited Jahmyr Gibbs and other severe review-board misses against Current Pigskin, guarded positional boards, the Phase 33.26C prototype, market tripwires, and source-backed RB features.
+- Found Gibbs is Current Pigskin RB3 in every profile and market rank 2 overall, but guarded RB ranks him RB18/RB19 outside PPR and RB9 in PPR.
+- Classified the miss as a positional-board failure first. The interleaver is pulling from a queue that already buried him.
+- Held top-100 review behind Current Pigskin until the RB board is refined or owner-approved review-only anchor rules are added.
+- Created validation report [phase-33-26d-elite-market-miss-audit-report.md](file:///e:/Fantasy%20Football/docs/rebuild/validation/phase-33-26d-elite-market-miss-audit-report.md).
+- Recommended next phase: Phase 33.27: Refine RB positional board.
+
+## Phase 33.27 RB Positional Board Refinement
+
+Scorecard decision: `RB POSITIONAL BOARD READY WITH ELITE TRIPWIRES`.
+
+Summary:
+- Built review-only RB board candidates after Gibbs, Achane, and Chase Brown were confirmed as RB queue misses.
+- Selected `anchored_blend_tripwire`, a tiered Current Pigskin anchor with elite RB tripwire locks.
+- Confirmed Gibbs ranks RB3, Achane RB6, Chase Brown RB7, Ashton Jeanty RB4, and Omarion Hampton RB12 in the selected review-only top 12.
+- Rejected existing alternates because they do not repair elite RB misses cleanly enough.
+- Held top-100 behind a future review-only rebuild using the refined RB queue.
+- Created validation report [phase-33-27-rb-positional-board-refinement-report.md](file:///e:/Fantasy%20Football/docs/rebuild/validation/phase-33-27-rb-positional-board-refinement-report.md).
+- Recommended next phase: Phase 33.28, rebuild top-100 prototype with refined RB board.
+
+## Phase 33.28 Refined RB Top-100 Rebuild Note
+
+Phase 33.28 keeps the Phase 33.26C calibrated weighted hybrid position-pull sequence and swaps only the RB queue to the Phase 33.27 `anchored_blend_tripwire` review queue. This fixes Jahmyr Gibbs inside RB3 and top 7 overall across all profiles, but the result remains review-only because Current Pigskin and market tripwires still require owner judgment.
+
+Stable constraints:
+
+- Do not write this prototype to `analytics_pigskin_rankings`.
+- Do not activate formula champions from this phase.
+- Keep Half PPR TE, PPR TE, GNG Keeper QB, and GNG Keeper TE held behind Current Pigskin.
+- Treat Jeremiyah Love as a market-only prospect tripwire until the player appears in a source-backed active ranking or approved prospect lane.
+- Treat Half PPR Breece Hall as a current-state drift warning because live Current Pigskin now lists him RB6 while the Phase 33.27 evidence used an older RB18 context.
+- Route metrics remain blocked/null.
+
+## Phase 33.29 Refined Top-100 Owner Review Decision
+
+Final decision: `REFINED TOP-100 READY FOR OWNER REVIEW WITH TRIPWIRES`.
+
+Phase 33.29 accepts the Phase 33.28 refined top-100 prototype for owner review only. It does not approve live ranking writes, champion activation, production exposure, or deployment.
+
+## Phase 34.1 Situational Metrics Warehouse
+
+The isolated `fantasy_football_advanced_metrics` dataset now contains 20,235 source-backed QB/RB/WR/TE situational rows for 2022-2025. It is research input only. No formula result, champion, candidate board, or live ranking changed. Identity mapping remains `UNMAPPED`, so these metrics are not approved for cross-dataset ranking joins yet.
+
+Owner-review findings:
+
+- Gibbs is fixed at RB3 and inside the top 24 overall in every scoring profile.
+- Achane and Chase Brown are not buried outside RB24.
+- Omarion Hampton and Cam Skattebo remain manual-review prospect-history cases.
+- Jeremiyah Love remains a market-only tripwire and needs a prospect lane or explicit owner rejection before live use.
+- Half PPR Breece Hall is stale Current Pigskin context: Phase 33.27 evidence used RB18, while the current active table now lists RB6.
+- Patrick Mahomes is an interleaver warning. The prototype pushes elite QBs too low for live use without backtest support.
+- Rashee Rice is a WR position-board warning. The guarded WR queue disagrees sharply with Current Pigskin.
+
+Next required gate: bounded historical backtest before any live top-100 decision.
+
+## Phase 33.30 Bounded Backtest And Tripwire Cleanup Decision
+
+Final decision: `REFINED TOP-100 NEEDS TARGETED QB/WR CLEANUP`.
+
+Phase 33.30 ran a bounded proxy backtest against `ranking_backtest_feature_mart` using target seasons 2024 and 2025, target week 18, all four scoring profiles, and no 2026 outcomes. The exact 2026 owner-review queues do not exist historically, so the test used source-window feature proxies and the Phase 33.26C position-pull sequence.
+
+Decision summary:
+
+- The refined RB queue remains useful for owner review and fixes 2026 Gibbs sanity.
+- The refined top-100 does not cleanly beat the Current Pigskin proxy on points/VOR capture.
+- QB tripwires, especially Patrick Mahomes, point to an interleaver anchor/cap problem.
+- WR tripwires, especially Rashee Rice, point to a WR position-board or elite-anchor problem.
+- Jeremiyah Love requires a prospect lane or explicit owner rejection of market-only prospect influence.
+- Half PPR Breece Hall requires stale-context refresh before live approval.
+- Current Pigskin holds for live use.
+
+Next gate: targeted QB/WR tripwire cleanup before another owner-review top-100 pass.
+
+## Phase 33.33 RB STD GPT 5.5 v1.0 Audit
+
+Final decision: `RB STD GPT 5.5 v1.0 BLOCKED BY MISSING METRICS`.
+
+The exact Standard RB formula was not backtested. Source-backed RB receiving YAC above expectation has 0 populated rows across the 2020-2024 source seasons needed for targets 2023-2025. Raw YAC was not substituted and formula weights were not changed. Current Pigskin still holds for Standard RB. Next gate: build the missing RB receiving YAC-above-expectation lane or obtain explicit owner approval for a formula revision.
+
+## Phase 33.35 RB STD GPT 5.5 v1.0A Dry-Run
+
+Final decision: `CURRENT PIGSKIN STILL HOLDS FOR STANDARD RB`.
+
+The rushing-only and receiving-EPA variants were tested on strict leakage-safe eligible cohorts with corrected full-season Standard outcomes. Both trail Current Pigskin on NDCG, pairwise ordering, and regret in 2023-2025. The team-pool xFP base preserves stale workloads, while the multiplicative availability factor over-penalizes elite backs after missed time. Neither variant advances to owner review.

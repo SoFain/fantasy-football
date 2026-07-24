@@ -57,11 +57,16 @@ def sort_player_profile_board(df, selected_board=PLAYER_PROFILE_DEFAULT_BOARD):
     out["display_rank_sort"] = pd.to_numeric(out["display_rank"], errors="coerce").fillna(9999)
     out["display_score_sort"] = pd.to_numeric(out["display_score"], errors="coerce").fillna(0)
     if board == "ALL":
-        out = out.sort_values(
-            by=["display_score_sort", "display_rank_sort", "position", "player_display_name"],
-            ascending=[False, True, True, True],
-        )
-        out["board_rank"] = range(1, len(out) + 1)
+        if "unified_overall_rank" in out.columns and out["unified_overall_rank"].notna().any():
+            out = out[out["unified_overall_rank"].notna()].copy()
+            out["board_rank"] = pd.to_numeric(out["unified_overall_rank"], errors="coerce")
+            out = out.sort_values(by=["board_rank", "player_display_name"], ascending=[True, True])
+        else:
+            out = out.sort_values(
+                by=["display_score_sort", "display_rank_sort", "position", "player_display_name"],
+                ascending=[False, True, True, True],
+            )
+            out["board_rank"] = range(1, len(out) + 1)
     else:
         out = out.sort_values(
             by=["display_rank_sort", "display_score_sort", "player_display_name"],
@@ -69,6 +74,43 @@ def sort_player_profile_board(df, selected_board=PLAYER_PROFILE_DEFAULT_BOARD):
         )
         out["board_rank"] = out["display_rank"]
     return out
+
+
+def format_adjustment_label(code, rank_delta=None):
+    value = str(code or "").strip().upper()
+    try:
+        delta = int(rank_delta) if rank_delta is not None else 0
+    except (TypeError, ValueError):
+        delta = 0
+    movement = f" {delta:+d}" if delta else ""
+    labels = {
+        "": "Formula rank",
+        "NO_ADJUSTMENT": "Formula rank",
+        "CURRENT_ROLE_UPGRADE": f"Role upgrade{movement}",
+        "CURRENT_ROLE_DOWNGRADE": f"Role downgrade{movement}",
+        "ROOKIE_CONTEXT": f"Rookie context{movement}",
+        "INJURY_UNCERTAIN": "Injury noted, no move",
+        "SUSPENSION_UNCERTAIN": "Suspension review, no move",
+        "ORDER_REBALANCE": f"Queue reorder{movement}",
+    }
+    if value.startswith("INJURY_"):
+        return labels.get(value, f"Injury adjustment{movement}")
+    if value.startswith("SUSPENSION_"):
+        return labels.get(value, f"Suspension adjustment{movement}")
+    return labels.get(value, value.replace("_", " ").title() + movement)
+
+
+def build_unified_rankings_query(project_id, dataset_id, scoring_profile_id):
+    sql_query = f"""
+    SELECT player_id, position, overall_rank AS unified_overall_rank,
+        board_version AS unified_board_version, replacement_rank AS unified_replacement_rank,
+        position_source_version, position_rank_source
+    FROM `{project_id}.{dataset_id}.unified_draft_rankings_current`
+    WHERE scoring_profile_id = @scoring_profile_id
+    """
+    return sql_query, bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("scoring_profile_id", "STRING", scoring_profile_id)
+    ])
 
 
 def build_pigskin_rankings_query(project_id, dataset_id, scoring_profile_id):
@@ -196,11 +238,20 @@ def build_live_ranking_context_query(
             risk_flags,
             what_would_change_mind,
             data_snapshot_label
-        FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings`
-        WHERE is_active = TRUE
-          AND scoring_profile_id = @scoring_profile_id
-          AND (@position IS NULL OR position = @position)
-          AND `rank` <= CASE position
+            ,unified.overall_rank AS unified_overall_rank
+        FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings` rankings
+        LEFT JOIN (
+          SELECT scoring_profile_id AS unified_profile_id, player_id AS unified_player_id,
+            position AS unified_position, overall_rank
+          FROM `{project_id}.{dataset_id}.unified_draft_rankings_current`
+        ) unified
+          ON unified.unified_profile_id = rankings.scoring_profile_id
+         AND unified.unified_player_id = rankings.player_id
+         AND unified.unified_position = rankings.position
+        WHERE rankings.is_active = TRUE
+          AND rankings.scoring_profile_id = @scoring_profile_id
+          AND (@position IS NULL OR rankings.position = @position)
+          AND rankings.`rank` <= CASE rankings.position
             WHEN 'QB' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["QB"]}
             WHEN 'RB' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["RB"]}
             WHEN 'WR' THEN {PLAYER_PROFILE_POSITION_DEPTH_LIMITS["WR"]}
@@ -212,7 +263,9 @@ def build_live_ranking_context_query(
         SELECT
             ROW_NUMBER() OVER (
                 ORDER BY
-                    CASE WHEN @position IS NULL THEN pigskin_score END DESC,
+                    CASE WHEN @position IS NULL AND unified_overall_rank IS NULL THEN 1 ELSE 0 END ASC,
+                    CASE WHEN @position IS NULL THEN unified_overall_rank END ASC,
+                    CASE WHEN @position IS NULL AND unified_overall_rank IS NULL THEN pigskin_score END DESC,
                     position_rank ASC,
                     position ASC,
                     player_name ASC

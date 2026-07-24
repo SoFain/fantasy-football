@@ -98,6 +98,30 @@ PBP values are xFP-like component proxies, not official fantasy-point xFP column
 Phase 33.15 adds three Player-Year Advanced Metrics Warehouse objects:
 
 - `player_week_advanced_metrics`, altered to include season-level advanced metrics alignments.
+
+## Phase 33.31 Tripwire Cleanup Source Policy
+
+Phase 33.31 confirmed that QB/WR cleanup may only use source-backed metrics already present in the ranking warehouse or approved compatibility layers. WR demotions need at least two source-backed concerns for elite Current Pigskin WRs. Market-only prospects are not source-backed official top-100 rows until a prospect watch lane exists or the owner rejects them.
+
+Blocked fields remain blocked for cleanup and owner-review decisions:
+
+- YPRR
+- TPRR
+- true route share
+- first-read share
+- pressure EPA
+- covered-receiver EPA
+- catch-over-expected
+- historical depth context
+- `pigskin_context_score`
+
+## Phase 33.32 Standard RB Formula Sprint Coverage
+
+Phase 33.32 used only source-window-safe Standard RB rows from `ranking_backtest_feature_mart`. Available target seasons were 2021-2025, not the full requested 2017-2025 range. The 2025 holdout slice had 19 RB rows and no usable VOR captured denominator.
+
+Safe RB formula inputs included Current Pigskin proxy, recent/profile points, carries, targets, receiving yards, receiving EPA, red-zone and goal-line opportunities, xFP split proxies, NGS rushing efficiency, NGS RYOE, NGS box resilience, snap stability, availability, injury burden, missed-time risk, and team environment.
+
+Unavailable requested fields remained excluded: rushing yards, rushing touchdowns, receptions, and receiving touchdowns as direct Standard RB feature-mart columns.
 - `player_season_advanced_metrics`, one row per player, season, season_type (REG/POST), and position.
 - `player_metric_source_coverage`, one row per metric, season, source status, and coverage count.
 
@@ -942,3 +966,235 @@ Under Phase 33.17, the BQML v2 feature contract is rebuilt to source rolling 3-y
 * **Standard-First**: Enforced.
 * **Safeguards**: Evaluates `hist.season BETWEEN target_season - 3 AND target_season - 1` to strictly prevent future target-season data leakage.
 * **Blocked features**: Route metrics, end zone targets, dakota, pressure, covered EPA, and pigskin context score remain blocked (NULL).
+
+## Phase 33.18 & 33.18B Advanced BQML v2 Status
+
+Phase 33.18 and 33.18B completed the training and evaluation of 64 advanced positional models using audited advanced player metrics (`advanced_player_metrics_v1`).
+
+Source-backed advanced finalists (Phase 33.18B):
+- Standard: QB `adv_standard_qb_logistic_bust`, RB `adv_standard_rb_linear_points`, WR `adv_standard_wr_logistic_elite`, TE `adv_standard_te_linear_points`.
+- Half PPR: QB `adv_half_ppr_qb_logistic_bust`, RB `adv_half_ppr_rb_linear_vor`, WR `adv_half_ppr_wr_logistic_elite`, TE `adv_half_ppr_te_logistic_elite`.
+- PPR: QB `adv_ppr_qb_logistic_bust`, RB `adv_ppr_rb_logistic_elite`, WR `adv_ppr_wr_logistic_elite`, TE `adv_ppr_te_logistic_bust`.
+- GNG Keeper: QB `adv_gng_keeper_qb_linear_points` (with warnings), RB `adv_gng_keeper_rb_linear_points`, WR `adv_gng_keeper_wr_logistic_bust`, TE `adv_gng_keeper_te_logistic_bust`.
+
+Source status of route metrics (Phase 33.18A):
+- Confirmed that player-level route run metrics (`routes_run`, `yprr`, `tprr`, etc.) are **blocked** (NULL) due to missing denominators in nflverse.
+- Play-by-play target routes only cover targeted plays and cannot be used to calculate total route runs.
+
+## Phase 33.18C Advanced BQML v2 Status Correction
+
+Phase 33.18C corrected the baseline prior finalists for non-Standard profiles to match the true Phase 33.13 finalists.
+
+Key findings:
+- Sourced and audited Phase 33.13 baseline rows. Confirmed they contain a buggy evaluator mismatch (extremely low points capture hit rates and ~52% missingness). These baselines are flagged as evaluator-incompatible. Direct points/VOR capture comparisons are invalid.
+- Applied warnings: GNG Keeper QB combined predictive correlation is below 0.45 (`0.4217`); Standard TE validation correlation declined by `-0.0342` (`0.4687` vs `0.5029`) despite holdout improvement.
+
+Advanced owner-review finalists (Phase 33.18C corrected):
+- Standard: QB `adv_standard_qb_logistic_bust`, RB `adv_standard_rb_linear_points`, WR `adv_standard_wr_logistic_elite`, TE `adv_standard_te_linear_points`.
+- Half PPR: QB `adv_half_ppr_qb_logistic_bust`, RB `adv_half_ppr_rb_linear_vor`, WR `adv_half_ppr_wr_logistic_elite`, TE `adv_half_ppr_te_logistic_elite`.
+- PPR: QB `adv_ppr_qb_logistic_bust`, RB `adv_ppr_rb_logistic_elite`, WR `adv_ppr_wr_logistic_elite`, TE `adv_ppr_te_logistic_bust`.
+- GNG Keeper: QB `adv_gng_keeper_qb_linear_points` (with warnings), RB `adv_gng_keeper_rb_linear_points`, WR `adv_gng_keeper_wr_logistic_bust`, TE `adv_gng_keeper_te_logistic_bust`.
+
+Source status of route metrics (Phase 33.18A/C):
+- Confirmed that player-level route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **blocked** (NULL) due to missing denominators in public data.
+
+## Phase 33.19 Advanced BQML v2 Owner-Review Boards Opportunity Metrics Status
+
+Phase 33.19 generated owner-review boards using active 2026 player contexts.
+
+Opportunity and NGS feature source status:
+- Sourced pre-2026 rolling 3-year advanced metrics averages (2023-2025) with 0% missingness via leakage-safe imputation.
+- All QB passing CPOE, dropback metrics, rushing yard baselines, RB weighted opportunities, red-zone/goal-line opportunities, NGS efficiencies, snap stability, and WR/TE WOPR, target shares, and air yards shares are source-backed.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`. No route runs or YPRR calculations were fabricated.
+
+## Phase 33.20 Owner Review of Advanced Positional Boards Opportunity Metrics Status
+
+Phase 33.20 reviewed the candidate review boards.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- QB passing and rushing metrics are fully source-backed, but the alternate `linear_points` model suffers from severe rushing bias.
+- Proposed guardrails will restrict rank movement for sparse-feature players (`SPARSE_FEATURES` missingness > 50% capped at +10 ranks) and rookies (`ROOKIE_NO_HISTORY` anchored to Current Pigskin rank).
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.21B Guardrail Identity and History Fix Opportunity Metrics Status
+
+Phase 33.21B corrected the review board guardrails opportunity metrics.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Career games played count (`hist_games_3yr`) and career seasons count (`hist_seasons_3yr`) are successfully integrated to evaluate history volume.
+- True rookies (no career history pre-2026) are anchored to Current Pigskin under `ROOKIE_NO_HISTORY`.
+- Low-history players (fewer than 10 career games pre-2026) are anchored to Current Pigskin under `LOW_HISTORY`.
+- Established players with career games >= 10 are correctly classified as having sufficient history.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.22 Owner Approval Packet Opportunity Metrics Status
+
+Phase 33.22 created the owner approval packet opportunity metrics.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Documented Cal QB Fernando Mendoza as the remaining join-failed item (safely anchored).
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.23 Owner Decision for Guarded Positional Boards Opportunity Metrics Status
+
+Phase 33.23 recorded the owner decision and established top-100 planning guidelines.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Documented Marvin Harrison (Jr.) label correction to `PROSPECT_HISTORY` (removing him from `ROOKIE_NO_HISTORY` due to career stats history).
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.24 Position-Locked Top-100 Interleaver Planning Opportunity Metrics Status
+
+Phase 33.24 formulated the technical plan opportunity metrics.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Planned identity preflight checks to resolve identity collisions prior to interleaving.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.25 Top-100 Player Identity Preflight Opportunity Metrics Status
+
+Phase 33.25 audited and hardened player identity mappings before building the interleaver.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Marvin Harrison Jr. identity collision resolved in the database via manual overrides in `player_identity_overrides`, successfully restoring his career stats history (29 games, 2 seasons).
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.26 Position-Locked Top-100 Prototype Opportunity Metrics Status
+
+Phase 33.26 compiled and evaluated the prototype overall boards.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Verified Marvin Harrison Jr. resolves to his correct active player ID `00-0039849` with 29 games / 2 seasons history and WR34/35 rankings.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.26B Position-Locked Top-100 Calibration Opportunity Metrics Status
+
+Phase 33.26B compiled and evaluated the calibrated prototype overall boards.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Verified Marvin Harrison Jr. resolves to his correct active player ID `00-0039849` with 29 games / 2 seasons history.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.26C Position-Locked Top-100 Weighting Calibration Opportunity Metrics Status
+
+Phase 33.26C compiled and evaluated the calibrated prototype overall boards.
+
+Opportunity and NGS feature source status:
+- All source-backed pre-2026 rolling 3-year advanced metrics averages remain valid with 0% missingness via leakage-safe imputation.
+- Verified Marvin Harrison Jr. resolves to his correct active player ID `00-0039849` with 29 games / 2 seasons history.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.26D Elite Market-Miss Audit Opportunity Metrics Status
+
+Phase 33.26D audited elite misses without changing feature contracts or writing rankings.
+
+Opportunity and NGS feature source status:
+- Jahmyr Gibbs' 2025 feature row is present under compact name `J.Gibbs`: 17 games, 94 targets, 77 receptions, 616 receiving yards, 243 carries, 1,223 rushing yards, and 313.84 PPR weighted opportunity.
+- Gibbs' receiving usage, 2025 season, availability, participation source, and NGS source were not missing in the inspected feature rows.
+- The miss is therefore classified as a model/queue weighting issue, not a missing-source issue.
+- Touchdown splits by rushing and receiving are not available in `player_season_advanced_metrics`; only total touchdown context is available from ranking outputs.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.27 RB Positional Board Refinement Opportunity Metrics Status
+
+Phase 33.27 used source-backed RB opportunity fields to select a review-only corrected RB queue.
+
+Opportunity and NGS feature source status:
+- Gibbs, Achane, and Chase Brown all have valid 2025 receiving and weighted-opportunity evidence. Their guarded RB misses are not source-missingness problems.
+- PPR weighted opportunity per game for audited receiving backs: Gibbs 18.46, Achane 17.38, Chase Brown 16.75.
+- The selected `anchored_blend_tripwire` candidate adds review labels for receiving value and role expansion where the guarded finalist suppresses source-backed usage.
+- NGS and participation source status are available for the audited rows.
+- True route run metrics (`routes_run`, `yprr`, `tprr`, etc.) remain strictly **BLOCKED** and mapped to `NULL`.
+
+## Phase 33.28 Refined RB Top-100 Rebuild Note
+
+Phase 33.28 keeps the Phase 33.26C calibrated weighted hybrid position-pull sequence and swaps only the RB queue to the Phase 33.27 `anchored_blend_tripwire` review queue. This fixes Jahmyr Gibbs inside RB3 and top 7 overall across all profiles, but the result remains review-only because Current Pigskin and market tripwires still require owner judgment.
+
+Stable constraints:
+
+- Do not write this prototype to `analytics_pigskin_rankings`.
+- Do not activate formula champions from this phase.
+- Keep Half PPR TE, PPR TE, GNG Keeper QB, and GNG Keeper TE held behind Current Pigskin.
+- Treat Jeremiyah Love as a market-only prospect tripwire until the player appears in a source-backed active ranking or approved prospect lane.
+- Treat Half PPR Breece Hall as a current-state drift warning because live Current Pigskin now lists him RB6 while the Phase 33.27 evidence used an older RB18 context.
+- Route metrics remain blocked/null.
+
+## Phase 33.29 Refined Top-100 Owner Review Decision
+
+Final decision: `REFINED TOP-100 READY FOR OWNER REVIEW WITH TRIPWIRES`.
+
+Phase 33.29 accepts the Phase 33.28 refined top-100 prototype for owner review only. It does not approve live ranking writes, champion activation, production exposure, or deployment.
+
+Owner-review findings:
+
+- Gibbs is fixed at RB3 and inside the top 24 overall in every scoring profile.
+- Achane and Chase Brown are not buried outside RB24.
+- Omarion Hampton and Cam Skattebo remain manual-review prospect-history cases.
+- Jeremiyah Love remains a market-only tripwire and needs a prospect lane or explicit owner rejection before live use.
+- Half PPR Breece Hall is stale Current Pigskin context: Phase 33.27 evidence used RB18, while the current active table now lists RB6.
+- Patrick Mahomes is an interleaver warning. The prototype pushes elite QBs too low for live use without backtest support.
+- Rashee Rice is a WR position-board warning. The guarded WR queue disagrees sharply with Current Pigskin.
+
+Next required gate: bounded historical backtest before any live top-100 decision.
+
+## Phase 33.30 Bounded Backtest And Tripwire Cleanup Decision
+
+Final decision: `REFINED TOP-100 NEEDS TARGETED QB/WR CLEANUP`.
+
+Phase 33.30 ran a bounded proxy backtest against `ranking_backtest_feature_mart` using target seasons 2024 and 2025, target week 18, all four scoring profiles, and no 2026 outcomes. The exact 2026 owner-review queues do not exist historically, so the test used source-window feature proxies and the Phase 33.26C position-pull sequence.
+
+Decision summary:
+
+- The refined RB queue remains useful for owner review and fixes 2026 Gibbs sanity.
+- The refined top-100 does not cleanly beat the Current Pigskin proxy on points/VOR capture.
+- QB tripwires, especially Patrick Mahomes, point to an interleaver anchor/cap problem.
+- WR tripwires, especially Rashee Rice, point to a WR position-board or elite-anchor problem.
+- Jeremiyah Love requires a prospect lane or explicit owner rejection of market-only prospect influence.
+- Half PPR Breece Hall requires stale-context refresh before live approval.
+- Current Pigskin holds for live use.
+
+Next gate: targeted QB/WR tripwire cleanup before another owner-review top-100 pass.
+
+## Phase 33.33 RB STD GPT 5.5 v1.0 Metric Audit
+
+| Metric lane | Status | Phase 33.33 finding |
+|---|---|---|
+| RB rushing and receiving xFP | Available | Direct player and team xFP inputs are complete across the target source windows. Standard scoring adjustment still needs explicit semantics. |
+| RB role shares | Available by derivation | Snap, weighted opportunity, red-zone, and goal-line values are populated. Team aggregation can produce shares. |
+| RB NGS rushing efficiency | Partial | Rushing efficiency, RYOE per attempt, and box context cover about 51-53% of RB player-seasons. |
+| RB receiving YAC above expectation | Blocked | `player_season_advanced_metrics.ngs_yac_above_expectation` is 0/603, 0/596, and 0/575 for the three target windows. The direct NGS receiving source has WR and TE rows only. |
+| Historical availability | Available with small identity warning | Games with offensive snaps are effectively complete. Birth date coverage is above 98%. |
+| Fumbles lost rate | Available by derivation | Historical `fumbles_lost` is present in profile source JSON; carries/targets come from advanced weekly rows. |
+
+Policy: do not substitute raw YAC for RB receiving YAC above expectation. The formula remains blocked until the source lane exists or the owner explicitly revises the formula.
+
+## Phase 33.35 v1.0A Dry-Run Read
+
+| Lane | Result |
+|---|---|
+| Standard xFP | `rec_fantasy_points_exp - receptions_exp` provides a source-backed Standard receiving xFP adjustment. |
+| NGS rushing eligibility | Leaves 56/72, 54/67, and 10/19 eligible rows for targets 2023-2025. |
+| Receiving EPA per target | Costs one additional 2023 row and barely changes ranking under the capped 3% efficiency multiplier. |
+| Fumbles lost | Source-backed rolling rate and touch projection work without total-fumble substitution. |
+| Availability | Source-backed, but a full multiplicative haircut is too punitive for elite players returning from missed time. |
+| Outcome contract | Use full-season profile totals for season-finish evaluation. Do not mislabel Week 18 target rows as season finishes. |
+
+Decision: retain these metrics as research components. Do not promote either v1.0A formula.
+
+## Phase 34.1 Situational Metrics Source
+
+| Lane | New source | Status | Constraint |
+|---|---|---|---|
+| QB situational efficiency | `fantasy_football_advanced_metrics.qb_situational_metrics` | Available in isolated research dataset | Identity bridge required before mart integration. |
+| RB box, concept, contact, and efficiency context | `fantasy_football_advanced_metrics.rb_situational_metrics` | Available in isolated research dataset | Raw `yac` is not YAC above expectation. `yards_after_contact` is not broken tackles. |
+| WR/TE route and coverage context | `fantasy_football_advanced_metrics.wr_situational_metrics`, `te_situational_metrics` | Source-backed in isolated research dataset | Routes Run, YPRR, and Targets/Route Run remain contained here until approved. |
+
+The source covers 2022-2025 and is not connected to live rankings, active champions, or `ranking_backtest_feature_mart`. All 945 source identities remain `UNMAPPED` pending a dedicated bridge phase.
