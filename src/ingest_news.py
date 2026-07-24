@@ -7,12 +7,38 @@ import json
 from datetime import datetime, timezone
 
 from src.load import get_bigquery_project
+from src.player_status_changes import compute_age
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('ingest_news')
 
 SLEEPER_MAX_CALLS_PER_MINUTE = 900
 _sleeper_call_timestamps = []
+
+
+def _parse_birth_date(value):
+    """Sleeper sends YYYY-MM-DD, but empty strings and nulls both appear."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value).strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        logger.debug("Unparseable Sleeper birth_date: %r", value)
+        return None
+
+
+def _clean_int(value):
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _clean_str(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def sleeper_get(url):
@@ -36,11 +62,62 @@ def sleeper_get(url):
     return response
 
 
-def load_realtime_news():
-    logger.info("Fetching Sleeper global player map...")
-    players_resp = sleeper_get("https://api.sleeper.app/v1/players/nfl")
-    players_map = players_resp.json()
+PLAYERS_ENDPOINT = "https://api.sleeper.app/v1/players/nfl?active=true"
+
+
+def _snapshot_exists_today(client, as_of_date):
+    """True when sleeper_players_history already holds a snapshot for today.
+
+    Returns False if the table is missing or empty, so the first run after the
+    migration proceeds.
+    """
+    table_id = f"{client.project}.fantasy_football_brain.sleeper_players_history"
+    from google.cloud import bigquery
+
+    sql = f"""
+    SELECT COUNT(1) AS n
+    FROM `{table_id}`
+    WHERE DATE(snapshot_at) = @as_of
+    """
+    try:
+        job = client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("as_of", "DATE", as_of_date)]
+            ),
+        )
+        return next(iter(job.result())).n > 0
+    except Exception as exc:
+        logger.info("Could not check for today's snapshot (%s); proceeding.", exc)
+        return False
+
+
+def load_realtime_news(force=False, client=None):
+    # Only /v1/players/ is rate-limited to once per day by Sleeper; it is ~5MB.
+    # This job is its single caller, and everything else reads the saved
+    # snapshot. Other Sleeper endpoints (trending, league, rosters, matchups)
+    # have no such limit. The guard makes once-per-day a property of the code,
+    # not just the schedule: a manual re-run or retry on the same day is a no-op
+    # unless forced. Trending shares this daily cadence only because it is
+    # enriched from the same player map.
+    if client is None:
+        client = bigquery.Client(project=get_bigquery_project())
+
     snapshot_at = datetime.now(timezone.utc)
+    if not force and _snapshot_exists_today(client, snapshot_at.date()):
+        logger.info(
+            "Sleeper snapshot already exists for %s; skipping. Pass force=True to override.",
+            snapshot_at.date(),
+        )
+        return
+
+    # active=true returns only active players and a much smaller payload, per the
+    # Sleeper players endpoint docs. Every ingested row therefore has
+    # active=true; a player leaving the active set drops out of the snapshot
+    # rather than flipping the field.
+    logger.info("Fetching Sleeper active player map...")
+    players_resp = sleeper_get(PLAYERS_ENDPOINT)
+    players_map = players_resp.json()
 
     logger.info("Fetching Sleeper trending add/drop vectors...")
     add_resp = sleeper_get("https://api.sleeper.app/v1/players/nfl/trending/add?lookback_hours=24&limit=50")
@@ -114,6 +191,7 @@ def load_realtime_news():
             or player.get("full_name")
             or player.get("search_full_name")
         )
+        birth_date = _parse_birth_date(player.get("birth_date"))
         current_player_records.append({
             "snapshot_at": snapshot_at,
             "sleeper_player_id": str(player_id),
@@ -121,17 +199,27 @@ def load_realtime_news():
             "player_name": player_name,
             "position": position,
             "team": player.get("team"),
-            "active": player.get("active"),
+            # The endpoint is filtered to active=true, so this is always true.
+            # Default to True rather than trusting a possibly-absent field.
+            "active": player.get("active", True) if player.get("active") is not None else True,
             "status": player.get("status"),
             "injury_status": player.get("injury_status"),
+            "injury_body_part": player.get("injury_body_part"),
+            "injury_notes": player.get("injury_notes"),
+            "practice_participation": player.get("practice_participation"),
             "fantasy_positions_json": json.dumps(player.get("fantasy_positions") or [], sort_keys=True),
             "depth_chart_position": player.get("depth_chart_position"),
             "depth_chart_order": player.get("depth_chart_order"),
             "search_rank": player.get("search_rank"),
             "years_exp": player.get("years_exp"),
+            "birth_date": birth_date,
+            "age": compute_age(birth_date, snapshot_at.date()),
+            "number": _clean_int(player.get("number")),
+            "height": _clean_str(player.get("height")),
+            "weight": _clean_str(player.get("weight")),
+            "college": _clean_str(player.get("college")),
         })
 
-    client = bigquery.Client(project=get_bigquery_project())
     project_id = client.project
 
     current_players_df = pd.DataFrame(current_player_records)
@@ -152,12 +240,38 @@ def load_realtime_news():
             bigquery.SchemaField("depth_chart_order", "INTEGER"),
             bigquery.SchemaField("search_rank", "INTEGER"),
             bigquery.SchemaField("years_exp", "INTEGER"),
+            bigquery.SchemaField("birth_date", "DATE"),
+            bigquery.SchemaField("age", "FLOAT"),
+            bigquery.SchemaField("number", "INTEGER"),
+            bigquery.SchemaField("height", "STRING"),
+            bigquery.SchemaField("weight", "STRING"),
+            bigquery.SchemaField("college", "STRING"),
+            bigquery.SchemaField("injury_body_part", "STRING"),
+            bigquery.SchemaField("injury_notes", "STRING"),
+            bigquery.SchemaField("practice_participation", "STRING"),
         ]
         job_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
             schema=current_players_schema,
             autodetect=False,
         )
+        # Append to history BEFORE truncating current. History is what makes
+        # day-over-day change detection possible; the truncating table cannot
+        # support it because yesterday's rows are gone by the time the next
+        # run reads them.
+        history_table_id = f"{project_id}.fantasy_football_brain.sleeper_players_history"
+        history_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            schema=current_players_schema,
+            autodetect=False,
+        )
+        client.load_table_from_dataframe(
+            current_players_df, history_table_id, job_config=history_config
+        ).result()
+        logger.info(
+            "Appended %s Sleeper player rows to %s", len(current_players_df), history_table_id
+        )
+
         job = client.load_table_from_dataframe(current_players_df, current_players_table_id, job_config=job_config)
         job.result()
         logger.info(

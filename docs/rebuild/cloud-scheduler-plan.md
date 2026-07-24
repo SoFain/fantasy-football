@@ -15,27 +15,70 @@ This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does 
 
 | Job | Suggested cadence | Notes |
 | --- | --- | --- |
-| `ingest-sleeper-news` | daily, more often during active season | Keep Sleeper calls below API safety limits. |
+| `ingest-sleeper-news` | daily at 07:00 America/New_York | Snapshots the Sleeper player map (`/v1/players/?active=true`) and appends to `sleeper_players_history`. This is the only caller of `/v1/players/`, which Sleeper limits to once per day; the job skips if today's snapshot already exists. Other jobs read the saved snapshot. |
+| `detect-player-changes` | daily at 07:15 America/New_York | Runs after the snapshot. Diffs the two most recent snapshots and pulls team news for injury, team, depth-chart, and deactivation changes. |
 | `ingest-nflverse` | after game days | Run by explicit season. Avoid repeated full truncation during live show prep unless intended. |
 | `materialize-analytics` | after successful ingestion | Use after source tables are refreshed. |
-| `generate-pigskin-rankings` | explicit cadence | Start manual or weekly. Do not overrun Gemini budget. |
+| `generate-pigskin-rankings` | daily at 07:30 America/New_York | Runs after the Sleeper snapshot. Refuses to run without a current-day `sleeper_players_current` snapshot, since that defines the eligible active pool. Watch the Gemini budget. |
 | `generate-evidence-packets` | after rankings and projections | Use for show prep and segment packets. |
 | `validate-warehouse` | after materialization | Use a validation pattern when checking a narrow sprint. |
 | `run-projections` | weekly or daily during active season | Start with weekly projection horizon, then add ROS and dynasty cadence. |
 | `run-backtests` | weekly or after projection changes | Start manual or narrow. Use dry-run first and keep season windows bounded. |
 | `verify-external-context` | manual or queued by player | Keep quota use explicit and auditable. |
 
+## Time Zones
+
+Always pass `--time-zone`. Cloud Scheduler defaults to UTC, so a schedule written as a bare UTC offset silently drifts by an hour twice a year when US daylight saving changes. A 7:00 AM Eastern job is `--schedule "0 7 * * *" --time-zone "America/New_York"`, never `"0 11 * * *"` or `"0 12 * * *"`.
+
 ## Example Commands
 
-Create a daily Sleeper news refresh trigger:
+Create the daily 7:00 AM Eastern Sleeper snapshot:
 
 ```powershell
 gcloud scheduler jobs create http ingest-sleeper-news-daily `
   --location us-central1 `
-  --schedule "0 8 * * *" `
+  --schedule "0 7 * * *" `
+  --time-zone "America/New_York" `
   --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/ingest-sleeper-news:run" `
   --http-method POST `
   --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
+```
+
+Create the change detection and news pass that follows it:
+
+```powershell
+gcloud scheduler jobs create http detect-player-changes-daily `
+  --location us-central1 `
+  --schedule "15 7 * * *" `
+  --time-zone "America/New_York" `
+  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/detect-player-changes:run" `
+  --http-method POST `
+  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
+```
+
+The 15 minute gap is a deliberate buffer, not a dependency. Cloud Scheduler cannot express "run after that job succeeded", so if the snapshot is slow or fails, the detector simply finds no new snapshot to diff and exits without writing. It does not produce wrong results; it produces none.
+
+Create the daily 7:30 AM Eastern rankings run, after the snapshot:
+
+```powershell
+gcloud scheduler jobs create http generate-pigskin-rankings-daily `
+  --location us-central1 `
+  --schedule "30 7 * * *" `
+  --time-zone "America/New_York" `
+  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/generate-pigskin-rankings:run" `
+  --http-method POST `
+  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
+```
+
+The rankings job enforces its own precondition: it materializes candidates only from a current-day Sleeper pool and raises if the snapshot is missing or stale. The 30 minute offset from the 07:00 snapshot is the same soft-buffer pattern, but here a failure is loud rather than silent — a stale pool stops the run instead of ranking yesterday's players. If the snapshot job is ever slowed, widen the offset rather than letting rankings fail. For a manual run that should also refresh Sleeper first, pass `--refresh-sleeper` (the once-per-day guard still applies).
+
+If an existing trigger needs to move to Eastern time:
+
+```powershell
+gcloud scheduler jobs update http ingest-sleeper-news-daily `
+  --location us-central1 `
+  --schedule "0 7 * * *" `
+  --time-zone "America/New_York"
 ```
 
 Create an after-game-day nflverse trigger:

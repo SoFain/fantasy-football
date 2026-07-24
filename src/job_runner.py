@@ -27,6 +27,7 @@ VALID_JOB_NAMES = (
     "ingest-market-values",
     "ingest-college-stats",
     "ingest-rookie-scouting",
+    "detect-player-changes",
     "materialize-analytics",
     "generate-pigskin-rankings",
     "generate-evidence-packets",
@@ -75,6 +76,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--team", help="Optional team context for external verification.")
     parser.add_argument("--max-results", type=int)
     parser.add_argument("--csv", help="CSV path for ingest-context-events and ingest-rookie-scouting.")
+    parser.add_argument(
+        "--skip-news",
+        action="store_true",
+        help="For detect-player-changes: record changes without fetching team feeds.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="For ingest-sleeper-news: re-fetch the players map even if today's snapshot exists.",
+    )
     parser.add_argument(
         "--replace-season",
         action="store_true",
@@ -263,17 +274,15 @@ def dispatch_ingest_nflverse(args: argparse.Namespace, client: Any) -> dict[str,
 
 
 def dispatch_ingest_sleeper_news(args: argparse.Namespace, client: Any) -> dict[str, Any]:
-    del client
     if args.dry_run:
-        return {"row_count": 0, "dry_run": True, "skipped": "Sleeper news ingest has no dry-run mode"}
+        return {"row_count": 0, "dry_run": True, "note": "would fetch Sleeper players map unless today's snapshot exists"}
     from src.ingest_news import load_realtime_news
 
-    load_realtime_news()
+    load_realtime_news(force=args.force, client=client)
     return {"row_count": 0}
 
 
 def dispatch_ingest_sleeper_league(args: argparse.Namespace, client: Any) -> dict[str, Any]:
-    del client
     if args.dry_run:
         _require(args.league_id, "--league-id is required")
         return {"row_count": 0, "dry_run": True, "league_id": args.league_id}
@@ -289,6 +298,7 @@ def dispatch_ingest_sleeper_league(args: argparse.Namespace, client: Any) -> dic
         display_name=args.display_name,
         team_name=args.team_name,
         dataset_name=args.dataset,
+        client=client,
     )
     return {"row_count": 0, "league_id": args.league_id}
 
@@ -342,6 +352,17 @@ def dispatch_ingest_rookie_scouting(args: argparse.Namespace, client: Any) -> di
         replace_season=bool(getattr(args, "replace_season", False)),
     )
     return {"row_count": getattr(table, "num_rows", 0) if table is not None else 0}
+
+
+def dispatch_detect_player_changes(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.detect_player_changes import detect_player_changes
+
+    return detect_player_changes(
+        dataset_id=args.dataset,
+        client=client,
+        fetch_news=not args.skip_news,
+        dry_run=args.dry_run,
+    )
 
 
 def dispatch_materialize_analytics(args: argparse.Namespace, client: Any) -> dict[str, Any]:
@@ -579,6 +600,7 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "ingest-market-values": dispatch_ingest_market_values,
     "ingest-college-stats": dispatch_ingest_college_stats,
     "ingest-rookie-scouting": dispatch_ingest_rookie_scouting,
+    "detect-player-changes": dispatch_detect_player_changes,
     "materialize-analytics": dispatch_materialize_analytics,
     "generate-pigskin-rankings": dispatch_generate_pigskin_rankings,
     "generate-evidence-packets": dispatch_generate_evidence_packets,

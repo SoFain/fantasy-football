@@ -47,7 +47,28 @@ python scripts/run_bigquery_validations.py --run --pattern claim
 | [rebuild/current-warehouse-inventory.md](rebuild/current-warehouse-inventory.md) | Every table, its classification, and who reads it. |
 | [rebuild/table-classification.md](rebuild/table-classification.md) | Raw / staging / mart classification and what is safe to expose. |
 | [rebuild/compatibility-contracts.md](rebuild/compatibility-contracts.md) | Index of the compatibility-object layer. |
-| [../bigquery/contracts/](../bigquery/contracts) | One contract per warehouse object. 44 contracts. |
+| [../bigquery/contracts/](../bigquery/contracts) | One contract per warehouse object. 48 contracts. |
+
+## Daily Player Watch
+
+Runs at 07:00 America/New_York, then 07:15 for the detection pass. Confirms team, status, injury, depth chart, and age from Sleeper; records what changed; pulls team beat coverage for changes worth investigating.
+
+| Document | Purpose |
+| --- | --- |
+| [../bigquery/contracts/sleeper_players_history.md](../bigquery/contracts/sleeper_players_history.md) | Append-only snapshot history. Without it, change detection is impossible. |
+| [../bigquery/contracts/player_status_changes.md](../bigquery/contracts/player_status_changes.md) | One row per changed field, and which changes warrant a news lookup. |
+| [../bigquery/contracts/team_news_items.md](../bigquery/contracts/team_news_items.md) | Beat-writer items for teams that had a triggering change. |
+| [../bigquery/contracts/player_news_matches.md](../bigquery/contracts/player_news_matches.md) | Links an item to the changed player it mentions. |
+| [rebuild/cloud-scheduler-plan.md](rebuild/cloud-scheduler-plan.md) | The 7 AM Eastern triggers, with the time-zone rule. |
+
+```bash
+python -m src.job_runner --job-name ingest-sleeper-news
+python -m src.job_runner --job-name detect-player-changes --dry-run
+```
+
+Team feeds are commentary, not an authoritative injury source. Sleeper's `status` and `injury_status` are the flag; the feed is context for investigating it.
+
+**Sleeper API discipline.** The `/v1/players/` map is ~5MB and Sleeper limits it to once per day, so `ingest-sleeper-news` is its only caller, fetches it with `?active=true`, and skips if today's snapshot already exists (`--force` overrides). Every other job — including on-demand `ingest-sleeper-league` — reads the saved `sleeper_players_current` snapshot rather than calling the endpoint again. Per-league endpoints (`/league`, `/rosters`, `/matchups`) have no such limit and stay live. Run `ingest-sleeper-news` before `ingest-sleeper-league`, or the league job errors that the snapshot is empty.
 
 ## Modeling and Evidence
 

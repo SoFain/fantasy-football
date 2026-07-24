@@ -342,13 +342,65 @@ def load_rows(client, dataset_id, table_name, rows):
     logger.info("Loaded %s rows into %s.", len(df), table_id)
 
 
-def ingest_sleeper_league(league_id, week, roster_id=None, username=None, display_name=None, team_name=None, dataset_name="fantasy_football_brain"):
+def load_players_map_from_warehouse(client, dataset_name="fantasy_football_brain"):
+    """Build the player-id lookup from the saved Sleeper snapshot.
+
+    Sleeper limits /v1/players/ to once per day, and this on-demand job can run
+    many times a day, so it must not call that endpoint. It reads the map that
+    ingest-sleeper-news saved into sleeper_players_current instead, exactly as
+    the Sleeper docs advise ("save this information on your own servers").
+
+    Returns a dict keyed by string player id, shaped so build_records can use it
+    the same way it used the raw API map.
+    """
+    table_id = f"{client.project}.{dataset_name}.sleeper_players_current"
+    sql = f"""
+    SELECT
+        sleeper_player_id, player_name, position, team, gsis_id,
+        status, injury_status, depth_chart_position, depth_chart_order,
+        active, fantasy_positions_json
+    FROM `{table_id}`
+    """
+    players_map = {}
+    for row in client.query(sql).result():
+        try:
+            fantasy_positions = json.loads(row["fantasy_positions_json"]) if row["fantasy_positions_json"] else []
+        except (TypeError, ValueError):
+            fantasy_positions = []
+        players_map[str(row["sleeper_player_id"])] = {
+            # player_name() falls back to full_name when first/last are absent.
+            "full_name": row["player_name"],
+            "position": row["position"],
+            "team": row["team"],
+            "gsis_id": row["gsis_id"],
+            "status": row["status"],
+            "injury_status": row["injury_status"],
+            "depth_chart_position": row["depth_chart_position"],
+            "depth_chart_order": row["depth_chart_order"],
+            "active": row["active"],
+            "fantasy_positions": fantasy_positions,
+        }
+    return players_map
+
+
+def ingest_sleeper_league(league_id, week, roster_id=None, username=None, display_name=None, team_name=None, dataset_name="fantasy_football_brain", client=None):
     logger.info("Fetching Sleeper league %s.", league_id)
     league = fetch_json(f"/league/{league_id}")
     users = fetch_json(f"/league/{league_id}/users")
     rosters = fetch_json(f"/league/{league_id}/rosters")
     matchups = fetch_json(f"/league/{league_id}/matchups/{week}")
-    players_map = fetch_json("/players/nfl")
+
+    # The player map comes from the saved daily snapshot, never a live
+    # /players/ call. Everything else above is a per-league endpoint with no
+    # once-per-day limit and stays live.
+    client = client or bigquery.Client(project=get_bigquery_project())
+    players_map = load_players_map_from_warehouse(client, dataset_name)
+    if not players_map:
+        raise RuntimeError(
+            "sleeper_players_current is empty. Run the ingest-sleeper-news job first: "
+            "the league job reads the saved player map instead of calling the Sleeper "
+            "/players/ endpoint, which is limited to once per day."
+        )
 
     viewer_roster = resolve_viewer_roster(
         rosters,
@@ -360,7 +412,6 @@ def ingest_sleeper_league(league_id, week, roster_id=None, username=None, displa
     )
     records = build_records(league_id, week, league, users, rosters, matchups, players_map, viewer_roster)
 
-    client = bigquery.Client(project=get_bigquery_project())
     dataset_id = create_dataset_if_not_exists(client, dataset_name)
     for table_name, rows in records.items():
         load_rows(client, dataset_id, table_name, rows)
