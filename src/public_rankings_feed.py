@@ -9,7 +9,9 @@ from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
 
-SCHEMA_VERSION = "1.2"
+# 1.3 adds optional per-player `situation` and `metrics` blocks (additive; the
+# site importer iterates profiles and ignores unknown player keys).
+SCHEMA_VERSION = "1.3"
 SCORING_PROFILES = ("standard", "ppr", "half_ppr", "gng_keeper")
 POSITIONS = ("QB", "RB", "WR", "TE")
 OVERALL_BOARD_SIZE = 150
@@ -159,6 +161,25 @@ def _position_formula(
     }
 
 
+def _attach_player_context(
+    player: dict[str, Any],
+    player_context: Mapping[str, Mapping[str, Any]] | None,
+    player_id: Any,
+) -> None:
+    """Attach situation/metrics blocks when context exists for this player.
+
+    Absent context leaves the keys off entirely, so pre-1.3 consumers see no
+    difference and article engines can distinguish 'no context' from 'context
+    says nothing changed'.
+    """
+    if not player_context:
+        return
+    blocks = player_context.get(str(player_id))
+    if blocks:
+        player["situation"] = blocks.get("situation")
+        player["metrics"] = blocks.get("metrics")
+
+
 def _public_positional_player(
     row: dict[str, Any], *, include_gng_context: bool = False
 ) -> dict[str, Any]:
@@ -195,6 +216,7 @@ def build_profile_payload(
     scoring_profile_id: str,
     overall_rows: Iterable[Mapping[str, Any]],
     positional_rows: Iterable[Mapping[str, Any]],
+    player_context: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     overall = row_dicts(overall_rows)
     positional = row_dicts(positional_rows)
@@ -238,19 +260,22 @@ def build_profile_payload(
         }
         if scoring_profile_id == "gng_keeper":
             player["context"] = context.get("ranking_context") if context else None
+        _attach_player_context(player, player_context, row["player_id"])
         overall_players.append(player)
 
     generated_values = _unique_values(overall + positional, "generated_at")
     position_payloads = {}
     for position in POSITIONS:
-        players = [
-            _public_positional_player(
+        players = []
+        for row in positional:
+            if row["position"] != position:
+                continue
+            player = _public_positional_player(
                 row,
                 include_gng_context=scoring_profile_id == "gng_keeper",
             )
-            for row in positional
-            if row["position"] == position
-        ]
+            _attach_player_context(player, player_context, row["player_id"])
+            players.append(player)
         position_payloads[position] = {"count": len(players), "players": players}
 
     missing_context = [

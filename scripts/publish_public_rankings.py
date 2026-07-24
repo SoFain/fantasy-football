@@ -190,6 +190,94 @@ def public_url(bucket_name: str, object_name: str) -> str:
     return f"https://storage.googleapis.com/{bucket_name}/{quote(object_name, safe='/')}"
 
 
+def fetch_player_context(
+    client: bigquery.Client, project_id: str, dataset_id: str
+) -> dict[str, dict[str, Any]] | None:
+    """Per-player situation + metrics blocks for the board payloads.
+
+    Profile-independent: one query, applied to all four profiles. Keyed by
+    every id form a board row may carry (gsis and 'sleeper:<id>'). Returns None
+    on any failure so a missing situation table can never block publication —
+    the boards then ship without the blocks, exactly as before schema 1.3.
+    """
+    sql = f"""
+    WITH metrics AS (
+      SELECT
+        player_id,
+        COUNT(DISTINCT week) AS games,
+        ROUND(AVG(fantasy_points), 2) AS std_ppg,
+        ROUND(AVG(fantasy_points_ppr), 2) AS ppr_ppg,
+        ROUND(SAFE_DIVIDE(SUM(targets), COUNT(DISTINCT week)), 2) AS targets_per_game,
+        ROUND(AVG(target_share) * 100, 1) AS target_share_pct,
+        ROUND(AVG(wopr), 3) AS wopr,
+        ROUND(SAFE_DIVIDE(SUM(carries), COUNT(DISTINCT week)), 2) AS carries_per_game,
+        ROUND(SAFE_DIVIDE(SUM(red_zone_touches), COUNT(DISTINCT week)), 2) AS red_zone_touches_per_game,
+        SUM(touchdowns) AS touchdowns,
+        ROUND(AVG(epa_per_opportunity), 3) AS epa_per_opportunity
+      FROM `{project_id}.{dataset_id}.analytics_player_weekly_truth`
+      WHERE season = 2025 AND season_type = 'REG'
+      GROUP BY player_id
+    )
+    SELECT
+      s.player_id_internal AS gsis_id,
+      s.sleeper_player_id,
+      s.team_from, s.team_to, s.team_changed,
+      s.qb_from, s.qb_to, s.qb_changed, s.qb_quality_delta,
+      s.age_at_season, s.head_coach, s.offensive_coordinator,
+      s.hc_changed, s.flags_json, s.metric_basis,
+      m.games, m.std_ppg, m.ppr_ppg, m.targets_per_game, m.target_share_pct,
+      m.wopr, m.carries_per_game, m.red_zone_touches_per_game, m.touchdowns,
+      m.epa_per_opportunity
+    FROM `{project_id}.{dataset_id}.analytics_player_situation` s
+    LEFT JOIN metrics m ON m.player_id = s.player_id_internal
+    WHERE s.situation_for_season = 2026
+    """
+    try:
+        rows = [dict(row) for row in client.query(sql).result()]
+    except Exception as exc:  # missing table, permissions, etc.
+        print(f"WARNING: player context unavailable, boards ship without situation blocks: {exc}")
+        return None
+
+    context: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        try:
+            flags = json.loads(row.get("flags_json") or "[]")
+        except (TypeError, ValueError):
+            flags = []
+        metrics = {
+            key: row.get(key)
+            for key in (
+                "games", "std_ppg", "ppr_ppg", "targets_per_game", "target_share_pct",
+                "wopr", "carries_per_game", "red_zone_touches_per_game", "touchdowns",
+                "epa_per_opportunity",
+            )
+            if row.get(key) is not None
+        }
+        blocks = {
+            "situation": {
+                "team": row.get("team_to"),
+                "team_2025": row.get("team_from"),
+                "team_changed": bool(row.get("team_changed")),
+                "qb": row.get("qb_to"),
+                "qb_2025": row.get("qb_from"),
+                "qb_changed": bool(row.get("qb_changed")),
+                "qb_quality_delta_ppg": row.get("qb_quality_delta"),
+                "age": row.get("age_at_season"),
+                "head_coach": row.get("head_coach"),
+                "offensive_coordinator": row.get("offensive_coordinator"),
+                "hc_changed": row.get("hc_changed"),
+                "flags": flags,
+                "metric_basis": row.get("metric_basis"),
+            },
+            "metrics": metrics,
+        }
+        if row.get("gsis_id"):
+            context[str(row["gsis_id"])] = blocks
+        if row.get("sleeper_player_id"):
+            context[f"sleeper:{row['sleeper_player_id']}"] = blocks
+    return context
+
+
 def fetch_current_datasets(bucket: storage.Bucket | None, bucket_name: str) -> dict[str, dict[str, Any]]:
     """Carry forward the datasets listed in the current live manifest.
 
@@ -306,6 +394,8 @@ def main() -> int:
     if bucket is not None and not bucket.exists():
         raise RuntimeError(f"Publication bucket does not exist: gs://{args.bucket}")
 
+    player_context = fetch_player_context(bigquery_client, args.project, args.dataset)
+
     profile_entries: dict[str, dict[str, Any]] = {}
     for profile in profiles:
         payload = build_profile_payload(
@@ -318,6 +408,7 @@ def main() -> int:
             positional_rows=fetch_positional_rows(
                 bigquery_client, args.project, args.dataset, args.metrics_dataset, profile
             ),
+            player_context=player_context,
         )
         content = json_bytes(payload)
         digest = sha256_hex(content)

@@ -252,6 +252,8 @@ Since 2026-07-24 the scheduled task `PigskinDailyPublishImport` runs daily at 07
 2. **Publish** — `publish_public_rankings.py --publish --gcloud-auth`, all four profiles, `datasets` carried forward.
 3. **Site import** — `run_remote_php.py --file scripts/trigger_site_rankings_import.php`; unchanged profiles skip by sha256.
 
+After GNG context, the chain rebuilds the player situation layer from the freshly promoted boards, emits the `player_situation` public dataset artifacts (the wrapper uploads the immutable object and passes `--dataset-entry`), and writes the owner-review queue of flagged ranked players to `output\daily-publish\situation-review-<date>.md`. Boards publish at schema 1.3 with per-player `situation` and `metrics` blocks; situation facts never move ranks.
+
 Refresh exit policy: `0` publish the new boards; `1` a pre-write gate tripped (for example the QB24 cutline guardrail) — boards are untouched, the last-approved state is republished, and the gate output in `output\daily-publish\` is an owner-review item; `3` failure after writes began — publication is skipped per Recovery below.
 
 Remove with `schtasks /delete /tn "PigskinDailyPublishImport" /f`. The prior publish-only wrapper `scripts/daily_publish_and_import.ps1` remains as a fallback.
