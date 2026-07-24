@@ -260,9 +260,17 @@ def load_realtime_news(force=False, client=None):
         # support it because yesterday's rows are gone by the time the next
         # run reads them.
         history_table_id = f"{project_id}.fantasy_football_brain.sleeper_players_history"
+        # The history DDL declares snapshot_at and sleeper_player_id NOT NULL.
+        # A load-job schema must match column modes exactly, and SchemaField
+        # defaults to NULLABLE, so mark those two REQUIRED here.
+        history_schema = [
+            bigquery.SchemaField(f.name, f.field_type, mode="REQUIRED")
+            if f.name in ("snapshot_at", "sleeper_player_id") else f
+            for f in current_players_schema
+        ]
         history_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-            schema=current_players_schema,
+            schema=history_schema,
             autodetect=False,
         )
         client.load_table_from_dataframe(

@@ -1,6 +1,8 @@
 # Cloud Scheduler Plan
 
-This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does not create live scheduler resources.
+Status: the daily player watch is **deployed and live** as of 2026-07-24. Cloud Scheduler runs `ingest-sleeper-news-daily` at 07:00 America/New_York and `detect-player-changes-daily` at 07:15, triggering Cloud Run Jobs built from this branch (image tag `pigskin-jobs-*`). `generate-pigskin-rankings` is deliberately NOT scheduled: it truncates `analytics_pigskin_rankings`, which the public feed publisher reads for the fable positional boards. Daily site publication runs through `scripts/publish_public_rankings.py` (main checkout) followed by the site importer.
+
+The remainder of this plan describes triggers not yet created.
 
 ## Scheduler Principles
 
@@ -21,7 +23,7 @@ This plan describes future Cloud Scheduler triggers for Cloud Run Jobs. It does 
 | `coaching-staff-feed` | after ingest-coaching-staff | Emits the JSON dataset object and manifest entry for the ranking publisher to merge. |
 | `ingest-nflverse` | after game days | Run by explicit season. Avoid repeated full truncation during live show prep unless intended. |
 | `materialize-analytics` | after successful ingestion | Use after source tables are refreshed. |
-| `generate-pigskin-rankings` | daily at 07:30 America/New_York | Runs after the Sleeper snapshot. Refuses to run without a current-day `sleeper_players_current` snapshot, since that defines the eligible active pool. Watch the Gemini budget. |
+| `generate-pigskin-rankings` | **do not schedule yet** | Truncates `analytics_pigskin_rankings`, which the publisher reads for the live fable positional boards. Blocked until the LLM path is reconciled with the fable pipeline. Its Sleeper-pool precondition remains in force for manual runs against a non-production dataset. |
 | `generate-evidence-packets` | after rankings and projections | Use for show prep and segment packets. |
 | `validate-warehouse` | after materialization | Use a validation pattern when checking a narrow sprint. |
 | `run-projections` | weekly or daily during active season | Start with weekly projection horizon, then add ROS and dynasty cadence. |

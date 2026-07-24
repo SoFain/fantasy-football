@@ -27,7 +27,7 @@ Hard architectural rules:
 11. Prefer small, reviewable pull requests.
 12. Do not remove existing behavior unless the task explicitly asks for a migration/removal plan.
 13. Only Sleeper-active players may appear in rankings. A player without an `active` tag in the Sleeper snapshot is never rankable. The Sleeper players endpoint is fetched with `?active=true`, so non-active players are absent from `sleeper_players_current` entirely, and the ranking candidate mart additionally filters `active IS TRUE`. Enforced by validations 148-150.
-14. Rankings run once per day, and the daily Sleeper pull runs first. The snapshot defines the eligible pool, so `generate-pigskin-rankings` refuses to run without a current-day `sleeper_players_current` snapshot.
+14. Rankings run once per day, and the daily Sleeper pull runs first. The snapshot defines the eligible pool, so `generate-pigskin-rankings` refuses to run without a current-day `sleeper_players_current` snapshot. **Production caution:** the published rankings are the fable/unified boards; `analytics_pigskin_rankings` currently holds the fable per-profile boards that `scripts/publish_public_rankings.py` reads, and `generate-pigskin-rankings` WRITE_TRUNCATEs that table. Do not schedule or run it against production until the LLM path is reconciled with the fable pipeline — it would destroy the published positional boards.
 15. Current depth chart position comes from Sleeper. nflreadpy `depth_charts` is a historical seasonal archive, not a current source; do not treat it as current depth. Rankings already use `sleeper_depth_chart_position` / `sleeper_depth_chart_order`.
 
 Coaching staff:

@@ -1,257 +1,257 @@
 team_abbr,role,coach_name,raw_title,verification_status,notes
-BUF,head_coach,,,pending,
-BUF,senior_assistant,,,pending,
-BUF,offensive_coordinator,,,pending,
-BUF,defensive_coordinator,,,pending,
-BUF,quarterbacks_coach,,,pending,
-BUF,running_backs_coach,,,pending,
-BUF,wide_receivers_coach,,,pending,
-BUF,offensive_line_coach,,,pending,
-MIA,head_coach,,,pending,
-MIA,senior_assistant,,,pending,
-MIA,offensive_coordinator,,,pending,
-MIA,defensive_coordinator,,,pending,
-MIA,quarterbacks_coach,,,pending,
-MIA,running_backs_coach,,,pending,
-MIA,wide_receivers_coach,,,pending,
-MIA,offensive_line_coach,,,pending,
-NE,head_coach,,,pending,
-NE,senior_assistant,,,pending,
-NE,offensive_coordinator,,,pending,
-NE,defensive_coordinator,,,pending,
-NE,quarterbacks_coach,,,pending,
-NE,running_backs_coach,,,pending,
-NE,wide_receivers_coach,,,pending,
-NE,offensive_line_coach,,,pending,
-NYJ,head_coach,,,pending,
-NYJ,senior_assistant,,,pending,
-NYJ,offensive_coordinator,,,pending,
-NYJ,defensive_coordinator,,,pending,
-NYJ,quarterbacks_coach,,,pending,
-NYJ,running_backs_coach,,,pending,
-NYJ,wide_receivers_coach,,,pending,
-NYJ,offensive_line_coach,,,pending,
-BAL,head_coach,,,pending,
-BAL,senior_assistant,,,pending,
-BAL,offensive_coordinator,,,pending,
-BAL,defensive_coordinator,,,pending,
-BAL,quarterbacks_coach,,,pending,
-BAL,running_backs_coach,,,pending,
-BAL,wide_receivers_coach,,,pending,
-BAL,offensive_line_coach,,,pending,
-CIN,head_coach,,,pending,
-CIN,senior_assistant,,,pending,
-CIN,offensive_coordinator,,,pending,
-CIN,defensive_coordinator,,,pending,
-CIN,quarterbacks_coach,,,pending,
-CIN,running_backs_coach,,,pending,
-CIN,wide_receivers_coach,,,pending,
-CIN,offensive_line_coach,,,pending,
-CLE,head_coach,,,pending,
-CLE,senior_assistant,,,pending,
-CLE,offensive_coordinator,,,pending,
-CLE,defensive_coordinator,,,pending,
-CLE,quarterbacks_coach,,,pending,
-CLE,running_backs_coach,,,pending,
-CLE,wide_receivers_coach,,,pending,
-CLE,offensive_line_coach,,,pending,
-PIT,head_coach,,,pending,
-PIT,senior_assistant,,,pending,
-PIT,offensive_coordinator,,,pending,
-PIT,defensive_coordinator,,,pending,
-PIT,quarterbacks_coach,,,pending,
-PIT,running_backs_coach,,,pending,
-PIT,wide_receivers_coach,,,pending,
-PIT,offensive_line_coach,,,pending,
-HOU,head_coach,,,pending,
-HOU,senior_assistant,,,pending,
-HOU,offensive_coordinator,,,pending,
-HOU,defensive_coordinator,,,pending,
-HOU,quarterbacks_coach,,,pending,
-HOU,running_backs_coach,,,pending,
-HOU,wide_receivers_coach,,,pending,
-HOU,offensive_line_coach,,,pending,
-IND,head_coach,,,pending,
-IND,senior_assistant,,,pending,
-IND,offensive_coordinator,,,pending,
-IND,defensive_coordinator,,,pending,
-IND,quarterbacks_coach,,,pending,
-IND,running_backs_coach,,,pending,
-IND,wide_receivers_coach,,,pending,
-IND,offensive_line_coach,,,pending,
-JAX,head_coach,,,pending,
-JAX,senior_assistant,,,pending,
-JAX,offensive_coordinator,,,pending,
-JAX,defensive_coordinator,,,pending,
-JAX,quarterbacks_coach,,,pending,
-JAX,running_backs_coach,,,pending,
-JAX,wide_receivers_coach,,,pending,
-JAX,offensive_line_coach,,,pending,
-TEN,head_coach,,,pending,
-TEN,senior_assistant,,,pending,
-TEN,offensive_coordinator,,,pending,
-TEN,defensive_coordinator,,,pending,
-TEN,quarterbacks_coach,,,pending,
-TEN,running_backs_coach,,,pending,
-TEN,wide_receivers_coach,,,pending,
-TEN,offensive_line_coach,,,pending,
-DEN,head_coach,,,pending,
-DEN,senior_assistant,,,pending,
-DEN,offensive_coordinator,,,pending,
-DEN,defensive_coordinator,,,pending,
-DEN,quarterbacks_coach,,,pending,
-DEN,running_backs_coach,,,pending,
-DEN,wide_receivers_coach,,,pending,
-DEN,offensive_line_coach,,,pending,
-KC,head_coach,,,pending,
-KC,senior_assistant,,,pending,
-KC,offensive_coordinator,,,pending,
-KC,defensive_coordinator,,,pending,
-KC,quarterbacks_coach,,,pending,
-KC,running_backs_coach,,,pending,
-KC,wide_receivers_coach,,,pending,
-KC,offensive_line_coach,,,pending,
-LV,head_coach,,,pending,
-LV,senior_assistant,,,pending,
-LV,offensive_coordinator,,,pending,
-LV,defensive_coordinator,,,pending,
-LV,quarterbacks_coach,,,pending,
-LV,running_backs_coach,,,pending,
-LV,wide_receivers_coach,,,pending,
-LV,offensive_line_coach,,,pending,
-LAC,head_coach,,,pending,
-LAC,senior_assistant,,,pending,
-LAC,offensive_coordinator,,,pending,
-LAC,defensive_coordinator,,,pending,
-LAC,quarterbacks_coach,,,pending,
-LAC,running_backs_coach,,,pending,
-LAC,wide_receivers_coach,,,pending,
-LAC,offensive_line_coach,,,pending,
-DAL,head_coach,,,pending,
-DAL,senior_assistant,,,pending,
-DAL,offensive_coordinator,,,pending,
-DAL,defensive_coordinator,,,pending,
-DAL,quarterbacks_coach,,,pending,
-DAL,running_backs_coach,,,pending,
-DAL,wide_receivers_coach,,,pending,
-DAL,offensive_line_coach,,,pending,
-NYG,head_coach,,,pending,
-NYG,senior_assistant,,,pending,
-NYG,offensive_coordinator,,,pending,
-NYG,defensive_coordinator,,,pending,
-NYG,quarterbacks_coach,,,pending,
-NYG,running_backs_coach,,,pending,
-NYG,wide_receivers_coach,,,pending,
-NYG,offensive_line_coach,,,pending,
-PHI,head_coach,,,pending,
-PHI,senior_assistant,,,pending,
-PHI,offensive_coordinator,,,pending,
-PHI,defensive_coordinator,,,pending,
-PHI,quarterbacks_coach,,,pending,
-PHI,running_backs_coach,,,pending,
-PHI,wide_receivers_coach,,,pending,
-PHI,offensive_line_coach,,,pending,
-WAS,head_coach,,,pending,
-WAS,senior_assistant,,,pending,
-WAS,offensive_coordinator,,,pending,
-WAS,defensive_coordinator,,,pending,
-WAS,quarterbacks_coach,,,pending,
-WAS,running_backs_coach,,,pending,
-WAS,wide_receivers_coach,,,pending,
-WAS,offensive_line_coach,,,pending,
-CHI,head_coach,,,pending,
-CHI,senior_assistant,,,pending,
-CHI,offensive_coordinator,,,pending,
-CHI,defensive_coordinator,,,pending,
-CHI,quarterbacks_coach,,,pending,
-CHI,running_backs_coach,,,pending,
-CHI,wide_receivers_coach,,,pending,
-CHI,offensive_line_coach,,,pending,
-DET,head_coach,,,pending,
-DET,senior_assistant,,,pending,
-DET,offensive_coordinator,,,pending,
-DET,defensive_coordinator,,,pending,
-DET,quarterbacks_coach,,,pending,
-DET,running_backs_coach,,,pending,
-DET,wide_receivers_coach,,,pending,
-DET,offensive_line_coach,,,pending,
-GB,head_coach,,,pending,
-GB,senior_assistant,,,pending,
-GB,offensive_coordinator,,,pending,
-GB,defensive_coordinator,,,pending,
-GB,quarterbacks_coach,,,pending,
-GB,running_backs_coach,,,pending,
-GB,wide_receivers_coach,,,pending,
-GB,offensive_line_coach,,,pending,
-MIN,head_coach,,,pending,
-MIN,senior_assistant,,,pending,
-MIN,offensive_coordinator,,,pending,
-MIN,defensive_coordinator,,,pending,
-MIN,quarterbacks_coach,,,pending,
-MIN,running_backs_coach,,,pending,
-MIN,wide_receivers_coach,,,pending,
-MIN,offensive_line_coach,,,pending,
-ATL,head_coach,,,pending,
-ATL,senior_assistant,,,pending,
-ATL,offensive_coordinator,,,pending,
-ATL,defensive_coordinator,,,pending,
-ATL,quarterbacks_coach,,,pending,
-ATL,running_backs_coach,,,pending,
-ATL,wide_receivers_coach,,,pending,
-ATL,offensive_line_coach,,,pending,
-CAR,head_coach,,,pending,
-CAR,senior_assistant,,,pending,
-CAR,offensive_coordinator,,,pending,
-CAR,defensive_coordinator,,,pending,
-CAR,quarterbacks_coach,,,pending,
-CAR,running_backs_coach,,,pending,
-CAR,wide_receivers_coach,,,pending,
-CAR,offensive_line_coach,,,pending,
-NO,head_coach,,,pending,
-NO,senior_assistant,,,pending,
-NO,offensive_coordinator,,,pending,
-NO,defensive_coordinator,,,pending,
-NO,quarterbacks_coach,,,pending,
-NO,running_backs_coach,,,pending,
-NO,wide_receivers_coach,,,pending,
-NO,offensive_line_coach,,,pending,
-TB,head_coach,,,pending,
-TB,senior_assistant,,,pending,
-TB,offensive_coordinator,,,pending,
-TB,defensive_coordinator,,,pending,
-TB,quarterbacks_coach,,,pending,
-TB,running_backs_coach,,,pending,
-TB,wide_receivers_coach,,,pending,
-TB,offensive_line_coach,,,pending,
-ARI,head_coach,,,pending,
-ARI,senior_assistant,,,pending,
-ARI,offensive_coordinator,,,pending,
-ARI,defensive_coordinator,,,pending,
-ARI,quarterbacks_coach,,,pending,
-ARI,running_backs_coach,,,pending,
-ARI,wide_receivers_coach,,,pending,
-ARI,offensive_line_coach,,,pending,
-LAR,head_coach,,,pending,
-LAR,senior_assistant,,,pending,
-LAR,offensive_coordinator,,,pending,
-LAR,defensive_coordinator,,,pending,
-LAR,quarterbacks_coach,,,pending,
-LAR,running_backs_coach,,,pending,
-LAR,wide_receivers_coach,,,pending,
-LAR,offensive_line_coach,,,pending,
-SF,head_coach,,,pending,
-SF,senior_assistant,,,pending,
-SF,offensive_coordinator,,,pending,
-SF,defensive_coordinator,,,pending,
-SF,quarterbacks_coach,,,pending,
-SF,running_backs_coach,,,pending,
-SF,wide_receivers_coach,,,pending,
-SF,offensive_line_coach,,,pending,
-SEA,head_coach,,,pending,
-SEA,senior_assistant,,,pending,
-SEA,offensive_coordinator,,,pending,
-SEA,defensive_coordinator,,,pending,
-SEA,quarterbacks_coach,,,pending,
-SEA,running_backs_coach,,,pending,
-SEA,wide_receivers_coach,,,pending,
-SEA,offensive_line_coach,,,pending,
+BUF,head_coach,Joe Brady,Head coach,verified,parsed from Wikipedia template 2026-07-24
+BUF,senior_assistant,John Fox,Senior assistant,verified,parsed from Wikipedia template 2026-07-24
+BUF,offensive_coordinator,Pete Carmichael,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+BUF,defensive_coordinator,Jim Leonhard,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+BUF,quarterbacks_coach,Bo Hardegree,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+BUF,running_backs_coach,Kelly Skipper,Running backs,verified,parsed from Wikipedia template 2026-07-24
+BUF,wide_receivers_coach,Drew Terrell,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+BUF,offensive_line_coach,Pat Meyer,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+MIA,head_coach,Jeff Hafley,Head Coach,verified,parsed from Wikipedia template 2026-07-24
+MIA,senior_assistant,,,pending,not listed on source page 2026-07-24
+MIA,offensive_coordinator,Bobby Slowik,Offensive Coordinator,verified,parsed from Wikipedia template 2026-07-24
+MIA,defensive_coordinator,Sean Duggan,Defensive Coordinator,verified,parsed from Wikipedia template 2026-07-24
+MIA,quarterbacks_coach,Bush Hamdan,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+MIA,running_backs_coach,Ladell Betts,Running Backs,verified,parsed from Wikipedia template 2026-07-24
+MIA,wide_receivers_coach,Tyke Tolbert,Wide Receivers,verified,parsed from Wikipedia template 2026-07-24
+MIA,offensive_line_coach,Zach Yenser,Offensive Line,verified,parsed from Wikipedia template 2026-07-24
+NE,head_coach,Mike Vrabel,Head coach,verified,parsed from Wikipedia template 2026-07-24
+NE,senior_assistant,Terrell Williams,Assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+NE,offensive_coordinator,Josh McDaniels,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NE,defensive_coordinator,Zak Kuhr,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NE,quarterbacks_coach,Ashton Grant,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+NE,running_backs_coach,Tony Dews,Running backs,verified,parsed from Wikipedia template 2026-07-24
+NE,wide_receivers_coach,Todd Downing,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+NE,offensive_line_coach,Doug Marrone,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+NYJ,head_coach,Aaron Glenn,Head coach,verified,parsed from Wikipedia template 2026-07-24
+NYJ,senior_assistant,,,pending,not listed on source page 2026-07-24
+NYJ,offensive_coordinator,Frank Reich,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NYJ,defensive_coordinator,Brian Duker,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NYJ,quarterbacks_coach,Bill Musgrave,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+NYJ,running_backs_coach,Nic McKissic-Luke,Running backs,verified,parsed from Wikipedia template 2026-07-24
+NYJ,wide_receivers_coach,Shawn Jefferson,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+NYJ,offensive_line_coach,Steve Heiden,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+BAL,head_coach,Jesse Minter,Head coach,verified,parsed from Wikipedia template 2026-07-24
+BAL,senior_assistant,,,pending,not listed on source page 2026-07-24
+BAL,offensive_coordinator,Declan Doyle,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+BAL,defensive_coordinator,Anthony Weaver,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+BAL,quarterbacks_coach,Israel Woolfork,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+BAL,running_backs_coach,Eddie Faulkner,Running backs,verified,parsed from Wikipedia template 2026-07-24
+BAL,wide_receivers_coach,Keary Colbert,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+BAL,offensive_line_coach,Dwayne Ledford,Offensive line/run game coordinator,verified,parsed from Wikipedia template 2026-07-24
+CIN,head_coach,Zac Taylor,Head coach,verified,parsed from Wikipedia template 2026-07-24
+CIN,senior_assistant,Darrin Simmons,Assistant head coach/special teams coordinator,verified,parsed from Wikipedia template 2026-07-24
+CIN,offensive_coordinator,Dan Pitcher,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CIN,defensive_coordinator,Al Golden,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CIN,quarterbacks_coach,Brad Kragthorpe,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+CIN,running_backs_coach,Justin Hill,Running backs,verified,parsed from Wikipedia template 2026-07-24
+CIN,wide_receivers_coach,Troy Walters,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+CIN,offensive_line_coach,Scott Peters,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+CLE,head_coach,Todd Monken,Head coach,verified,parsed from Wikipedia template 2026-07-24
+CLE,senior_assistant,,,pending,not listed on source page 2026-07-24
+CLE,offensive_coordinator,Travis Switzer,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CLE,defensive_coordinator,Mike Rutenberg,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CLE,quarterbacks_coach,Mike Bajakian,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+CLE,running_backs_coach,Duce Staley,Running backs,verified,parsed from Wikipedia template 2026-07-24
+CLE,wide_receivers_coach,Christian Jones,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+CLE,offensive_line_coach,George Warhop; Sanders Davis,Offensive line + Offensive assistant/offensive line,verified,parsed from Wikipedia template 2026-07-24
+PIT,head_coach,Mike McCarthy,Head coach,verified,parsed from Wikipedia template 2026-07-24
+PIT,senior_assistant,Joe Whitt Jr.,Assistant head coach/secondary,verified,parsed from Wikipedia template 2026-07-24
+PIT,offensive_coordinator,Brian Angelichio,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+PIT,defensive_coordinator,Patrick Graham,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+PIT,quarterbacks_coach,Tom Arth; Tim Berbenich,Quarterbacks + Game management/quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+PIT,running_backs_coach,Ramon Chinyoung Sr.,Running backs,verified,parsed from Wikipedia template 2026-07-24
+PIT,wide_receivers_coach,Adam Henry,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+PIT,offensive_line_coach,James Campen,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+HOU,head_coach,DeMeco Ryans,Head coach,verified,parsed from Wikipedia template 2026-07-24
+HOU,senior_assistant,Danny Barrett,Assistant head coach/running backs,verified,parsed from Wikipedia template 2026-07-24
+HOU,offensive_coordinator,Nick Caley,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+HOU,defensive_coordinator,Matt Burke,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+HOU,quarterbacks_coach,Jerry Schuplinski,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+HOU,running_backs_coach,Danny Barrett,Assistant head coach/running backs,verified,parsed from Wikipedia template 2026-07-24
+HOU,wide_receivers_coach,Ben McDaniels,Wide receivers/offensive passing game coordinator,verified,parsed from Wikipedia template 2026-07-24
+HOU,offensive_line_coach,Cole Popovich,Offensive line/offensive run game coordinator,verified,parsed from Wikipedia template 2026-07-24
+IND,head_coach,Shane Steichen,Head coach,verified,parsed from Wikipedia template 2026-07-24
+IND,senior_assistant,,,pending,not listed on source page 2026-07-24
+IND,offensive_coordinator,Jim Bob Cooter,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+IND,defensive_coordinator,Lou Anarumo,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+IND,quarterbacks_coach,Cameron Turner,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+IND,running_backs_coach,DeAndre Smith,Running backs,verified,parsed from Wikipedia template 2026-07-24
+IND,wide_receivers_coach,Reggie Wayne,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+IND,offensive_line_coach,Tony Sparano Jr.,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+JAX,head_coach,Liam Coen,Head coach,verified,parsed from Wikipedia template 2026-07-24
+JAX,senior_assistant,Shane Waldron,Assistant head coach/Pass game coordinator,verified,parsed from Wikipedia template 2026-07-24
+JAX,offensive_coordinator,Grant Udinski,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+JAX,defensive_coordinator,Anthony Campanile,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+JAX,quarterbacks_coach,Spencer Whipple,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+JAX,running_backs_coach,Chad Morton,Running backs,verified,parsed from Wikipedia template 2026-07-24
+JAX,wide_receivers_coach,Edgar Bennett,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+JAX,offensive_line_coach,Shaun Sarrett,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+TEN,head_coach,Robert Saleh,Head coach,verified,parsed from Wikipedia template 2026-07-24
+TEN,senior_assistant,John Fassel,Assistant head coach/special teams coordinator,verified,parsed from Wikipedia template 2026-07-24
+TEN,offensive_coordinator,Brian Daboll,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+TEN,defensive_coordinator,Gus Bradley,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+TEN,quarterbacks_coach,Shea Tierney,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+TEN,running_backs_coach,Randy Jordan,Running backs/Bill Walsh diversity coaching fellowship coordinator,verified,parsed from Wikipedia template 2026-07-24
+TEN,wide_receivers_coach,Greg Lewis,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+TEN,offensive_line_coach,Carmen Bricillo,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+DEN,head_coach,Sean Payton,Head coach,verified,parsed from Wikipedia template 2026-07-24
+DEN,senior_assistant,Zach Strief; Darren Rizzi,Offensive run game coordinator/assistant head coach + Special teams coordinator/assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+DEN,offensive_coordinator,Davis Webb,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+DEN,defensive_coordinator,Vance Joseph,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+DEN,quarterbacks_coach,Logan Kilgore,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+DEN,running_backs_coach,Lou Ayeni,Running backs,verified,parsed from Wikipedia template 2026-07-24
+DEN,wide_receivers_coach,Ronald Curry,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+DEN,offensive_line_coach,Chris Morgan,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+KC,head_coach,Andy Reid,Head coach,verified,parsed from Wikipedia template 2026-07-24
+KC,senior_assistant,Dave Toub,Assistant head coach/special teams coordinator,verified,parsed from Wikipedia template 2026-07-24
+KC,offensive_coordinator,Eric Bieniemy,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+KC,defensive_coordinator,Steve Spagnuolo,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+KC,quarterbacks_coach,David Girardi,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+KC,running_backs_coach,DeMarco Murray,Running backs,verified,parsed from Wikipedia template 2026-07-24
+KC,wide_receivers_coach,Chad O'Shea,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+KC,offensive_line_coach,Andy Heck,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+LV,head_coach,Klint Kubiak,Head coach,verified,parsed from Wikipedia template 2026-07-24
+LV,senior_assistant,Mike McCoy,Assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+LV,offensive_coordinator,Andrew Janocko,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+LV,defensive_coordinator,Rob Leonard,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+LV,quarterbacks_coach,Mike Sullivan,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+LV,running_backs_coach,Omar Young,Running backs,verified,parsed from Wikipedia template 2026-07-24
+LV,wide_receivers_coach,Zach Azzanni,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+LV,offensive_line_coach,Rick Dennison,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+LAC,head_coach,Jim Harbaugh,Head coach,verified,parsed from Wikipedia template 2026-07-24
+LAC,senior_assistant,,,pending,not listed on source page 2026-07-24
+LAC,offensive_coordinator,Mike McDaniel,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+LAC,defensive_coordinator,Chris O'Leary,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+LAC,quarterbacks_coach,Shane Day,Passing game coordinator/quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+LAC,running_backs_coach,Max McCaffrey,Running backs,verified,parsed from Wikipedia template 2026-07-24
+LAC,wide_receivers_coach,Sanjay Lal,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+LAC,offensive_line_coach,Butch Barry,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+DAL,head_coach,Brian Schottenheimer,Head coach,verified,parsed from Wikipedia template 2026-07-24
+DAL,senior_assistant,,,pending,not listed on source page 2026-07-24
+DAL,offensive_coordinator,Klayton Adams,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+DAL,defensive_coordinator,Christian Parker,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+DAL,quarterbacks_coach,Steve Shimko,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+DAL,running_backs_coach,Derrick Foster,Running backs,verified,parsed from Wikipedia template 2026-07-24
+DAL,wide_receivers_coach,Junior Adams,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+DAL,offensive_line_coach,Conor Riley,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+NYG,head_coach,John Harbaugh,Head coach,verified,parsed from Wikipedia template 2026-07-24
+NYG,senior_assistant,Chris Horton,Assistant head coach/special teams coordinator,verified,parsed from Wikipedia template 2026-07-24
+NYG,offensive_coordinator,Matt Nagy,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NYG,defensive_coordinator,Dennard Wilson,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NYG,quarterbacks_coach,Brian Callahan,Quarterbacks/pass game coordinator,verified,parsed from Wikipedia template 2026-07-24
+NYG,running_backs_coach,Willie Taggart,Running backs,verified,parsed from Wikipedia template 2026-07-24
+NYG,wide_receivers_coach,Chad Hall,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+NYG,offensive_line_coach,Mike Bloomgren,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+PHI,head_coach,Nick Sirianni,Head coach,verified,parsed from Wikipedia template 2026-07-24
+PHI,senior_assistant,Jemal Singleton,Assistant head coach/running backs,verified,parsed from Wikipedia template 2026-07-24
+PHI,offensive_coordinator,Sean Mannion,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+PHI,defensive_coordinator,Vic Fangio,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+PHI,quarterbacks_coach,Parks Frazier,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+PHI,running_backs_coach,Jemal Singleton,Assistant head coach/running backs,verified,parsed from Wikipedia template 2026-07-24
+PHI,wide_receivers_coach,Aaron Moorehead,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+PHI,offensive_line_coach,Chris Kuper,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+WAS,head_coach,Dan Quinn,Head coach,verified,parsed from Wikipedia template 2026-07-24
+WAS,senior_assistant,,,pending,not listed on source page 2026-07-24
+WAS,offensive_coordinator,David Blough,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+WAS,defensive_coordinator,Daronte Jones,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+WAS,quarterbacks_coach,D. J. Williams,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+WAS,running_backs_coach,Anthony Lynn,Running backs,verified,parsed from Wikipedia template 2026-07-24
+WAS,wide_receivers_coach,Bobby Engram,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+WAS,offensive_line_coach,Darnell Stapleton,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+CHI,head_coach,Ben Johnson,Head coach,verified,parsed from Wikipedia template 2026-07-24
+CHI,senior_assistant,Antwaan Randle El,Assistant head coach/wide receivers,verified,parsed from Wikipedia template 2026-07-24
+CHI,offensive_coordinator,Press Taylor,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CHI,defensive_coordinator,Dennis Allen,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CHI,quarterbacks_coach,JT Barrett,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+CHI,running_backs_coach,Eric Studesville,Running backs,verified,parsed from Wikipedia template 2026-07-24
+CHI,wide_receivers_coach,Antwaan Randle El,Assistant head coach/wide receivers,verified,parsed from Wikipedia template 2026-07-24
+CHI,offensive_line_coach,Dan Roushar,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+DET,head_coach,Dan Campbell,Head coach,verified,parsed from Wikipedia template 2026-07-24
+DET,senior_assistant,Jim O'Neil,Assistant head coach/safeties,verified,parsed from Wikipedia template 2026-07-24
+DET,offensive_coordinator,Drew Petzing,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+DET,defensive_coordinator,Kelvin Sheppard,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+DET,quarterbacks_coach,Mark Brunell,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+DET,running_backs_coach,Tashard Choice,Running backs,verified,parsed from Wikipedia template 2026-07-24
+DET,wide_receivers_coach,Scottie Montgomery,Associate head coach/wide receivers,verified,parsed from Wikipedia template 2026-07-24
+DET,offensive_line_coach,Hank Fraley,Run game coordinator/offensive line,verified,parsed from Wikipedia template 2026-07-24
+GB,head_coach,Matt LaFleur,Head coach,verified,parsed from Wikipedia template 2026-07-24
+GB,senior_assistant,offense – Luke Getsy; defense – DeMarcus Covington,Quarterbacks/assistant head coach + Outside linebackers/run game coordinator/assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+GB,offensive_coordinator,Adam Stenavich,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+GB,defensive_coordinator,Jonathan Gannon,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+GB,quarterbacks_coach,offense – Luke Getsy,Quarterbacks/assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+GB,running_backs_coach,Ben Sirmans,Running backs,verified,parsed from Wikipedia template 2026-07-24
+GB,wide_receivers_coach,Noah Pauley,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+GB,offensive_line_coach,Luke Butkus,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+MIN,head_coach,Kevin O'Connell,Head coach,verified,parsed from Wikipedia template 2026-07-24
+MIN,senior_assistant,Frank Smith,Assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+MIN,offensive_coordinator,Wes Phillips,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+MIN,defensive_coordinator,Brian Flores,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+MIN,quarterbacks_coach,Josh McCown,Offensive passing game coordinator/quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+MIN,running_backs_coach,Curtis Modkins,Offensive running game coordinator/running backs,verified,parsed from Wikipedia template 2026-07-24
+MIN,wide_receivers_coach,Keenan McCardell,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+MIN,offensive_line_coach,Keith Carter,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+ATL,head_coach,Kevin Stefanski,Head Coach,verified,parsed from Wikipedia template 2026-07-24
+ATL,senior_assistant,,,pending,not listed on source page 2026-07-24
+ATL,offensive_coordinator,Tommy Rees,Offensive Coordinator,verified,parsed from Wikipedia template 2026-07-24
+ATL,defensive_coordinator,Jeff Ulbrich,Defensive Coordinator,verified,parsed from Wikipedia template 2026-07-24
+ATL,quarterbacks_coach,Alex Van Pelt,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+ATL,running_backs_coach,,,pending,not listed on source page 2026-07-24
+ATL,wide_receivers_coach,Robert Prince,Wide Receivers,verified,parsed from Wikipedia template 2026-07-24
+ATL,offensive_line_coach,Bill Callahan,Offensive Line/Run Game Coordinator,verified,parsed from Wikipedia template 2026-07-24
+CAR,head_coach,Dave Canales,Head coach,verified,parsed from Wikipedia template 2026-07-24
+CAR,senior_assistant,Harold Goodwin,Assistant head coach/run game coordinator,verified,parsed from Wikipedia template 2026-07-24
+CAR,offensive_coordinator,Brad Idzik,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CAR,defensive_coordinator,Ejiro Evero,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+CAR,quarterbacks_coach,Will Harriger,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+CAR,running_backs_coach,Bernie Parmalee,Running backs,verified,parsed from Wikipedia template 2026-07-24
+CAR,wide_receivers_coach,Rob Moore,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+CAR,offensive_line_coach,Joe Gilbert,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+NO,head_coach,Kellen Moore,Head coach,verified,parsed from Wikipedia template 2026-07-24
+NO,senior_assistant,,,pending,not listed on source page 2026-07-24
+NO,offensive_coordinator,Doug Nussmeier,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NO,defensive_coordinator,Brandon Staley,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+NO,quarterbacks_coach,Scott Tolzien,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+NO,running_backs_coach,Joel Thomas,Associate head coach/running backs,verified,parsed from Wikipedia template 2026-07-24
+NO,wide_receivers_coach,Keith Williams,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+NO,offensive_line_coach,Brendan Nugent,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+TB,head_coach,Todd Bowles,Head coach,verified,parsed from Wikipedia template 2026-07-24
+TB,senior_assistant,,,pending,not listed on source page 2026-07-24
+TB,offensive_coordinator,Zac Robinson,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+TB,defensive_coordinator,,,pending,not listed on source page 2026-07-24
+TB,quarterbacks_coach,Chandler Whitmer,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+TB,running_backs_coach,Skip Peete,Running backs,verified,parsed from Wikipedia template 2026-07-24
+TB,wide_receivers_coach,Bryan McClendon,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+TB,offensive_line_coach,Kevin Carberry,Run game coordinator/offensive line,verified,parsed from Wikipedia template 2026-07-24
+ARI,head_coach,Mike LaFleur,Head coach,verified,parsed from Wikipedia template 2026-07-24
+ARI,senior_assistant,,,pending,not listed on source page 2026-07-24
+ARI,offensive_coordinator,Nathaniel Hackett,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+ARI,defensive_coordinator,Nick Rallis,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+ARI,quarterbacks_coach,Matt Schaub,Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+ARI,running_backs_coach,Matt Merritt,Running backs,verified,parsed from Wikipedia template 2026-07-24
+ARI,wide_receivers_coach,Tony Sorrentino,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+ARI,offensive_line_coach,Justin Frye,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+LAR,head_coach,Sean McVay,Head coach,verified,parsed from Wikipedia template 2026-07-24
+LAR,senior_assistant,Kliff Kingsbury,Assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+LAR,offensive_coordinator,Nathan Scheelhaase,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+LAR,defensive_coordinator,Chris Shula,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+LAR,quarterbacks_coach,Dave Ragone,Associate coordinator/quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+LAR,running_backs_coach,Ron Gould,Running backs,verified,parsed from Wikipedia template 2026-07-24
+LAR,wide_receivers_coach,Rob Calabrese; Eric Yarber,Wide receivers + Senior offensive assistant/wide receivers,verified,parsed from Wikipedia template 2026-07-24
+LAR,offensive_line_coach,Ryan Wendell,Offensive line,verified,parsed from Wikipedia template 2026-07-24
+SF,head_coach,Kyle Shanahan,Head coach,verified,parsed from Wikipedia template 2026-07-24
+SF,senior_assistant,Chris Foerster; Matt Eberflus,Assistant head coach/offensive line + Assistant head coach/defense,verified,parsed from Wikipedia template 2026-07-24
+SF,offensive_coordinator,Klay Kubiak,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+SF,defensive_coordinator,Raheem Morris,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+SF,quarterbacks_coach,Mick Lombardi; Jacob Webster,Quarterbacks + Offensive assistant/quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+SF,running_backs_coach,Robert Turner Jr,Running backs,verified,parsed from Wikipedia template 2026-07-24
+SF,wide_receivers_coach,Leonard Hankerson; Andrew Hayes-Stoker,Passing game coordinator/wide receivers + Offensive assistant/wide receivers,verified,parsed from Wikipedia template 2026-07-24
+SF,offensive_line_coach,Chris Foerster,Assistant head coach/offensive line,verified,parsed from Wikipedia template 2026-07-24
+SEA,head_coach,Mike Macdonald,Head coach,verified,parsed from Wikipedia template 2026-07-24
+SEA,senior_assistant,Leslie Frazier,Assistant head coach,verified,parsed from Wikipedia template 2026-07-24
+SEA,offensive_coordinator,Brian Fleury,Offensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+SEA,defensive_coordinator,Aden Durde,Defensive coordinator,verified,parsed from Wikipedia template 2026-07-24
+SEA,quarterbacks_coach,Jake Peetz; Tyson Prince,Passing game coordinator/quarterbacks + Quarterbacks,verified,parsed from Wikipedia template 2026-07-24
+SEA,running_backs_coach,Thomas Hammock,Senior offensive assistant/running backs,verified,parsed from Wikipedia template 2026-07-24
+SEA,wide_receivers_coach,Frisman Jackson,Wide receivers,verified,parsed from Wikipedia template 2026-07-24
+SEA,offensive_line_coach,John Benton,Senior offensive assistant/offensive line,verified,parsed from Wikipedia template 2026-07-24

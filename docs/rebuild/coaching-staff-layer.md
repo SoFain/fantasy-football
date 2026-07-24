@@ -2,6 +2,8 @@
 
 The first layer of coaching context: **current staff only.** Coaching styles and historical records are deliberately later layers and are not built yet.
 
+Status 2026-07-24: **live.** `data/coaching_staff.csv` is populated from the Wikipedia source (242 verified coaches, 14 true vacancies), `coaching_staff_current` is loaded and validated (151-155), the immutable dataset object is published to the public bucket, and `v1/manifest.json` lists it under `datasets.coaching_staff` via the ranking publisher's new `--dataset-entry` flag. Refresh path: edit or re-run `scripts/populate_coaching_staff_csv.py --write`, then `ingest-coaching-staff`, `coaching-staff-feed --publish-feed`, then republish the manifest.
+
 Gives agents up-to-date coaching context alongside player data: for each of the 32 teams, eight roles — head coach, senior assistant, offensive coordinator, defensive coordinator, quarterbacks coach, running backs coach, wide receivers coach, offensive line coach.
 
 ## Pieces
