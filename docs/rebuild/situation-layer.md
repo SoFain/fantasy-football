@@ -64,10 +64,23 @@ The table above is in-sample. The backtest fits only on seasons before each hold
 - Overall error never got worse on average; rank order (Spearman) improved slightly for WR/RB, flat for TE.
 - Coefficient signs held in **all 36 training windows** (team change always negative, QB delta always positive) — the effects are stable, not artifacts of one fit.
 
-This is the Phase-3 evidence bar: the findings generalize forward, so small bounded mover adjustments are justified; TE is the weakest case. Board-level backtests (would the *ranks* have been better) can't reach before 2026 — no historical fable boards exist — but the content-addressed feed archives every published board from launch onward, so a true board backtest accrues one season per year from here. Candidate magnitudes are small and mostly conservative. Phase 3 converts these into a bounded, coded post-formula adjustment policy (same `llm_adjustment_*` provenance and cutline guards as the acknowledged-crossing machinery) after owner sign-off; v1 study ideas: interaction terms (qb_delta × prior target share), boosted trees, quantile effects.
+This is the Phase-3 evidence bar: the findings generalize forward, so small bounded mover adjustments are justified; TE is the weakest case. Board-level backtests (would the *ranks* have been better) can't reach before 2026 — no historical fable boards exist — but the content-addressed feed archives every published board from launch onward, so a true board backtest accrues one season per year from here.
+
+### v1 interaction study (owner hypotheses, 2026-07-25)
+
+[scripts/run_situation_interaction_study.py](../../scripts/run_situation_interaction_study.py) tested two hypotheses head-to-head on held-out movers (walk-forward, both scales): **H1** — QB upgrades matter more for movers (`team_changed × qb_delta`); **H2** — moving to a team with a better prior-season record is itself an upgrade (`winpct_delta`, records from nflreadpy REG schedules).
+
+| Cell | H1 interaction | H2 winpct_delta | Out-of-sample best |
+| --- | --- | --- | --- |
+| WR std / gng | +0.013 / +0.007 (tiny) | **−1.15 / −0.81** | keep v0 additive (both) |
+| RB std / gng | **+0.110 / +0.078** (mover slope ≈ 2× stayers) | +0.17 / +0.21 | **B (qb interaction)** std, 4/6; gng 3/6 keep v0 |
+| TE std / gng | ≈ 0 | **−1.24 / −1.03** | **C (team quality)** both, 5/6 |
+
+Two owner-relevant surprises: (1) for WRs and TEs the destination-record sign is **negative** — pass-catchers joining last year's winners do *worse* (established target hierarchies; losing teams force-feed volume); (2) the QB-upgrade interaction is real for **RBs**, not WRs. Re-pin proposals (owner sign-off pending): RB standard adopts the interaction form; TE adopts the team-quality form both scales; WR keeps v0. Report: `build/situation-study/situation_interaction_v1_report.json`. Candidate magnitudes are small and mostly conservative. Phase 3 converts these into a bounded, coded post-formula adjustment policy (same `llm_adjustment_*` provenance and cutline guards as the acknowledged-crossing machinery) after owner sign-off; v1 study ideas: interaction terms (qb_delta × prior target share), boosted trees, quantile effects.
 
 ## Known limits
 
+- Team codes differ across sources for one franchise (Sleeper `LAR` vs nflverse mart `LA`); `TEAM_ALIASES` in [src/situation_layer.py](../../src/situation_layer.py) normalizes the comparison. The 2026-07-25 audit found no other alias pair — re-audit if a source changes conventions (a false pair shows up as an entire roster flagged NEW_TEAM).
 - Coaching change detection is head-coach-only; season infoboxes don't carry coordinators, so `oc_changed` stays NULL until a coordinator baseline is curated.
 - Rookies and players without a 2025 stats season have no situation row (2 board players as of launch); absence of the block is itself signal.
 - The profile points mart's `player_id_internal` scheme split (bare gsis vs `gsis:`-prefixed) is worked around here via `source_player_key`; a mart-side fix is tracked separately.
