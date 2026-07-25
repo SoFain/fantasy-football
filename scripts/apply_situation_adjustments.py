@@ -6,9 +6,10 @@ bounded adjustments; this is the third step, approved for rollout 2026-07-24
 after the walk-forward backtest (situation model beats baseline on movers in
 22/24 position/scale/year cells, coefficient signs stable in all 36 windows).
 
-Model (per scoring scale, coefficients pinned from situation_effect_v0):
+Model (v1 forms per scale/position, owner-approved 2026-07-25; see EFFECTS):
 
-    delta_ppg = C_team * team_changed + C_qb * qb_quality_delta
+    delta_ppg = team*moved + (qb + moved*qb_mover_extra)*qb_delta
+                + moved*winpct_mover*(winpct_to - winpct_from)
 
 Age is deliberately absent: the fable formula already carries an
 age-availability component, so re-applying age here would double-count.
@@ -59,25 +60,60 @@ GNG_MIRROR = f"{PROJECT}.{METRICS}.gng_2026_positional_boards_with_rookies"
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = Path(os.environ.get("PIGSKIN_MAIN_ROOT", r"E:\Fantasy Football")) / "output" / "board-refresh"
 
-CODE = "SITUATION_V0"
+CODE = "SITUATION_V1"
+CODE_FAMILY = "SITUATION_V"  # idempotency guard matches any pinned version
 CAP_SLOTS = 4              # matches the guarded QB blend's movement cap
 DENSITY_WINDOW = 5         # ranks each side when estimating local PPG density
 MIN_PPG_STEP = 0.05        # density floor: flat regions can't produce huge jumps
 MIN_DELTA_PPG = 0.10       # dead-band: sub-noise deltas (model MAE ~2 PPG) never move anyone
 POSITIONS = ("WR", "RB", "TE")
 
-# Pinned policy coefficients (PPG): situation_effect_v0[_gng] BQML study,
-# validated by scripts/backtest_situation_effects.py. Re-pinning is a formula
-# change: new backtest + owner sign-off, per the runbook.
+# Pinned policy coefficients (PPG), owner-approved 2026-07-25 from the v1
+# interaction study (walk-forward validated per cell; see
+# docs/rebuild/situation-layer.md):
+#   WR both scales — v0 additive (richer forms did not validate).
+#   RB standard    — QB-interaction form (mover QB slope = qb + qb_mover_extra);
+#                    RB gng keeps v0 (3/6, unvalidated).
+#   TE both scales — team-quality form. winpct_mover is the counterfactual
+#                    differential (C_winpct_delta + C_winpct_to): a mover swaps
+#                    origin environment for destination, so both fitted slopes
+#                    ride the same delta. Stayers are never touched by it.
+# delta_ppg = team*moved + (qb + moved*qb_mover_extra)*qb_delta
+#             + moved*winpct_mover*(winpct_to - winpct_from)
+# Re-pinning is a formula change: new walk-forward + owner sign-off.
 EFFECTS = {
-    "standard": {"WR": (-0.778, 0.022), "RB": (-0.590, 0.055), "TE": (-0.422, 0.018)},
-    "gng": {"WR": (-0.562, 0.020), "RB": (-0.328, 0.057), "TE": (-0.327, 0.014)},
+    "standard": {
+        "WR": {"team": -0.778, "qb": 0.022},
+        "RB": {"team": -0.527, "qb": -0.0035, "qb_mover_extra": 0.1096},
+        "TE": {"team": -0.485, "qb": 0.0278, "qb_mover_extra": -0.0062, "winpct_mover": -0.483},
+    },
+    "gng": {
+        "WR": {"team": -0.562, "qb": 0.020},
+        "RB": {"team": -0.328, "qb": 0.057},
+        "TE": {"team": -0.376, "qb": 0.0268, "qb_mover_extra": -0.0102, "winpct_mover": -0.449},
+    },
 }
 PROFILE_SCALE = {"standard": "standard", "gng_keeper": "gng"}
 SCALE_COLS = {
     "standard": {"qb_delta": "qb_quality_delta", "ppg_prev": "ppg_prev"},
     "gng": {"qb_delta": "qb_quality_delta_gng", "ppg_prev": "gng_ppg_prev"},
 }
+
+# 2025 REG-season win shares (ties = half), nflreadpy schedules, pinned for
+# the season. Sleeper-coded destinations normalize through TEAM_ALIASES.
+TEAM_ALIASES = {"LAR": "LA"}
+WINPCT_2025 = {
+    "ARI": 0.1765, "ATL": 0.4706, "BAL": 0.4706, "BUF": 0.7059, "CAR": 0.4706, "CHI": 0.6471, "CIN": 0.3529, "CLE": 0.2941,
+    "DAL": 0.4412, "DEN": 0.8235, "DET": 0.5294, "GB": 0.5588, "HOU": 0.7059, "IND": 0.4706, "JAX": 0.7647, "KC": 0.3529,
+    "LA": 0.7059, "LAC": 0.6471, "LV": 0.1765, "MIA": 0.4118, "MIN": 0.5294, "NE": 0.8235, "NO": 0.3529, "NYG": 0.2353,
+    "NYJ": 0.1765, "PHI": 0.6471, "PIT": 0.5882, "SEA": 0.8235, "SF": 0.7059, "TB": 0.4706, "TEN": 0.1765, "WAS": 0.2941,
+}
+
+
+def winpct(team: str | None) -> float | None:
+    if team is None:
+        return None
+    return WINPCT_2025.get(TEAM_ALIASES.get(team, team))
 
 
 def pull_board(client, profile: str, position: str) -> list[dict]:
@@ -115,7 +151,7 @@ def local_step(ppg_by_rank: list[float | None], idx: int) -> float:
 
 def plan_board(rows: list[dict], profile: str, position: str) -> dict:
     """Compute the full post-adjustment board. Pure; no I/O."""
-    c_team, c_qb = EFFECTS[PROFILE_SCALE[profile]][position]
+    eff = EFFECTS[PROFILE_SCALE[profile]][position]
     ladder = [r["ranking_score"] for r in rows]  # score by slot, fixed
     ppg_by_rank = [r["ppg_prev"] for r in rows]
 
@@ -123,7 +159,14 @@ def plan_board(rows: list[dict], profile: str, position: str) -> dict:
     for i, r in enumerate(rows):
         moved_team = bool(r["team_changed"])
         qb_delta = r["qb_delta"] if r["qb_delta"] is not None else 0.0
-        delta_ppg = (c_team if moved_team else 0.0) + c_qb * qb_delta
+        qb_slope = eff["qb"] + (eff.get("qb_mover_extra", 0.0) if moved_team else 0.0)
+        delta_ppg = (eff["team"] if moved_team else 0.0) + qb_slope * qb_delta
+        wp_delta = None
+        if moved_team and "winpct_mover" in eff:
+            wp_to, wp_from = winpct(r["team_to"]), winpct(r["team_from"])
+            if wp_to is not None and wp_from is not None:
+                wp_delta = round(wp_to - wp_from, 4)
+                delta_ppg += eff["winpct_mover"] * wp_delta
         slots = 0
         if r["team_changed"] is not None and abs(delta_ppg) >= MIN_DELTA_PPG:
             step = local_step(ppg_by_rank, i)
@@ -133,6 +176,7 @@ def plan_board(rows: list[dict], profile: str, position: str) -> dict:
             "row": r, "old_rank": r["rank"], "slots": slots,
             "target": r["rank"] - slots,  # positive delta_ppg -> up the board
             "delta_ppg": round(delta_ppg, 3), "moved_team": moved_team, "qb_delta": qb_delta,
+            "qb_slope": round(qb_slope, 4), "wp_delta": wp_delta,
         })
 
     order = sorted(plans, key=lambda p: (p["target"], p["old_rank"]))
@@ -163,18 +207,26 @@ def validate_plan(plan: dict) -> list[str]:
 def provenance(p: dict, profile: str, position: str) -> dict:
     r = p["row"]
     scale = PROFILE_SCALE[profile]
-    c_team, c_qb = EFFECTS[scale][position]
+    eff = EFFECTS[scale][position]
     bits = []
     if p["moved_team"]:
-        bits.append(f"team {r['team_from']}->{r['team_to']} {c_team:+.2f} PPG")
+        bits.append(f"team {r['team_from']}->{r['team_to']} {eff['team']:+.2f} PPG")
     if p["qb_delta"]:
-        bits.append(f"QB delta {p['qb_delta']:+.2f} PPG x {c_qb:.3f} = {c_qb * p['qb_delta']:+.2f}")
+        bits.append(
+            f"QB delta {p['qb_delta']:+.2f} PPG x {p['qb_slope']:.3f}"
+            f" = {p['qb_slope'] * p['qb_delta']:+.2f}"
+        )
+    if p["wp_delta"] is not None and p["wp_delta"] != 0:
+        bits.append(
+            f"team record {p['wp_delta']:+.3f} win share x {eff['winpct_mover']:.3f}"
+            f" = {eff['winpct_mover'] * p['wp_delta']:+.2f}"
+        )
     detail = (
-        f"Situation v0 [{scale}]: " + "; ".join(bits)
+        f"Situation v1 [{scale}]: " + "; ".join(bits)
         + f"; net {p['delta_ppg']:+.2f} PPG -> {position}{p['old_rank']}->{position}{p['new_rank']}"
         + f" (cap {CAP_SLOTS})."
     )
-    evidence = f"metric_basis {r['metric_basis']}; flags {r['flags_json']}; backtest 22/24 mover cells"
+    evidence = f"metric_basis {r['metric_basis']}; flags {r['flags_json']}; v1 study walk-forward, owner-approved 2026-07-25"
     return {
         "scoring_profile_id": profile, "position": position, "player_id": r["player_id"],
         "new_rank": p["new_rank"], "new_score": p["new_score"],
@@ -188,7 +240,7 @@ def provenance(p: dict, profile: str, position: str) -> dict:
 def refuse_if_already_adjusted(client) -> None:
     sql = f"""
     SELECT scoring_profile_id, COUNT(*) AS n FROM `{TABLE}`
-    WHERE is_active AND llm_adjustment_code LIKE '%{CODE}%'
+    WHERE is_active AND llm_adjustment_code LIKE '%{CODE_FAMILY}%'
       AND scoring_profile_id IN ('standard', 'gng_keeper')
     GROUP BY 1
     """

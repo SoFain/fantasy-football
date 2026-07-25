@@ -98,9 +98,51 @@ class PlanTest(unittest.TestCase):
 
 
 class PolicyPinTest(unittest.TestCase):
-    def test_coefficients_match_the_signed_off_study(self):
-        self.assertEqual(adj.EFFECTS["standard"]["WR"], (-0.778, 0.022))
-        self.assertEqual(adj.EFFECTS["gng"]["RB"], (-0.328, 0.057))
+    def test_coefficients_match_the_signed_off_v1_study(self):
+        # Owner-approved 2026-07-25: WR keeps v0; RB standard gains the QB
+        # interaction; TE gains team quality both scales; RB gng keeps v0.
+        self.assertEqual(adj.EFFECTS["standard"]["WR"], {"team": -0.778, "qb": 0.022})
+        self.assertEqual(adj.EFFECTS["standard"]["RB"]["qb_mover_extra"], 0.1096)
+        self.assertEqual(adj.EFFECTS["standard"]["TE"]["winpct_mover"], -0.483)
+        self.assertEqual(adj.EFFECTS["gng"]["TE"]["winpct_mover"], -0.449)
+        self.assertEqual(adj.EFFECTS["gng"]["RB"], {"team": -0.328, "qb": 0.057})
+        self.assertEqual(adj.CODE, "SITUATION_V1")
+
+    def test_rb_standard_qb_upgrade_is_a_mover_phenomenon(self):
+        # Mover slope = qb + extra; stayer slope ~ 0, so a stayer QB upgrade
+        # lands under the dead-band and never moves.
+        rows = _board(mover_at=10, mover_delta_qb=5.0)
+        plan = adj.plan_board(rows, "standard", "RB")
+        mover = next(p for p in plan["all"] if p["row"]["player_id"] == "p10")
+        self.assertAlmostEqual(mover["qb_slope"], -0.0035 + 0.1096)
+        self.assertAlmostEqual(mover["delta_ppg"], -0.527 + 0.1061 * 5.0, places=3)
+        stayer_rows = _board()
+        stayer_rows[5]["qb_changed"] = True
+        stayer_rows[5]["qb_delta"] = 5.0
+        self.assertEqual(adj.plan_board(stayer_rows, "standard", "RB")["adjusted"], [])
+
+    def test_te_mover_applies_the_record_differential(self):
+        # CHI (0.6471) -> NYJ (0.1765): a big drop in destination record is a
+        # POSITIVE adjustment for a TE (winpct_mover is negative).
+        rows = _board(mover_at=8)
+        rows[7]["team_from"], rows[7]["team_to"] = "CHI", "NYJ"
+        plan = adj.plan_board(rows, "standard", "TE")
+        mover = next(p for p in plan["all"] if p["row"]["player_id"] == "p8")
+        self.assertAlmostEqual(mover["wp_delta"], 0.1765 - 0.6471, places=4)
+        self.assertAlmostEqual(
+            mover["delta_ppg"], -0.485 - 0.483 * (0.1765 - 0.6471), places=3
+        )
+
+    def test_unknown_team_codes_skip_the_record_term(self):
+        plan = adj.plan_board(_board(mover_at=8), "standard", "TE")  # AAA->BBB
+        mover = next(p for p in plan["all"] if p["row"]["player_id"] == "p8")
+        self.assertIsNone(mover["wp_delta"])
+        self.assertAlmostEqual(mover["delta_ppg"], -0.485, places=3)
+
+    def test_sleeper_coded_destination_normalizes(self):
+        self.assertEqual(adj.winpct("LAR"), adj.winpct("LA"))
+        self.assertEqual(len(adj.WINPCT_2025), 32)
+        self.assertTrue(all(0.0 <= v <= 1.0 for v in adj.WINPCT_2025.values()))
 
     def test_gng_moves_mirror_to_the_pipeline_source_table(self):
         # The GNG unified builder/promoter read boards_with_rookies; without
