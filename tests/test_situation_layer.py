@@ -41,6 +41,12 @@ class BuildSituationSqlTest(unittest.TestCase):
     def test_coaching_baseline_joined(self):
         self.assertIn("coaching_staff_history", self.sql)
 
+    def test_team_alias_never_reads_as_a_move(self):
+        # Sleeper LAR vs mart LA: without normalization every Rams player is a
+        # false mover (13 of them on 2026-07-25).
+        self.assertIn("CASE sleeper_now.team WHEN 'LAR' THEN 'LA' ELSE sleeper_now.team END", self.sql)
+        self.assertNotIn("prev.team != sleeper_now.team", self.sql)
+
     def test_gng_parity(self):
         # Owner rule: GNG is included wherever Standard is.
         for col in ("gng_ppg_prev", "gng_ppg_next", "qb_quality_delta_gng"):

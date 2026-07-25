@@ -36,12 +36,23 @@ QB_UPGRADE_MAJOR_PPG = 4.0
 QB_UPGRADE_PPG = 1.5
 AGE_CLIFF = {"RB": 28.0, "WR": 30.0, "TE": 31.0, "QB": 37.0}
 
+# Sleeper team code -> nflverse mart team code, for the one franchise the two
+# sources spell differently. Audited 2026-07-25: LA/LAR was the only alias pair
+# among the season's team-change rows (13 false Rams movers before the fix).
+TEAM_ALIASES = {"LAR": "LA"}
+
+
+def _team_alias_case(column: str) -> str:
+    whens = " ".join(f"WHEN '{src}' THEN '{dst}'" for src, dst in TEAM_ALIASES.items())
+    return f"CASE {column} {whens} ELSE {column} END"
+
 
 def build_situation_sql(project_id: str, dataset_id: str) -> str:
     age_cliff_sql = " ".join(
         f"WHEN e.position = '{pos}' AND e.age_at_season >= {age} THEN 'AGE_CLIFF'"
         for pos, age in AGE_CLIFF.items()
     )
+    team_alias_case = _team_alias_case("sleeper_now.team")
     return f"""
 BEGIN TRANSACTION;
 
@@ -169,7 +180,10 @@ current_rows AS (
     prev.position,
     prev.team AS team_from,
     sleeper_now.team AS team_to,
-    prev.team != sleeper_now.team AS team_changed,
+    -- Sleeper and the nflverse mart disagree on one franchise code (Sleeper
+    -- LAR vs mart LA); compare on the normalized code or every Rams player is
+    -- a false mover. team_to keeps the Sleeper code for display and joins.
+    prev.team != {team_alias_case} AS team_changed,
     prev.games AS games_prev,
     prev.ppg AS ppg_prev,
     CAST(NULL AS FLOAT64) AS ppg_next,
