@@ -46,9 +46,15 @@ from pathlib import Path
 
 PROJECT = "fantasy-football-498121"
 BRAIN = "fantasy_football_brain"
+METRICS = "fantasy_football_advanced_metrics"
 TABLE = f"{PROJECT}.{BRAIN}.analytics_pigskin_rankings"
 SITUATION = f"{PROJECT}.{BRAIN}.analytics_player_situation"
 STAGING = f"{PROJECT}.{BRAIN}.situation_adjustments_staging"
+# The GNG pipeline's source of truth: the unified builder, the GNG promoter,
+# and the review-table rebuild all read this table, and the promoter derives
+# the live score from rank (100 - 0.5*rank). Adjusted GNG ranks must be
+# mirrored here or stage 6's artifact-vs-active preflight refuses the day.
+GNG_MIRROR = f"{PROJECT}.{METRICS}.gng_2026_positional_boards_with_rookies"
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = Path(os.environ.get("PIGSKIN_MAIN_ROOT", r"E:\Fantasy Football")) / "output" / "board-refresh"
@@ -234,6 +240,26 @@ def write(client, staged: list[dict]) -> None:
       llm_rank_delta = IF(s.moved AND t.llm_rank_delta IS NULL, s.realized_delta, t.llm_rank_delta),
       rank_rationale = IF(s.moved, CONCAT(COALESCE(t.rank_rationale, ''), s.note), t.rank_rationale)
     """).result()
+
+    client.query(f"""
+    MERGE `{GNG_MIRROR}` t
+    USING `{STAGING}` s
+      ON t.player_id = s.player_id AND t.position = s.position
+     AND s.scoring_profile_id = 'gng_keeper'
+    WHEN MATCHED THEN UPDATE SET rank = s.new_rank
+    """).result()
+    mirror_rows = [dict(r) for r in client.query(f"""
+    SELECT position, COUNT(*) AS n, COUNT(DISTINCT rank) AS distinct_ranks,
+           MIN(rank) AS lo, MAX(rank) AS hi
+    FROM `{GNG_MIRROR}` GROUP BY position
+    """).result()]
+    broken = [
+        r for r in mirror_rows
+        if not (r["n"] == r["distinct_ranks"] == r["hi"] and r["lo"] == 1)
+    ]
+    if broken:
+        raise RuntimeError(f"gng mirror ranks not contiguous after merge: {broken}")
+
     client.query(f"DROP TABLE `{STAGING}`").result()
 
 

@@ -102,6 +102,16 @@ class PolicyPinTest(unittest.TestCase):
         self.assertEqual(adj.EFFECTS["standard"]["WR"], (-0.778, 0.022))
         self.assertEqual(adj.EFFECTS["gng"]["RB"], (-0.328, 0.057))
 
+    def test_gng_moves_mirror_to_the_pipeline_source_table(self):
+        # The GNG unified builder/promoter read boards_with_rookies; without
+        # the mirror, stage 6's artifact-vs-active preflight fails the day.
+        import inspect
+
+        src = inspect.getsource(adj.write)
+        self.assertIn("gng_2026_positional_boards_with_rookies", adj.GNG_MIRROR)
+        self.assertIn("GNG_MIRROR", src)
+        self.assertIn("s.scoring_profile_id = 'gng_keeper'", src)
+
     def test_apply_is_env_gated(self):
         import inspect
 
