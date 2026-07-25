@@ -20,6 +20,9 @@ Stages (mirroring the runbook):
   3. Dry-run every positional promoter. All must pass before any write.
   4. Apply positional promotions, each behind its own ALLOW_* write gate.
   5. Validate active positional rows against the runbook's release invariants.
+  5.5 Rebuild the situation layer, apply Situation v0 adjustments (bounded
+      slot swaps on the standard + gng_keeper WR/RB/TE boards; owner-approved
+      Phase 3), realign the GNG unified review table, re-validate.
   6. Build and promote unified Top 150 boards (dry-run, then apply).
   7. Validate unified boards: 150 unique contiguous rows per profile.
   8. Build GNG rank context (dry-run, then apply).
@@ -353,6 +356,20 @@ def main() -> int:
     # Stage 5: runbook invariants on what was just promoted.
     validate_positional()
 
+    # Stage 5.5: Situation v0 (Phase 3, owner-approved 2026-07-24). Rebuild the
+    # situation layer from the just-promoted QB boards, then apply bounded
+    # situation adjustments to the standard + gng_keeper WR/RB/TE boards. This
+    # runs BEFORE stage 6 so the unified boards inherit adjusted positional
+    # ranks; the GNG unified review table is rebuilt afterwards so the stage-6
+    # GNG promote preflight sees the adjusted order. Score ladders are
+    # preserved by construction (players swap slots), so the invariants are
+    # re-checked cheaply rather than re-derived.
+    run("5.5 rebuild situation layer", [PYTHON, "-m", "src.job_runner", "--job-name", "build-situation-layer"], cwd=BRANCH_ROOT)
+    run("5.5 apply situation adjustments", [PYTHON, str(BRANCH_ROOT / "scripts" / "apply_situation_adjustments.py"), "--apply"],
+        env_extra={"ALLOW_SITUATION_ADJUSTMENTS": "true"}, cwd=BRANCH_ROOT)
+    run("5.5 realign gng unified review table", [PYTHON, script("build_unified_gng_2026_top100.py"), "--output", str(gng_board), "--apply"])
+    validate_positional()
+
     # Stage 6: unified boards. Build artifacts, dry-run promoters, then apply.
     standard_board = OUT / "unified-standard-top150.json"
     ppr_board = OUT / "unified-ppr-top150.json"
@@ -391,10 +408,9 @@ def main() -> int:
     run("8 apply gng context", [PYTHON, script("build_gng_rank_context.py"), "--apply"],
         env_extra={"ALLOW_GNG_RANK_CONTEXT_PUBLISH": "true"})
 
-    # Stage 8.5: refresh the situation layer from the just-promoted boards and
-    # today's Sleeper snapshot, emit the public dataset artifacts for the
-    # wrapper to upload, and write the owner-review queue.
-    run("8.5 rebuild situation layer", [PYTHON, "-m", "src.job_runner", "--job-name", "build-situation-layer"], cwd=BRANCH_ROOT)
+    # Stage 8.6: emit the public situation-dataset artifacts for the wrapper to
+    # upload, and write the owner-review queue (which now shows the adjusted
+    # ranks). The layer itself was rebuilt at stage 5.5, before adjustments.
     run("8.6 situation feed artifacts", [PYTHON, "-m", "src.job_runner", "--job-name", "situation-feed"], cwd=BRANCH_ROOT)
     write_situation_review()
 

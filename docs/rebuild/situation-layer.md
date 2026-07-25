@@ -1,10 +1,10 @@
 # Player Situation Layer
 
-Status 2026-07-24: **Phases 1 and 2 live.** Phase 3 (rank adjustments) awaits owner policy informed by the BQML study below.
+Status 2026-07-24: **Phases 1–3 live.** Situation v0 adjustments (owner-approved after the walk-forward backtest) run at stage 5.5 of the daily chain: [scripts/apply_situation_adjustments.py](../../scripts/apply_situation_adjustments.py) — standard + gng_keeper WR/RB/TE only (QB boards stay under the cutline machinery; ppr/half_ppr await their own scale study), pinned coefficients, dead-band 0.10 PPG, cap ±4 slots, players swap slots on a fixed score ladder so every score invariant holds by construction, provenance `SITUATION_V0`. Re-pinning coefficients is a formula change: new backtest + owner sign-off.
 
 The layer exists because rankings and articles were blind to context their metrics don't carry: D.J. Moore ranked WR50 on 2025 Chicago numbers while being Buffalo's WR1 under Josh Allen — and the generated article never mentioned any of it. 57 of 264 standard-board players carried a team change their metrics didn't know about.
 
-Doctrine (mirrors the runbook's injury contract): **facts → flags → owner-gated bounded adjustments.** Nothing in this layer moves a ranking.
+Doctrine (mirrors the runbook's injury contract): **facts → flags → owner-gated bounded adjustments.** Flags never move a ranking; only the bounded, provenance-stamped Situation v0 stage does.
 
 ## Pieces
 
@@ -15,6 +15,7 @@ Doctrine (mirrors the runbook's injury contract): **facts → flags → owner-ga
 | Public dataset | `datasets.player_situation` in the feed manifest — [src/situation_feed.py](../../src/situation_feed.py), job `situation-feed` |
 | Board blocks | Schema **1.3**: every board player may carry `situation` + `metrics` objects (publisher `fetch_player_context`, main checkout) |
 | Coaching baseline | `coaching_staff_history` (2025 head coaches from Wikipedia season pages) — [scripts/populate_coaching_staff_2025_csv.py](../../scripts/populate_coaching_staff_2025_csv.py), loaded via `ingest-coaching-staff --history-season 2025` |
+| Adjustments | [scripts/apply_situation_adjustments.py](../../scripts/apply_situation_adjustments.py), chain stage 5.5; daily move report in `output\board-refresh\situation-adjustments-<date>.md` |
 | Review queue | `output\daily-publish\situation-review-<date>.md`, written by the daily board-refresh chain |
 | ML study | [scripts/run_situation_ml_study.py](../../scripts/run_situation_ml_study.py) → models `situation_effect_v0[_gng]_{wr,rb,te}` in the metrics dataset (both scoring scales) |
 | Backtest | [scripts/backtest_situation_effects.py](../../scripts/backtest_situation_effects.py) — walk-forward (fit ≤S−1, predict S), read-only, local OLS → `build/situation-study/situation_backtest_report.json` |
