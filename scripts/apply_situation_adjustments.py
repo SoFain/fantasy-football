@@ -1,4 +1,4 @@
-"""Apply Situation v0 adjustments to the live boards (Phase 3, owner-approved).
+"""Apply Situation adjustments to the live boards (Phase 3, owner-approved).
 
 Converts the validated situation-effect findings into bounded rank moves on the
 standard and gng_keeper WR/RB/TE boards. Doctrine: facts -> flags -> owner-gated
@@ -339,7 +339,7 @@ def main() -> int:
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    report_lines = [f"# Situation v0 adjustments {stamp}", ""]
+    report_lines = [f"# Situation adjustments {stamp} ({CODE})", ""]
     staged, moved_total = [], 0
     for plan in plans:
         staged.extend(provenance(p, plan["profile"], plan["position"]) for p in plan["all"])
@@ -350,7 +350,10 @@ def main() -> int:
             r = p["row"]
             report_lines.append(
                 f"- {r['player_name']}: {p['old_rank']} -> {p['new_rank']}"
-                f" ({p['delta_ppg']:+.2f} PPG; team={p['moved_team']}, qbΔ={p['qb_delta']:+.2f})"
+                f" ({p['delta_ppg']:+.2f} PPG; team={p['moved_team']}, qbΔ={p['qb_delta']:+.2f}"
+                f"×{p['qb_slope']:.3f}"
+                + (f", recordΔ={p['wp_delta']:+.3f}" if p["wp_delta"] else "")
+                + ")"
             )
         report_lines.append("")
     artifact = OUT_DIR / f"situation-adjustments-{stamp}.md"

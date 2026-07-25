@@ -154,6 +154,14 @@ class PolicyPinTest(unittest.TestCase):
         self.assertIn("GNG_MIRROR", src)
         self.assertIn("s.scoring_profile_id = 'gng_keeper'", src)
 
+    def test_report_header_tracks_the_pinned_version(self):
+        # A hardcoded "v0" title outlived the v1 re-pin once; derive it.
+        import inspect
+
+        src = inspect.getsource(adj.main)
+        self.assertNotIn("Situation v0 adjustments", src)
+        self.assertIn("({CODE})", src)
+
     def test_apply_is_env_gated(self):
         import inspect
 
