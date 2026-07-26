@@ -1,5 +1,12 @@
 # Phase 35.1C Progress Handoff — WR Fable v1.1 Upgrade (Session Ended Mid-Phase)
 
+> SUPERSEDED 2026-07-26: this handoff was fully executed by later sessions. See
+> `phase-35-1c-wr-fable-v1-1-upgrade-report.md` (v1.1 backtest: NEEDS ONE SIMPLE TWEAK),
+> `phase-35-1d-wr-fable-modified-tests-report.md` (injury-variant tests), and the
+> production runbook's WR formula line (v1 exact + prior-qualified veteran coverage
+> fallback, live). The weekly Sleeper archive and its Cloud Run/Scheduler rollout also
+> shipped (enabled 2026-07-11). Nothing below remains actionable.
+
 Status: **BUILD ARTIFACTS WRITTEN, NOTHING DEPLOYED OR VALIDATED.** All Phase 35.1C code exists on disk but no tests have been run, no views deployed, no backtest executed, and no report produced. Nothing live was touched at any point. The final phase report (`phase-35-1c-wr-fable-v1-1-upgrade-report.md`) does NOT exist yet.
 
 ## Completed (files written to disk, unvalidated)
