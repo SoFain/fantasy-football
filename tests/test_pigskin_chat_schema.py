@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
-import re
 
 from src.pigskin_chat_schema import (
     PIGSKIN_CHAT_ALLOWED_TABLES,

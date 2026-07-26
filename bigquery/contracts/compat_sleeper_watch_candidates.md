@@ -10,9 +10,9 @@ Helper: [src/sleeper_watch.py](../../src/sleeper_watch.py)
 
 ## Purpose
 
-Compatibility layer for `render_sleeper_watch_segment`, `app.py:788-918`.
+Compatibility layer for `render_sleeper_watch_segment`.
 
-This object replaces UI reads from raw `weekly_metrics`, `sleeper_rosters`, and `sleeper_roster_players` with a curated Sleeper Watch mart. Streamlit is not wired to it yet. Future wiring must be behind `USE_COMPAT_SLEEPER_WATCH=false` until live validation is complete.
+This object replaces UI reads from raw `weekly_metrics`, `sleeper_rosters`, and `sleeper_roster_players` with a curated Sleeper Watch mart. No consumer reads it yet. Any future consumer must be gated behind `USE_COMPAT_SLEEPER_WATCH=false` until live validation is complete.
 
 ## Backing Object
 
@@ -190,7 +190,7 @@ Validation files:
 
 ## Future Wiring
 
-Future Streamlit wiring should:
+Any future consumer should:
 
 1. Add `USE_COMPAT_SLEEPER_WATCH=false`.
 2. Use [src/sleeper_watch.py](../../src/sleeper_watch.py).

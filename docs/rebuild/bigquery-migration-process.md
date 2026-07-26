@@ -202,7 +202,7 @@ The initial helper checks for the migration ledger table:
 - `134_content_briefs_source_freshness_exists.sql`
 - `135_content_briefs_missing_flags_exist.sql`
 
-Validation SQL files are not automatically run by the migration runner. Run them with [scripts/run_bigquery_validations.py](../../scripts/run_bigquery_validations.py) after migrations or materialization jobs.
+Validation SQL files are deliberately not run by the migration runner. Run them with [scripts/run_bigquery_validations.py](../../scripts/run_bigquery_validations.py) after migrations or materialization jobs; the full process is in [bigquery-validation-process.md](bigquery-validation-process.md).
 
 ## Safety Notes
 

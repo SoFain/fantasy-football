@@ -1,6 +1,8 @@
-# Google Cloud Run Deployment Guide: NFL Data Studio
+﻿# Google Cloud Run Deployment Guide: Pigskin
 
-This document provides step-by-step instructions for containerizing the Streamlit dashboard and deploying it securely to Google Cloud Run.
+This document provides step-by-step instructions for containerizing the Pigskin warehouse jobs and deploying them securely to Google Cloud Run Jobs.
+
+There is no service to deploy. The Streamlit dashboard was retired; the image runs `src/job_runner.py` per execution and exits.
 
 ---
 
@@ -122,26 +124,37 @@ By default, Cloud Run uses the Compute Engine default service account. However, 
 
 ---
 
-## 5. Deploy to Google Cloud Run
-Deploy the compiled container to Cloud Run, attaching the newly configured service account, wiring the Gemini secret into environment variables, pinning the BigQuery project, setting conservative external verification limits, and restricting access to authenticated users:
+## 5. Deploy Cloud Run Jobs
+
+Create one Cloud Run Job per job name. Jobs run to completion and exit; they have no ingress port and no public URL.
+
 ```bash
-gcloud run deploy nfl-studio-dashboard \
-    --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/nfl-studio-repo/nfl-studio-app:YOUR_IMMUTABLE_TAG \
-    --region=us-central1 \
-    --service-account=nfl-studio-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-    --set-env-vars=BQ_PROJECT=YOUR_PROJECT_ID,EXTERNAL_SEARCH_PROVIDER=vertex_ai_search,EXTERNAL_SEARCH_DAILY_LIMIT=25,EXTERNAL_SEARCH_MAX_RESULTS=3,VERTEX_AI_SEARCH_ENGINE_ID=YOUR_VERTEX_SEARCH_ENGINE_ID \
-    --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest \
-    --port=8501 \
-    --no-allow-unauthenticated
+gcloud run jobs create pigskin-materialize-analytics     --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/nfl-studio-repo/nfl-studio-app:latest     --region=us-central1     --service-account=nfl-studio-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com     --set-env-vars=BQ_PROJECT=YOUR_PROJECT_ID,EXTERNAL_SEARCH_PROVIDER=vertex_ai_search,EXTERNAL_SEARCH_DAILY_LIMIT=25,EXTERNAL_SEARCH_MAX_RESULTS=3,VERTEX_AI_SEARCH_ENGINE_ID=YOUR_VERTEX_SEARCH_ENGINE_ID     --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest     --args=--job-name,materialize-analytics     --max-retries=1     --task-timeout=3600s
 ```
+
+Execute it:
+
+```bash
+gcloud run jobs execute pigskin-materialize-analytics --region=us-central1 --wait
+```
+
+Override arguments per execution without redeploying:
+
+```bash
+gcloud run jobs execute pigskin-materialize-analytics --region=us-central1 --args=--job-name,materialize-analytics,--season,2026
+```
+
+`src/cloud_run_jobs.py:cloud_run_job_name` maps a job name to its Cloud Run Job name, so keep the `pigskin-` prefix convention.
 
 ### Explanations of Flags:
 - `--image`: The location of your Docker image in Artifact Registry.
-- `--service-account`: Links the IAM roles (BigQuery Admin) directly to the running container instance (enabling passwordless, fileless BigQuery access).
+- `--service-account`: Links the IAM roles directly to the running container instance, enabling passwordless, fileless BigQuery access.
 - `--set-env-vars`: Pins the warehouse project, selects Vertex AI Search, caps external verification at 25 requests per UTC day, and limits each search to 3 stored results. You can provide `VERTEX_AI_SEARCH_SERVING_CONFIG` instead of `VERTEX_AI_SEARCH_ENGINE_ID` if you want to pass the full serving config resource name.
-- `--set-secrets`: Injects Secret Manager values without storing keys in code or the container image. `GEMINI_API_KEY:latest` refers to a Secret Manager version, not a container image tag.
-- `--port=8501`: Sets the container ingress port to align with Streamlit's default port.
-- `--no-allow-unauthenticated`: Restricts access so only authenticated IAM users in your GCP project can access the dashboard. (Change this to `--allow-unauthenticated` if you want to make it publicly accessible).
+- `--set-secrets`: Injects Secret Manager values without storing keys in code or the container image.
+- `--args`: The job name and any job-specific flags, passed to the `src.job_runner` entrypoint.
+- `--task-timeout`: Raise this for long ingestion or backtest jobs. The default is too short for a full pipeline run.
+
+There is no `--allow-unauthenticated` decision to make: jobs are not network-reachable. Access is controlled entirely by who may execute the job and what the service account may do.
 
 ### Staging-Only Compatibility Flag
 Phase 15.3 promotes only Trade Lab player history to staging. Production defaults remain unchanged.
@@ -163,18 +176,25 @@ gcloud run services update <staging-service-name> `
 ```
 
 ### External Verification Cost Controls
-- Default app cap: 25 external search requests per UTC day.
+- Default cap: 25 external search requests per UTC day.
 - Absolute hard cap in code: 99 external search requests per UTC day.
 - Default stored results: 3 per request.
 - Absolute hard result cap in code: 5 per request.
-- The app calls Vertex AI Search `servingConfigs.search` only. It does not request generative answers.
+- `verify-external-context` calls Vertex AI Search `servingConfigs.search` only. It does not request generative answers.
 - Set `EXTERNAL_SEARCH_DAILY_LIMIT=0` to disable external verification entirely.
 - Keep the Vertex AI Search data store limited to a curated football source set instead of general web search.
 
 ---
 
-## 6. Accessing the App
-Once the deployment finishes, the terminal will print the Service URL:
-`Service URL: https://nfl-studio-dashboard-xxxxxx.a.run.app`
+## 6. Checking Job Results
 
-Double-click or navigate to that URL in your browser to access the dashboard!
+Executions are visible in the Cloud Run Jobs console and in BigQuery:
+
+```sql
+SELECT job_run_id, job_name, status, started_at, finished_at, row_count, error_message
+FROM `YOUR_PROJECT_ID.fantasy_football_brain.cloud_run_job_runs`
+ORDER BY started_at DESC
+LIMIT 20
+```
+
+Every execution records a row through `src/cloud_run_jobs.py`. A job that fails before reaching the recorder will appear in Cloud Run logs but not in this table.

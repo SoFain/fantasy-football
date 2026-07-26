@@ -1,0 +1,88 @@
+# Player Situation Layer
+
+Status 2026-07-24: **Phases 1–3 live.** Situation v0 adjustments (owner-approved after the walk-forward backtest) run at stage 5.5 of the daily chain: [scripts/apply_situation_adjustments.py](../../scripts/apply_situation_adjustments.py) — standard + gng_keeper WR/RB/TE only (QB boards stay under the cutline machinery; ppr/half_ppr await their own scale study), pinned coefficients, dead-band 0.10 PPG, cap ±4 slots, players swap slots on a fixed score ladder so every score invariant holds by construction, provenance `SITUATION_V0`. Re-pinning coefficients is a formula change: new backtest + owner sign-off.
+
+The layer exists because rankings and articles were blind to context their metrics don't carry: D.J. Moore ranked WR50 on 2025 Chicago numbers while being Buffalo's WR1 under Josh Allen — and the generated article never mentioned any of it. 57 of 264 standard-board players carried a team change their metrics didn't know about.
+
+Doctrine (mirrors the runbook's injury contract): **facts → flags → owner-gated bounded adjustments.** Flags never move a ranking; only the bounded, provenance-stamped Situation v0 stage does.
+
+## Pieces
+
+| Piece | Location |
+| --- | --- |
+| Table | `analytics_player_situation` — migrations 0046/0047/0048. One table, two slices: 2016–2025 transitions with outcomes (ML training set), and the 2026 slice (live context). |
+| Builder | [src/situation_layer.py](../../src/situation_layer.py), job `build-situation-layer` |
+| Public dataset | `datasets.player_situation` in the feed manifest — [src/situation_feed.py](../../src/situation_feed.py), job `situation-feed` |
+| Board blocks | Schema **1.3**: every board player may carry `situation` + `metrics` objects (publisher `fetch_player_context`, main checkout) |
+| Coaching baseline | `coaching_staff_history` (2025 head coaches from Wikipedia season pages) — [scripts/populate_coaching_staff_2025_csv.py](../../scripts/populate_coaching_staff_2025_csv.py), loaded via `ingest-coaching-staff --history-season 2025` |
+| Adjustments | [scripts/apply_situation_adjustments.py](../../scripts/apply_situation_adjustments.py), chain stage 5.5; daily move report in `output\board-refresh\situation-adjustments-<date>.md` |
+| Review queue | `output\daily-publish\situation-review-<date>.md`, written by the daily board-refresh chain |
+| ML study | [scripts/run_situation_ml_study.py](../../scripts/run_situation_ml_study.py) → models `situation_effect_v0[_gng]_{wr,rb,te}` in the metrics dataset (both scoring scales) |
+| Backtest | [scripts/backtest_situation_effects.py](../../scripts/backtest_situation_effects.py) — walk-forward (fit ≤S−1, predict S), read-only, local OLS → `build/situation-study/situation_backtest_report.json` |
+| Validations | 156–160 |
+
+## What a `situation` block says
+
+```json
+{"team": "BUF", "team_2025": "CHI", "team_changed": true,
+ "qb": "Josh Allen", "qb_2025": "Caleb Williams",
+ "qb_quality_delta_ppg": 4.87, "qb_quality_delta_gng_ppg": 4.13,
+ "head_coach": "Joe Brady", "hc_changed": true, "age": 29.4,
+ "flags": ["NEW_TEAM", "QB_CHANGED", "QB_UPGRADE_MAJOR", "NEW_HC"],
+ "metric_basis": "2025_CHI"}
+```
+
+`metric_basis` is the honesty field: it names the team-season every metric describes. Article rules in the GNG repo's AGENTS.md require stating changes and attributing metrics to their basis.
+
+QB quality convention: a QB's quality entering season S+1 is his season-S PPG (knowable at decision time). `qb_to` is the platform's own board QB1 for the player's current team.
+
+## GNG parity (owner rule)
+
+**GNG rankings are included in anything Standard Scoring is included in.** Unsuffixed columns/fields are standard scoring; the `_gng` suffix is GNG Keeper. In this layer that means: `gng_ppg_prev/next` and `qb_quality_*_gng` on the table (migration 0048), `gng_ppg` in the `metrics` block and `qb_quality_delta_gng_ppg` in the `situation` block (dataset schema 1.1, boards 1.3), a GNG rank column plus std/gng QB deltas in the review queue, and a full `_gng` model set in the study. The two scales can disagree usefully — Kyler Murray is QB7 standard but QB20 GNG, so a WR inheriting him reads +2.0 std / +0.5 gng.
+
+## Daily flow
+
+The 07:30 chain rebuilds the layer after boards promote (stage 8.5), emits fresh dataset artifacts (8.6), writes the review queue (8.7-equivalent), and the wrapper uploads the immutable object and passes `--dataset-entry` to the publisher. On gate-tripped days the publisher carries the prior dataset forward.
+
+## The ML study (Phase-3 input)
+
+Linear models per position **and per scoring scale** over 2016–2025 transitions (n=3,362, 925 movers), controlling for prior PPG, games, and age. First results (r² 0.48–0.57; standard / gng):
+
+| Effect | WR | RB | TE |
+| --- | --- | --- | --- |
+| Team change (avg) | −0.78 / −0.56 PPG | −0.59 / −0.33 | −0.42 / −0.33 |
+| Per +1.0 PPG QB upgrade | +0.02 / +0.02 | +0.06 / +0.06 | +0.02 / +0.01 |
+| Age per year | −0.02 / −0.01 | −0.22 / −0.15 | −0.03 / −0.02 |
+
+Read: movers mildly underperform on average, QB upgrades claw back only a fraction, the RB age cliff is real — and both scales agree on direction, with GNG magnitudes proportionally smaller (its scoring compresses skill-player PPG).
+
+### Walk-forward backtest (out-of-sample check)
+
+The table above is in-sample. The backtest fits only on seasons before each holdout year (2020–2025) and predicts forward — the situation the 2026 board is actually in. Results, both scales:
+
+- **On movers — the only players an adjustment would touch — the situation model beat the baseline in 22 of 24 position/scale/year cells** (WR and RB: 6/6 years in both scales), cutting mover error ~4–8% (e.g. WR standard MAE 1.96 → 1.84 PPG).
+- Overall error never got worse on average; rank order (Spearman) improved slightly for WR/RB, flat for TE.
+- Coefficient signs held in **all 36 training windows** (team change always negative, QB delta always positive) — the effects are stable, not artifacts of one fit.
+
+This is the Phase-3 evidence bar: the findings generalize forward, so small bounded mover adjustments are justified; TE is the weakest case. Board-level backtests (would the *ranks* have been better) can't reach before 2026 — no historical fable boards exist — but the content-addressed feed archives every published board from launch onward, so a true board backtest accrues one season per year from here.
+
+### v1 interaction study (owner hypotheses, 2026-07-25)
+
+[scripts/run_situation_interaction_study.py](../../scripts/run_situation_interaction_study.py) tested two hypotheses head-to-head on held-out movers (walk-forward, both scales): **H1** — QB upgrades matter more for movers (`team_changed × qb_delta`); **H2** — moving to a team with a better prior-season record is itself an upgrade (`winpct_delta`, records from nflreadpy REG schedules).
+
+| Cell | H1 interaction | H2 winpct_delta | Out-of-sample best |
+| --- | --- | --- | --- |
+| WR std / gng | +0.013 / +0.007 (tiny) | **−1.15 / −0.81** | keep v0 additive (both) |
+| RB std / gng | **+0.110 / +0.078** (mover slope ≈ 2× stayers) | +0.17 / +0.21 | **B (qb interaction)** std, 4/6; gng 3/6 keep v0 |
+| TE std / gng | ≈ 0 | **−1.24 / −1.03** | **C (team quality)** both, 5/6 |
+
+Two owner-relevant surprises: (1) for WRs and TEs the destination-record sign is **negative** — pass-catchers joining last year's winners do *worse* (established target hierarchies; losing teams force-feed volume); (2) the QB-upgrade interaction is real for **RBs**, not WRs. Report: `build/situation-study/situation_interaction_v1_report.json`.
+
+**Owner-approved and applied 2026-07-25 (Situation v1, provenance `SITUATION_V1`):** RB standard uses the interaction form; TE uses the team-quality form in both scales, where the record term is the mover counterfactual differential `(C_winpct_delta + C_winpct_to) × Δwin_share` — a mover swaps environments, so both fitted slopes ride the delta, and stayers are never touched by a static environment term. WR keeps v0 additive; RB gng keeps v0. 2025 win shares are pinned in the engine (nflreadpy REG schedules, ties = half). Candidate magnitudes are small and mostly conservative. Phase 3 converts these into a bounded, coded post-formula adjustment policy (same `llm_adjustment_*` provenance and cutline guards as the acknowledged-crossing machinery) after owner sign-off; v1 study ideas: interaction terms (qb_delta × prior target share), boosted trees, quantile effects.
+
+## Known limits
+
+- Team codes differ across sources for one franchise (Sleeper `LAR` vs nflverse mart `LA`); `TEAM_ALIASES` in [src/situation_layer.py](../../src/situation_layer.py) normalizes the comparison. The 2026-07-25 audit found no other alias pair — re-audit if a source changes conventions (a false pair shows up as an entire roster flagged NEW_TEAM).
+- Coaching change detection is head-coach-only; season infoboxes don't carry coordinators, so `oc_changed` stays NULL until a coordinator baseline is curated.
+- Rookies and players without a 2025 stats season have no situation row (2 board players as of launch); absence of the block is itself signal.
+- The profile points mart's `player_id_internal` scheme split (bare gsis vs `gsis:`-prefixed) is worked around here via `source_player_key`; a mart-side fix is tracked separately.

@@ -1,6 +1,6 @@
 # Content Brief Orchestrator
 
-The Content Brief Orchestrator assembles deterministic, evidence-backed show prep briefs for AI vs. Meatbags.
+The Content Brief Orchestrator assembles deterministic, evidence-backed show prep briefs for Pigskin.
 
 ## Scope
 

@@ -1,6 +1,6 @@
 # Data Ops Cloud Run Jobs Rollout
 
-This guide covers the default-off Cloud Run Jobs path in the Streamlit Data Ops tab.
+This guide covers the default-off Cloud Run Jobs dispatch path in `src/cloud_run_jobs.py`.
 
 ## Current State
 
@@ -26,7 +26,7 @@ CLOUD_RUN_JOB_SERVICE_ACCOUNT=<job-service-account>
 
 Meaning:
 
-- `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS` enables the Streamlit Cloud Run Jobs path.
+- `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS` enables the Cloud Run Jobs dispatch path.
 - `CLOUD_RUN_JOBS_ENABLED` is a global kill switch.
 - `DATA_OPS_ALLOW_JOB_TRIGGER` permits an explicit button click to trigger a job.
 - The dashboard still requires the user confirmation checkbox for every trigger.
@@ -35,7 +35,7 @@ Meaning:
 
 Local subprocess path:
 
-- Runs Python modules in the Streamlit service process context.
+- Runs Python modules as local subprocesses.
 - Uses current local or Cloud Run service credentials.
 - Remains available while flags are false.
 

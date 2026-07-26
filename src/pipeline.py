@@ -302,9 +302,9 @@ def run_pipeline(seasons, write_disposition="WRITE_APPEND", dataset_name="fantas
         if ingest_only:
             logger.info("--- Skipping Step 4: Ingest-only mode requested. Analytics materialization not run. ---")
         else:
-            logger.info("--- Starting Step 4: Materializing AI vs Vibes truth table ---")
+            logger.info("--- Starting Step 4: Materializing Pigskin truth table ---")
             materialize_all(bq_client, dataset_id=dataset_name)
-            logger.info("Successfully materialized AI vs Vibes analytics tables.")
+            logger.info("Successfully materialized Pigskin analytics tables.")
 
         logger.info("=" * 60)
         logger.info(f"NFL Data Pipeline finished successfully at {datetime.now()}!")

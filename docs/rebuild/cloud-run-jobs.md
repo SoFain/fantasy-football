@@ -1,6 +1,6 @@
 # Cloud Run Jobs
 
-This document defines the Cloud Run Job path for long-running warehouse work. The Streamlit Cloud Run service remains the admin and control surface. These jobs should use the shared app container image unless a later dependency split is justified.
+This document defines the Cloud Run Job path for long-running warehouse work. Jobs are the only cloud runtime; the Streamlit app remains a local studio surface only. These jobs use the same container image unless a later cost or dependency split is justified.
 
 No Cloud infrastructure is created by this document.
 
@@ -242,11 +242,56 @@ Run:
 .\venv\Scripts\python.exe scripts\check_deployment_safety.py
 ```
 
+## Retry Policy
+
+Use Cloud Run Job retry settings only for idempotent jobs or jobs that safely overwrite by version.
+
+Recommended starting point:
+
+- Ingestion: low retry count, explicit inspection after repeated failure.
+- Materialization: one retry if queries are idempotent.
+- Ranking generation: manual retry unless the failure is clearly transient.
+- External verification: strict quota guardrails and low retry count.
+- Validation: one retry is acceptable.
+
+## Cost Controls
+
+- Prefer `--dry-run` during setup.
+- Use `--limit` for projections, rankings, and packet generation tests.
+- Use validation `--pattern` when checking a narrow area.
+- Keep external verification behind explicit player/query inputs.
+- Keep scheduled jobs conservative until warehouse freshness and row counts are visible.
+- Store only metadata in `cloud_run_job_runs`; put large logs or artifacts in Cloud Storage if needed.
+
+## Local Execution Compatibility
+
+Local subprocess execution remains the default so jobs can be run without live Cloud Run access.
+
+`src/cloud_run_jobs.py` provides default-off preview and trigger helpers.
+
+Feature flags:
+
+```text
+USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=false
+CLOUD_RUN_JOBS_ENABLED=true
+DATA_OPS_ALLOW_JOB_TRIGGER=false
+```
+
 ## Phase 14.7 Validate Warehouse Gate
 
 Phase 14.7 produced a dry-run deployment preview for only `validate-warehouse`. Live deployment was not run because `ALLOW_VALIDATE_WAREHOUSE_CLOUD_RUN_TEST=true` was not set and `gcloud` was not installed locally.
 
 See [phase-14-7-cloud-run-validate-warehouse-test.md](validation/phase-14-7-cloud-run-validate-warehouse-test.md).
+
+Flag behavior:
+
+- With the default flags, only configured-job listing and dry-run previews are available.
+- Actual triggering requires `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true` and `DATA_OPS_ALLOW_JOB_TRIGGER=true`.
+- The user must confirm the trigger in the dashboard before any job is started.
+- Unknown job names and unsupported args are rejected by `src/cloud_run_jobs.py`.
+- Trigger metadata is written to `cloud_run_job_runs`.
+- Secrets are refused as ad hoc environment overrides and are not logged.
+- Local subprocess controls remain available during rollout.
 
 ## Phase 15.1 Cleanup Note
 

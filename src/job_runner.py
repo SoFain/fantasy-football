@@ -26,6 +26,12 @@ VALID_JOB_NAMES = (
     "ingest-context-events",
     "ingest-market-values",
     "ingest-college-stats",
+    "ingest-rookie-scouting",
+    "detect-player-changes",
+    "ingest-coaching-staff",
+    "coaching-staff-feed",
+    "build-situation-layer",
+    "situation-feed",
     "materialize-analytics",
     "generate-pigskin-rankings",
     "generate-evidence-packets",
@@ -50,7 +56,7 @@ def get_bigquery_dataset() -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run AI vs Meatbags warehouse jobs.")
+    parser = argparse.ArgumentParser(description="Run Pigskin warehouse jobs.")
     parser.add_argument("--job-name", required=True, choices=VALID_JOB_NAMES)
     parser.add_argument("--project", default=get_bigquery_project())
     parser.add_argument("--dataset", default=get_bigquery_dataset())
@@ -75,7 +81,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--query", help="Explicit external verification query.")
     parser.add_argument("--team", help="Optional team context for external verification.")
     parser.add_argument("--max-results", type=int)
-    parser.add_argument("--csv", help="CSV path for ingest-context-events.")
+    parser.add_argument("--csv", help="CSV path for ingest-context-events and ingest-rookie-scouting.")
+    parser.add_argument(
+        "--skip-news",
+        action="store_true",
+        help="For detect-player-changes: record changes without fetching team feeds.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="For ingest-sleeper-news: re-fetch the players map even if today's snapshot exists.",
+    )
+    parser.add_argument(
+        "--replace-season",
+        action="store_true",
+        help="For ingest-rookie-scouting: replace the CSV's seasons instead of appending.",
+    )
     parser.add_argument("--roster-id")
     parser.add_argument("--username")
     parser.add_argument("--display-name")
@@ -89,6 +110,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow-large-backtest", action="store_true")
     parser.add_argument("--brief-type")
     parser.add_argument("--claim-id")
+    parser.add_argument("--source-url", help="Provenance/source URL for coaching staff jobs.")
+    parser.add_argument(
+        "--history-season", type=int,
+        help="For ingest-coaching-staff: load a season baseline into coaching_staff_history instead of the current table.",
+    )
+    parser.add_argument("--out", help="Local artifact directory for feed jobs.")
+    parser.add_argument(
+        "--publish-feed",
+        action="store_true",
+        help="For coaching-staff-feed: upload the immutable object to Cloud Storage. Never updates the manifest.",
+    )
     parser.add_argument("--log-level", default=os.environ.get("LOG_LEVEL", "INFO"))
     return parser.parse_args(argv)
 
@@ -181,12 +213,25 @@ def start_job_run(client: Any, args: argparse.Namespace, job_run_id: str, starte
         "created_by": os.environ.get("K_SERVICE") or "job_runner",
         "metadata_json": json.dumps(_args_metadata(args), sort_keys=True),
     }
+    # Load job, not insert_rows_json. A streaming insert parks the row in the
+    # streaming buffer for up to ~90 minutes, and BigQuery rejects UPDATE or
+    # DELETE against buffered rows -- which would make finish_job_run fail on
+    # every single run. A load job lands the row in managed storage where the
+    # completion UPDATE works immediately.
     table_id = _table_id(client.project, args.dataset, JOB_RUNS_TABLE)
     if hasattr(client, "load_table_from_json"):
-        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND)
-        job = client.load_table_from_json([row], table_id, job_config=job_config)
-        job.result()
-        errors = getattr(job, "errors", None)
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        )
+        load = client.load_table_from_json([row], table_id, job_config=job_config)
+        # A load job raises on failure rather than returning an error list, which
+        # is the opposite of insert_rows_json.
+        try:
+            load.result()
+        except Exception as exc:
+            raise RuntimeError(f"Failed to insert job run {job_run_id}: {exc}") from exc
+        errors = getattr(load, "errors", None)
         if errors:
             raise RuntimeError(f"Failed to load job run {job_run_id}: {errors}")
         return
@@ -251,16 +296,15 @@ def dispatch_ingest_nflverse(args: argparse.Namespace, client: Any) -> dict[str,
 
 
 def dispatch_ingest_sleeper_news(args: argparse.Namespace, client: Any) -> dict[str, Any]:
-    del client
     if args.dry_run:
-        return {"row_count": 0, "dry_run": True, "skipped": "Sleeper news ingest has no dry-run mode"}
+        return {"row_count": 0, "dry_run": True, "note": "would fetch Sleeper players map unless today's snapshot exists"}
     from src.ingest_news import load_realtime_news
 
-    return load_realtime_news()
+    load_realtime_news(force=args.force, client=client)
+    return {"row_count": 0}
 
 
 def dispatch_ingest_sleeper_league(args: argparse.Namespace, client: Any) -> dict[str, Any]:
-    del client
     if args.dry_run:
         _require(args.league_id, "--league-id is required")
         return {"row_count": 0, "dry_run": True, "league_id": args.league_id}
@@ -276,6 +320,7 @@ def dispatch_ingest_sleeper_league(args: argparse.Namespace, client: Any) -> dic
         display_name=args.display_name,
         team_name=args.team_name,
         dataset_name=args.dataset,
+        client=client,
     )
     return {"row_count": 0, "league_id": args.league_id}
 
@@ -314,6 +359,95 @@ def dispatch_ingest_college_stats(args: argparse.Namespace, client: Any) -> dict
         args.dataset,
     ])
     return {"row_count": 0, "season": args.season}
+
+
+def dispatch_ingest_rookie_scouting(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    del client
+    csv_path = args.csv or _default_rookie_scouting_csv()
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "csv": csv_path}
+    from src.ingest_rookie_scouting import load_rookie_scouting
+
+    table = load_rookie_scouting(
+        csv_path,
+        dataset_name=args.dataset,
+        replace_season=bool(getattr(args, "replace_season", False)),
+    )
+    return {"row_count": getattr(table, "num_rows", 0) if table is not None else 0}
+
+
+def dispatch_detect_player_changes(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.detect_player_changes import detect_player_changes
+
+    return detect_player_changes(
+        dataset_id=args.dataset,
+        client=client,
+        fetch_news=not args.skip_news,
+        dry_run=args.dry_run,
+    )
+
+
+def dispatch_ingest_coaching_staff(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.ingest_coaching_staff import DEFAULT_SOURCE_URL, load_coaching_history, load_coaching_staff
+
+    if args.history_season:
+        csv_path = args.csv or os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "data", f"coaching_staff_{args.history_season}.csv"
+        )
+        if args.dry_run:
+            return {"row_count": 0, "dry_run": True, "csv": csv_path, "season": args.history_season}
+        return load_coaching_history(csv_path, args.history_season, dataset_name=args.dataset, client=client)
+
+    csv_path = args.csv or _default_coaching_staff_csv()
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "csv": csv_path}
+    return load_coaching_staff(
+        csv_path,
+        dataset_name=args.dataset,
+        source_url=args.source_url or DEFAULT_SOURCE_URL,
+        client=client,
+    )
+
+
+def dispatch_coaching_staff_feed(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.coaching_staff_feed import build_coaching_staff_feed
+
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "note": "would render coaching_staff_current to a JSON feed object"}
+    result = build_coaching_staff_feed(
+        dataset_name=args.dataset,
+        out_dir=args.out,
+        source_url=args.source_url or "",
+        publish=args.publish_feed,
+        client=client,
+    )
+    # The manifest entry is an artifact + log line; return scalars only.
+    return {
+        "row_count": result["row_count"],
+        "object": result["object"],
+        "sha256": result["sha256"],
+        "published": result["published"],
+    }
+
+
+def dispatch_build_situation_layer(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.situation_layer import build_situation_layer
+
+    return build_situation_layer(
+        project_id=args.project,
+        dataset_id=args.dataset,
+        client=client,
+        dry_run=args.dry_run,
+    )
+
+
+def dispatch_situation_feed(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.situation_feed import build_situation_feed
+
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "note": "would render the player situation dataset"}
+    result = build_situation_feed(dataset_name=args.dataset, out_dir=args.out, client=client)
+    return {"row_count": result["row_count"], "object": result["object"], "sha256": result["sha256"]}
 
 
 def dispatch_materialize_analytics(args: argparse.Namespace, client: Any) -> dict[str, Any]:
@@ -613,6 +747,12 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "ingest-context-events": dispatch_ingest_context_events,
     "ingest-market-values": dispatch_ingest_market_values,
     "ingest-college-stats": dispatch_ingest_college_stats,
+    "ingest-rookie-scouting": dispatch_ingest_rookie_scouting,
+    "detect-player-changes": dispatch_detect_player_changes,
+    "ingest-coaching-staff": dispatch_ingest_coaching_staff,
+    "coaching-staff-feed": dispatch_coaching_staff_feed,
+    "build-situation-layer": dispatch_build_situation_layer,
+    "situation-feed": dispatch_situation_feed,
     "materialize-analytics": dispatch_materialize_analytics,
     "generate-pigskin-rankings": dispatch_generate_pigskin_rankings,
     "generate-evidence-packets": dispatch_generate_evidence_packets,
@@ -694,8 +834,16 @@ def _current_season() -> int:
     return datetime.now(timezone.utc).year
 
 
+def _default_coaching_staff_csv() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "coaching_staff.csv")
+
+
 def _default_context_csv() -> str:
     return os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "context_events.csv")
+
+
+def _default_rookie_scouting_csv() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "sample_rookie_scouting.csv")
 
 
 def main(argv: list[str] | None = None) -> None:

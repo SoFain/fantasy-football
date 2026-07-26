@@ -25,8 +25,14 @@ class FakeClient:
         self.query_error = query_error
 
     def insert_rows_json(self, table_id, rows):
+        raise AssertionError(
+            "job runs must be written with a load job; a streaming insert makes "
+            "the completion UPDATE fail against the streaming buffer"
+        )
+
+    def load_table_from_json(self, rows, table_id, job_config=None):
         self.insert_calls.append((table_id, rows))
-        return []
+        return FakeJob()
 
     def query(self, sql, job_config=None):
         self.query_calls.append((sql, job_config))

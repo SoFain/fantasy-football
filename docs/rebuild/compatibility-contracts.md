@@ -4,18 +4,18 @@ This document indexes the compatibility-contract layer created from the rebuild 
 
 Most contracts are documentation and placeholder DDL only. `compat_trade_player_history`, `compat_player_profiles_current`, `compat_sleeper_watch_candidates`, `compat_trade_assets_current`, `compat_viewer_team_context`, `llm_player_context_packet`, trade review packet tables, and segment packet tables have been promoted to production compatibility objects. Selected Streamlit reads are now wired behind default-off compatibility flags. Default runtime behavior is unchanged.
 
-Streamlit rollout details live in [docs/rebuild/streamlit-compat-rollout.md](streamlit-compat-rollout.md).
+The retired Streamlit rollout is recorded in [docs/rebuild/streamlit-compat-rollout.md](streamlit-compat-rollout.md).
 
 ## Contract Index
 
 | Object | Contract | Placeholder SQL | Replaces |
 | --- | --- | --- | --- |
-| `compat_player_profiles_current` | [contract](../../bigquery/contracts/compat_player_profiles_current.md) | [view](../../bigquery/views/compat_player_profiles_current.sql), [migration](../../bigquery/migrations/0008__promote_compat_player_profiles_current.sql) | `fetch_player_profiles_data`, `app.py:1090-1275` |
-| `compat_sleeper_watch_candidates` | [contract](../../bigquery/contracts/compat_sleeper_watch_candidates.md) | [view](../../bigquery/views/compat_sleeper_watch_candidates.sql), [migration](../../bigquery/migrations/0011__promote_compat_sleeper_watch_candidates.sql) | `render_sleeper_watch_segment`, `app.py:788-918` |
-| `compat_trade_assets_current` | [contract](../../bigquery/contracts/compat_trade_assets_current.md) | [view](../../bigquery/views/compat_trade_assets_current.sql), [migration](../../bigquery/migrations/0010__promote_compat_trade_assets_current.sql) | `render_value_analyzer.load_market_players`, `app.py:2761-2769` |
-| `compat_trade_player_history` | [contract](../../bigquery/contracts/compat_trade_player_history.md) | [view](../../bigquery/views/compat_trade_player_history.sql), [migration](../../bigquery/migrations/0007__promote_compat_trade_player_history.sql) | `render_value_analyzer.query_player_history`, `app.py:3147-3155` |
-| `compat_viewer_team_context` | [contract](../../bigquery/contracts/compat_viewer_team_context.md) | [view](../../bigquery/views/compat_viewer_team_context.sql), [migration](../../bigquery/migrations/0014__extend_compat_viewer_team_context_packet.sql), [migration](../../bigquery/migrations/0015__filter_compat_viewer_team_context_packets.sql) | `get_sleeper_viewer_team_context`, `app.py:3390-3570` |
-| `llm_player_context_packet` | [contract](../../bigquery/contracts/llm_player_context_packet.md) | [view](../../bigquery/views/llm_player_context_packet.sql), [migration](../../bigquery/migrations/0009__build_llm_player_context_packet.sql) | Pigskin SQL tool path, `app.py:2525-2796` |
+| `compat_player_profiles_current` | [contract](../../bigquery/contracts/compat_player_profiles_current.md) | [view](../../bigquery/views/compat_player_profiles_current.sql), [migration](../../bigquery/migrations/0008__promote_compat_player_profiles_current.sql) | `fetch_player_profiles_data` |
+| `compat_sleeper_watch_candidates` | [contract](../../bigquery/contracts/compat_sleeper_watch_candidates.md) | [view](../../bigquery/views/compat_sleeper_watch_candidates.sql), [migration](../../bigquery/migrations/0011__promote_compat_sleeper_watch_candidates.sql) | `render_sleeper_watch_segment` |
+| `compat_trade_assets_current` | [contract](../../bigquery/contracts/compat_trade_assets_current.md) | [view](../../bigquery/views/compat_trade_assets_current.sql), [migration](../../bigquery/migrations/0010__promote_compat_trade_assets_current.sql) | `render_value_analyzer.load_market_players` |
+| `compat_trade_player_history` | [contract](../../bigquery/contracts/compat_trade_player_history.md) | [view](../../bigquery/views/compat_trade_player_history.sql), [migration](../../bigquery/migrations/0007__promote_compat_trade_player_history.sql) | `render_value_analyzer.query_player_history` |
+| `compat_viewer_team_context` | [contract](../../bigquery/contracts/compat_viewer_team_context.md) | [view](../../bigquery/views/compat_viewer_team_context.sql), [migration](../../bigquery/migrations/0014__extend_compat_viewer_team_context_packet.sql), [migration](../../bigquery/migrations/0015__filter_compat_viewer_team_context_packets.sql) | `get_sleeper_viewer_team_context` |
+| `llm_player_context_packet` | [contract](../../bigquery/contracts/llm_player_context_packet.md) | [view](../../bigquery/views/llm_player_context_packet.sql), [migration](../../bigquery/migrations/0009__build_llm_player_context_packet.sql) | Pigskin context tool path via `src/pigskin_context_tools.py` |
 | `analytics_pigskin_rankings` and `analytics_pigskin_rankings_history` | [contract](../../bigquery/contracts/analytics_pigskin_rankings.md) | [migration](../../bigquery/migrations/0004__add_model_run_id_to_pigskin_rankings.sql) | current and historical Pigskin ranking outputs |
 | `player_identity_bridge` | [contract](../../bigquery/contracts/player_identity_bridge.md) | [migration](../../bigquery/migrations/0005__player_identity_bridge.sql) | canonical player ID bridge for future marts |
 | `dim_players_current` | [contract](../../bigquery/contracts/dim_players_current.md) | [migration](../../bigquery/migrations/0005__player_identity_bridge.sql) | current player dimension for UI and evidence packets |
@@ -65,7 +65,7 @@ Streamlit rollout details live in [docs/rebuild/streamlit-compat-rollout.md](str
 ## Compatibility Rules
 
 1. Existing tables are not renamed.
-2. Current Streamlit behavior is unchanged unless a default-off compatibility flag is explicitly enabled.
+2. These objects are the only read path; the legacy UI paths they replaced no longer exist.
 3. Compatibility objects should hide raw/source tables from the UI and LLM.
 4. `ranking_version` remains available until the UI fully migrates to `model_run_id`.
 5. Every compatibility object must include `source_freshness_json` or a TODO placeholder.
@@ -110,7 +110,7 @@ The mart is refreshed by [src/materialize_sleeper_watch.py](../../src/materializ
 - Sleeper snapshots only inside the controlled materializer layer
 - `realtime_player_news`
 
-Helper access lives in [src/sleeper_watch.py](../../src/sleeper_watch.py). Streamlit wiring is available behind `USE_COMPAT_SLEEPER_WATCH=false`.
+Helper access lives in [src/sleeper_watch.py](../../src/sleeper_watch.py).
 
 The compatibility view does not expose direct raw `weekly_metrics`, `sleeper_rosters`, or `sleeper_roster_players` access to UI or Pigskin.
 
@@ -129,7 +129,7 @@ The mart is refreshed by [src/materialize_trade_assets.py](../../src/materialize
 - `compat_trade_player_history`
 - `analytics_fraud_watch`
 
-Helper access lives in [src/trade_assets.py](../../src/trade_assets.py). Streamlit wiring is available behind `USE_COMPAT_TRADE_ASSETS=false`.
+Helper access lives in [src/trade_assets.py](../../src/trade_assets.py).
 
 The compatibility view does not expose direct raw `market_values` access to UI or Pigskin.
 
@@ -162,7 +162,7 @@ The mart is refreshed by [src/materialize_viewer_team_context.py](../../src/mate
 - `compat_trade_player_history`
 - `llm_player_context_packet`
 
-Helper access lives in [src/viewer_team_context.py](../../src/viewer_team_context.py). Streamlit wiring is available behind `USE_COMPAT_VIEWER_TEAM_CONTEXT=false`.
+Helper access lives in [src/viewer_team_context.py](../../src/viewer_team_context.py).
 
 The compatibility view only exposes materialized packet rows where `packet_json IS NOT NULL`; older legacy rows can remain in the backing mart until a future cleanup migration.
 
@@ -196,7 +196,7 @@ The helper reads only curated compatibility objects:
 - `compat_trade_player_history`
 - `compat_player_profiles_current`
 
-It does not call the LLM, does not wire Streamlit, and does not expose raw market, raw weekly, or raw Sleeper sources.
+It does not call the LLM, and does not expose raw market, raw weekly, or raw Sleeper sources.
 
 Segment packet infrastructure is now documented:
 
@@ -212,7 +212,7 @@ The helper reads only curated compatibility objects:
 - `compat_sleeper_watch_candidates`
 - `model_runs`
 
-It does not call the LLM, does not wire Streamlit, and does not expose raw weekly, play, NGS, FTN, snap, injury, or raw Sleeper sources.
+It does not call the LLM, and does not expose raw weekly, play, NGS, FTN, snap, injury, or raw Sleeper sources.
 
 Projection output infrastructure is now documented:
 
@@ -223,7 +223,7 @@ Projection output infrastructure is now documented:
 - The helper lives in [src/projection_engine.py](../../src/projection_engine.py).
 - The operating model is documented in [docs/rebuild/projection-engine-v1.md](projection-engine-v1.md).
 
-The helper reads only curated compatibility objects and packet outputs. It does not call the LLM, does not wire Streamlit, and does not expose raw weekly, play, NGS, FTN, snap, injury, or raw Sleeper sources.
+The helper reads only curated compatibility objects and packet outputs. It does not call the LLM, and does not expose raw weekly, play, NGS, FTN, snap, injury, or raw Sleeper sources.
 
 Meatbag Claim Ledger infrastructure is now documented:
 
@@ -234,7 +234,7 @@ Meatbag Claim Ledger infrastructure is now documented:
 - The helper lives in [src/claim_ledger.py](../../src/claim_ledger.py).
 - The operating model is documented in [docs/rebuild/meatbag-claim-ledger.md](meatbag-claim-ledger.md).
 
-The helper is manual-entry only. It does not call the LLM, scrape media, wire Streamlit, or expose Pigskin SQL access.
+The helper is manual-entry only. It does not call the LLM, scrape media, or expose Pigskin SQL access.
 
 Claim Grading V1 infrastructure is now documented:
 
@@ -244,7 +244,7 @@ Claim Grading V1 infrastructure is now documented:
 - The helper lives in [src/claim_grading.py](../../src/claim_grading.py).
 - The operating model is documented in [docs/rebuild/claim-grading-v1.md](claim-grading-v1.md).
 
-The helper reads only curated outputs and marts. It does not call the LLM, scrape media, wire Streamlit, or expose raw source tables.
+The helper reads only curated outputs and marts. It does not call the LLM, scrape media, or expose raw source tables.
 
 Content Brief Orchestrator infrastructure is now documented:
 
@@ -254,7 +254,7 @@ Content Brief Orchestrator infrastructure is now documented:
 - The helper lives in [src/content_briefs.py](../../src/content_briefs.py).
 - The operating model is documented in [docs/rebuild/content-brief-orchestrator.md](content-brief-orchestrator.md).
 
-The helper reads only curated packets and outputs. It does not call the LLM, wire Streamlit, create Firebase artifacts, or expose source tables.
+The helper reads only curated packets and outputs. It does not call the LLM, create Firebase artifacts, or expose source tables.
 
 `model_runs` is a table migration.
 

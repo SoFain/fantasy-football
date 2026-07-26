@@ -48,4 +48,4 @@ Each row should include:
 
 ## Runtime Status
 
-No Streamlit runtime behavior is wired to this table yet.
+No consumer reads this table yet.

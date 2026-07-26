@@ -1,6 +1,6 @@
 # Market And Consensus Baselines
 
-This document defines the first source-agnostic outside-baseline layer for AI vs. Meatbags.
+This document defines the first source-agnostic outside-baseline layer for Pigskin.
 
 ## Status
 

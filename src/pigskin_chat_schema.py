@@ -61,7 +61,7 @@ def render_pigskin_chat_schema(dataset_name: str = "fantasy_football_brain") -> 
     - {table("analytics_external_context_search_results")}
 
     - Table: {table("analytics_player_weekly_truth")} (PRIMARY PLAYER EVIDENCE TABLE)
-      Description: Derived AI vs Vibes player truth table with fantasy output, usage, red-zone role, EPA, recent trend, opportunity scoring, efficiency scoring, and criticism-ready flags.
+      Description: Derived Pigskin player truth table with fantasy output, usage, red-zone role, EPA, recent trend, opportunity scoring, efficiency scoring, and criticism-ready flags.
       Columns include: `season`, `week`, `player_id`, `player_name`, `player_full_name`, `position`, `team`, `current_team`, `roster_status`, `team_changed_since_stats`, `primary_qb_name`, `primary_qb_epa_per_target`, `primary_qb_target_share`, `qbs_targeted_by`, `opponent_team`, `fantasy_points_ppr`, `targets`, `receptions`, `carries`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, `rushing_epa`, `receiving_epa`, `total_epa`, `red_zone_targets`, `red_zone_carries`, `red_zone_touches`, `prior_week_ppr`, `ppr_delta`, `rolling_3_week_ppr`, `rolling_3_week_targets`, `rolling_3_week_carries`, `opportunity_score`, `efficiency_score`, `role_quality_score`, `points_over_role_score`, `role_fragility_score`, `analytical_grade`, `touchdown_dependent`, `box_score_trap`, `target_earner`, `empty_volume`, `usage_warning`, `points_outran_role`, `thin_role_big_week`, `fragile_role`, `role_backed_production`, and `analytical_verdict`.
       `team` is the historical team for that stat week. `current_team` is the latest known roster team. If `team_changed_since_stats` is true, do not describe the player as currently on `team`.
 

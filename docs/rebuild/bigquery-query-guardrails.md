@@ -2,10 +2,9 @@
 
 Source of truth: `docs/CODEX_PROJECT_CONTEXT.md`.
 
-This repo now has a shared query guardrail layer for Streamlit and legacy server-side SQL paths:
+This repo has a shared query guardrail layer for server-side SQL paths:
 
 - Wrapper module: `src/bigquery_guardrails.py`
-- Cached Streamlit helper: `app.py::execute_bq_cached`
 - Curated chat schema: `src/pigskin_chat_schema.py`
 - Pigskin context tools: `src/pigskin_context_tools.py`
 
@@ -89,9 +88,7 @@ The extractor ignores simple CTE names so allowed queries using `WITH latest AS 
 
 Current representative call sites:
 
-- `app.py::execute_bq_cached` routes normal cached Streamlit queries through `query_to_dataframe()`.
 - Pigskin chat uses `execute_pigskin_context_tool()` from `src/pigskin_context_tools.py`.
-- `app.py::get_persisted_last_success` routes a parameterized admin status query through `query_to_dataframe()`.
 
 This is intentionally not a full query rewrite. Existing materialization, migration, and ingestion code should move to this wrapper only when the work is scoped and validated.
 
@@ -121,7 +118,7 @@ Recommended checks:
 ```powershell
 .\venv\Scripts\python.exe -m unittest tests.test_model_runs
 .\venv\Scripts\python.exe -m unittest tests.test_bigquery_guardrails
-.\venv\Scripts\python.exe -m py_compile app.py src\bigquery_guardrails.py src\pigskin_chat_schema.py tests\test_bigquery_guardrails.py
+.\venv\Scripts\python.exe -m py_compile src\bigquery_guardrails.py src\pigskin_chat_schema.py tests\test_bigquery_guardrails.py
 .\venv\Scripts\python.exe scripts\run_bigquery_migrations.py --dry-run
 .\venv\Scripts\python.exe scripts\run_bigquery_migrations.py --list-pending
 ```

@@ -1,4 +1,4 @@
-"""Deterministic show content brief builders for AI vs. Meatbags.
+"""Deterministic show content brief builders for Pigskin.
 
 This module assembles compact, source-aware briefs from curated packet and
 output tables. It does not call LLMs, query source tables, or create UI
@@ -1119,7 +1119,7 @@ def _round(value: float | None) -> float | None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build deterministic AI vs. Meatbags content briefs.")
+    parser = argparse.ArgumentParser(description="Build deterministic Pigskin content briefs.")
     parser.add_argument("--brief-type", required=True, choices=sorted(SUPPORTED_BRIEF_TYPES))
     parser.add_argument("--season", type=int, required=True)
     parser.add_argument("--week", type=int)

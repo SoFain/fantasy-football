@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from src import cloud_run_jobs
@@ -134,14 +133,6 @@ class CloudRunJobsTests(unittest.TestCase):
         self.assertFalse(cloud_run_jobs.data_ops_job_trigger_allowed({}))
         self.assertFalse(cloud_run_jobs.should_use_cloud_run_jobs_for_data_ops({}))
 
-    def test_streamlit_helper_keeps_legacy_path_when_flag_false(self):
-        app_source = Path("app.py").read_text(encoding="utf-8")
-
-        self.assertIn("render_cloud_run_jobs_data_ops_panel()", app_source)
-        self.assertIn("Cloud Run Job execution is not active", app_source)
-        self.assertIn("run_subprocess_live(cmd_args", app_source)
-        self.assertFalse(cloud_run_jobs.should_use_cloud_run_jobs_for_data_ops({}))
-
     def test_trigger_requires_explicit_allow_flag(self):
         with patch.dict(os.environ, {
             "USE_CLOUD_RUN_JOBS_FOR_DATA_OPS": "true",
@@ -221,7 +212,7 @@ class CloudRunJobsTests(unittest.TestCase):
                 client=client,
             )
 
-        self.assertTrue(job_run_id.startswith("streamlit-validate-warehouse-"))
+        self.assertTrue(job_run_id.startswith("cli-validate-warehouse-"))
         self.assertEqual(len(client.load_calls), 1)
         self.assertEqual(client.load_calls[0][0], "test-project.fantasy_football_brain.cloud_run_job_runs")
         self.assertEqual(client.insert_calls, [])

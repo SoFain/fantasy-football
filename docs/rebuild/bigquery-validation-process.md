@@ -1,4 +1,4 @@
-# BigQuery Validation Process
+﻿# BigQuery Validation Process
 
 This document defines how warehouse validation SQL is written, discovered, run, and reported for the AI vs. Meatbags rebuild.
 

@@ -1,23 +1,20 @@
 # Cloud Run Operating Model
 
-This is the long-term operating model for the AI vs. Meatbags fantasy football platform.
+This is the long-term operating model for the Pigskin fantasy football platform.
 
-The platform stays on Cloud Run, BigQuery, Cloud Run Jobs, Cloud Scheduler, Cloud Storage, and Secret Manager. Firebase is not part of the target architecture unless the project explicitly reopens that decision.
+The platform runs on Cloud Run Jobs, BigQuery, Cloud Scheduler, Cloud Storage, and Secret Manager. Firebase is not part of the target architecture unless the project explicitly reopens that decision.
 
-## Cloud Run Service Responsibilities
+## No Cloud Run Service
 
-The Cloud Run service hosts the Streamlit admin/UI app.
+There is no Cloud Run service. The Streamlit admin/UI app that occupied that role was retired, and nothing replaced it.
 
-Responsibilities:
+This is the intended end state of the transition this document originally described, reached by deleting the UI rather than by migrating it. Consequences:
 
-- Render the dashboard and admin workflows.
-- Read precomputed BigQuery marts, output tables, and compatibility views.
-- Provide user-triggered controls for safe diagnostics and job kickoff.
-- Display warehouse status, job status, ranking outputs, segment outputs, and Pigskin chat responses.
-- Use Secret Manager-provided environment variables for secrets.
-- Keep request-time work short and bounded.
+- There is no HTTP listener, no request path, and no request-time work to bound.
+- The image has a single entrypoint, `src/job_runner.py`, invoked per execution with a job name.
+- Adding a service back is a platform decision that needs an explicit ADR, not an incremental change.
 
-The Cloud Run service should not own long-running ingestion, materialization, ranking generation, evidence packet generation, backtests, or scheduled workers once those jobs have Cloud Run Job equivalents.
+If a consumer surface is needed later, it reads the compatibility objects and packets documented in [ui-query-debt-register.md](ui-query-debt-register.md). It does not query raw tables, and it does not re-embed job execution.
 
 ## Cloud Run Jobs Responsibilities
 
@@ -109,40 +106,13 @@ Current and future examples:
 
 Cloud Run services and jobs should receive secrets through environment bindings or mounted secrets, not checked-in files.
 
-## What Remains Temporarily in Streamlit
+## Completed: Streamlit Retirement
 
-The current Streamlit app still owns some work that should later move.
+Everything this document previously listed as "temporarily in Streamlit" or "must eventually move out of Streamlit" is done. Ingestion, Sleeper refreshes, viewer-team ingestion, college and market ingestion, materialization, ranking generation, evidence packets, projections, backtests, warehouse validations, and external verification are all named jobs in `src/job_runner.py`.
 
-Temporary Streamlit responsibilities:
+One item did not migrate. The Pigskin chat interface was deleted with the UI; the curated tool layer survives in `src/pigskin_context_tools.py` and can back a future surface.
 
-- Manual job kickoff buttons.
-- Default-off Cloud Run Job preview and trigger controls.
-- Basic dashboard runtime status.
-- Current Pigskin chat interface.
-- Current Data Ops controls.
-- Current local subprocess execution for ingestion and ranking jobs.
-- Current UI-level BigQuery reads.
-
-This is acceptable during transition, but it is not the final operating model.
-
-## What Must Eventually Move Out of Streamlit
-
-Move these out of Streamlit request handling:
-
-- Main statistics ingestion.
-- Sleeper refreshes.
-- Sleeper viewer-team ingestion.
-- College and market data ingestion.
-- Materialization.
-- Pigskin ranking generation.
-- Evidence packet generation.
-- Projection generation.
-- Backtests.
-- Warehouse validations.
-- External verification searches.
-- Any BigQuery mutation other than narrow admin metadata.
-
-Streamlit should become a dashboard and control surface, not the job execution runtime.
+The rookie scouting CSV upload became the `ingest-rookie-scouting` job rather than disappearing with the UI.
 
 ## Job Naming Conventions
 
@@ -206,9 +176,9 @@ Job metadata:
 - `APP_VERSION`
 - `APP_COMMIT`
 - `K_REVISION`
-- `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS`: default false. Enables the Streamlit Cloud Run Jobs control surface.
+- `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS`: default false. Enables live Cloud Run Job dispatch instead of local execution.
 - `CLOUD_RUN_JOBS_ENABLED`: optional global Cloud Run Jobs switch.
-- `DATA_OPS_ALLOW_JOB_TRIGGER`: default false. Required before Streamlit can trigger a Cloud Run Job.
+- `DATA_OPS_ALLOW_JOB_TRIGGER`: default false. Required before a Cloud Run Job can actually be triggered.
 - `CLOUD_RUN_REGION`: Cloud Run Jobs region. Defaults to `us-central1`.
 - `CLOUD_RUN_PROJECT`: Cloud Run Jobs project override.
 - `CLOUD_RUN_JOB_SERVICE_ACCOUNT`: deployment-time service account hint for job definitions.
@@ -216,27 +186,26 @@ Job metadata:
 
 ## Deployment Assumptions
 
-- The Streamlit dashboard remains a Cloud Run service.
 - Python jobs are packaged from the same repo image unless a later split is justified.
 - Cloud Build can build the shared image.
 - Cloud Run Jobs use the same image with job-specific commands.
 - Service accounts should use least privilege once migrations stabilize.
 - Secrets are injected through Secret Manager.
 - BigQuery project defaults should continue to follow `src/load.py`.
-- Streamlit Cloud Run Job triggers should remain explicit user actions and should be logged to `cloud_run_job_runs`.
+- Job triggers should remain explicit operator actions and should be logged to `cloud_run_job_runs`.
 
 ## Cost-Control Assumptions
 
-- Precompute marts instead of running repeated raw scans from Streamlit or Pigskin chat.
+- Precompute marts instead of running repeated raw scans.
 - Partition and cluster large BigQuery tables.
 - Require partition filters in ad hoc diagnostic queries.
 - Keep external verification behind daily and per-query limits.
 - Store large artifacts in Cloud Storage instead of duplicating them in BigQuery.
 - Prefer scheduled incremental jobs over full rebuilds when source data supports it.
 - Keep `DATA_OPS_ALLOW_JOB_TRIGGER=false` outside controlled operator sessions.
-- Use dry-run previews before enabling Streamlit-triggered Cloud Run Jobs.
+- Use dry-run previews before enabling live Cloud Run Job triggers.
 - Keep Cloud Run Job memory, CPU, and timeout settings job-specific.
-- Keep LLM calls tied to evidence packets and ranking runs, not repeated uncached dashboard renders.
+- Keep LLM calls tied to evidence packets and ranking runs.
 
 ## Future Sprint Guidance
 
@@ -244,10 +213,9 @@ Future sprint docs should reference this file for platform placement decisions.
 
 Default placement:
 
-- UI and controls: Cloud Run service.
 - Long-running Python work: Cloud Run Jobs.
 - Schedules: Cloud Scheduler.
 - Analytical state: BigQuery.
 - Large files and exports: Cloud Storage.
 - Secrets: Secret Manager.
-- Optional internal APIs: Cloud Run service, likely FastAPI, only when they reduce Streamlit complexity or make LLM access safer.
+- Optional internal APIs: a Cloud Run service, likely FastAPI, only with an explicit ADR reopening the no-service decision.

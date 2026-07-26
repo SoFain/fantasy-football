@@ -1,4 +1,4 @@
-"""Feature-flagged Cloud Run Jobs helpers for Streamlit Data Ops."""
+"""Feature-flagged Cloud Run Jobs helpers for warehouse job execution."""
 
 from __future__ import annotations
 
@@ -428,7 +428,7 @@ def record_cloud_run_job_trigger(
     client = client or bq.Client(project=get_cloud_run_project())
     dataset_id = get_bigquery_dataset()
     normalized_args = validate_job_args(job_name, args)
-    job_run_id = f"streamlit-{job_name}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+    job_run_id = f"cli-{job_name}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     row = {
         "job_run_id": job_run_id,
@@ -455,11 +455,11 @@ def record_cloud_run_job_trigger(
         "source_freshness_snapshot_id": None,
         "error_message": error_message,
         "log_url": None,
-        "created_by": "streamlit_data_ops",
+        "created_by": "data_ops_cli",
         "metadata_json": json.dumps({
             "args": redact_payload(normalized_args),
             "command": command_to_string(command),
-            "source": "streamlit_data_ops",
+            "source": "data_ops_cli",
         }, sort_keys=True),
     }
     table_id = bigquery_table_id(client.project, dataset_id, JOB_RUNS_TABLE)

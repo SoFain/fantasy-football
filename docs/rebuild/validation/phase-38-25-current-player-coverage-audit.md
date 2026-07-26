@@ -23,8 +23,8 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | half_ppr | WR | 100 | 100 | PASS |
 | half_ppr | TE | 35 | 35 | PASS |
 
-- Live Sleeper fetch: `2026-07-26T11:30:18.111319+00:00`.
-- BigQuery Sleeper snapshot: `2026-07-26 11:02:09.827171+00:00` (0 hours old).
+- Live Sleeper fetch: `2026-07-26T13:36:07.511900+00:00`.
+- BigQuery Sleeper snapshot: `2026-07-26 11:02:09.827171+00:00` (2 hours old).
 - BigQuery 72-hour safety status: `CURRENT`.
 - PPR versus Half-PPR presence mismatches: `0`.
 - Depth-order-1 current players missing at least one redraft board: `12`.
