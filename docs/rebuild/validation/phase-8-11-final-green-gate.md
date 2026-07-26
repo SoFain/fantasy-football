@@ -35,18 +35,18 @@ Resolved.
 
 Evidence:
 
-- `app.py:2425` contains the exact marker `### Context Tool Protocol ###`.
-- `app.py:2426` instructs Pigskin to use only provided parameterized context tools for warehouse-backed evidence.
-- `app.py:2427` instructs Pigskin that it cannot write or execute SQL, request table access, invent table names, or describe unavailable warehouse tables as usable data.
-- `app.py:2430` instructs Pigskin to say curated data is unavailable when a tool returns no rows.
-- `app.py:2431` instructs Pigskin not to invent stats, injury claims, rankings, transactions, source freshness, or evidence.
-- `app.py:2482` mandates curated context tools before player, ranking, trade, projection, roster, or causal claims.
+- `app.py:cluster_reddit_topics` contains the exact marker `### Context Tool Protocol ###`.
+- `app.py:cluster_reddit_topics` instructs Pigskin to use only provided parameterized context tools for warehouse-backed evidence.
+- `app.py:cluster_reddit_topics` instructs Pigskin that it cannot write or execute SQL, request table access, invent table names, or describe unavailable warehouse tables as usable data.
+- `app.py:cluster_reddit_topics` instructs Pigskin to say curated data is unavailable when a tool returns no rows.
+- `app.py:cluster_reddit_topics` instructs Pigskin not to invent stats, injury claims, rankings, transactions, source freshness, or evidence.
+- `app.py:render_reddit_topic_scout` mandates curated context tools before player, ranking, trade, projection, roster, or causal claims.
 
 ## Pigskin Visible Tool Status
 
 Resolved.
 
-Allowed model-visible tools are defined in `src/pigskin_context_tools.py:43-156`:
+Allowed model-visible tools are defined in `src/pigskin_context_tools.py:get_pigskin_context_tool_declarations`:
 
 - `get_player_context_packet`
 - `search_players`
@@ -63,8 +63,8 @@ Blocked status:
 - No model-visible tool accepts an arbitrary table name.
 - No model-visible tool accepts arbitrary WHERE clauses.
 - Internal query helpers use fixed table names and BigQuery query parameters.
-- `_table_id` validates trusted project, dataset, and internal table identifiers at `src/pigskin_context_tools.py:680-687`.
-- `_query_records` uses `bigquery.QueryJobConfig` with scalar query parameters and a bytes cap at `src/pigskin_context_tools.py:617-631`.
+- `_table_id` validates trusted project, dataset, and internal table identifiers at `src/pigskin_context_tools.py:_table_id`.
+- `_query_records` uses `bigquery.QueryJobConfig` with scalar query parameters and a bytes cap at `src/pigskin_context_tools.py:_query_records`.
 
 ## Raw Source Exposure Status
 
@@ -88,9 +88,9 @@ The rendered Pigskin schema contains no blocked raw/source table names from the 
 
 Evidence:
 
-- `src/pigskin_chat_schema.py:15-41` defines the blocked table set.
-- `tests/test_pigskin_chat_schema.py:46-66` verifies blocked tables are absent from the rendered schema and the app prompt segment.
-- `tests/test_pigskin_context_tools.py:31-43` verifies tool declarations do not expose SQL or raw tables and that `execute_bigquery_sql` is rejected.
+- `src/pigskin_chat_schema.py:PIGSKIN_CHAT_BLOCKED_TABLES` defines the blocked table set.
+- `tests/test_pigskin_chat_schema.py:test_rendered_schema_does_not_contain_blocked_tables` verifies blocked tables are absent from the rendered schema and the app prompt segment.
+- `tests/test_pigskin_context_tools.py:test_declarations_do_not_expose_sql_or_raw_tables` verifies tool declarations do not expose SQL or raw tables and that `execute_bigquery_sql` is rejected.
 
 Allowed Pigskin schema tables remain curated analytics/output tables:
 

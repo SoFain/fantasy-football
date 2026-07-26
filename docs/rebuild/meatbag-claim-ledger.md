@@ -18,8 +18,9 @@ This phase does not:
 - Scrape YouTube, TV, podcasts, or articles.
 - Create Firebase artifacts.
 - Alter Pigskin chat.
-- Wire the Streamlit UI.
 - Apply migrations automatically.
+
+Phase 13.4 adds a default-off Streamlit admin UI. See [claim-ledger-ui.md](claim-ledger-ui.md) and [claim-import-format.md](claim-import-format.md).
 
 ## Tables
 
@@ -49,6 +50,16 @@ Use the repo venv on Windows:
 ```powershell
 .\venv\Scripts\python.exe -m src.claim_ledger --create-source --source-id analyst_x --source-name "Analyst X" --source-type youtube --dry-run
 ```
+
+## Streamlit UI
+
+The Claim Ledger UI is behind `USE_CLAIM_LEDGER_UI=false`.
+
+When enabled, it supports source management, manual claim entry, CSV import preview and write, player resolution review, claim board filtering, claim detail inspection, and safe status actions. It does not scrape URLs, call LLMs, or auto-grade claims.
+
+CSV imports are validated before writing and use [src/claim_import.py](../../src/claim_import.py), which writes through the existing `src.claim_ledger` helper functions.
+
+Phase 14.5 added a small draft-only demo import set for workflow testing. See [phase-14-5-claim-ledger-sample-report.md](validation/phase-14-5-claim-ledger-sample-report.md).
 
 ## Status Workflow
 

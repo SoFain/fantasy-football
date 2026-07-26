@@ -11,9 +11,15 @@ from src.compat_flags import (
     USE_COMPAT_TRADE_ASSETS,
     USE_COMPAT_TRADE_PLAYER_HISTORY,
     USE_COMPAT_VIEWER_TEAM_CONTEXT,
+    USE_TRADE_ANALYZER_SCORE_V0,
+    USE_COMPAT_TRADE_PLAYER_SCORE,
+    USE_TRADE_PICK_SCORE_V0,
+    USE_COMPAT_TRADE_PICK_SCORE,
     compat_flag_enabled,
 )
 from src.player_profiles import build_player_profiles_list_query
+from src.trade_player_scores import build_current_trade_player_scores_query
+from src.trade_pick_scores import build_current_trade_pick_scores_query
 
 
 APP_SOURCE = Path("app.py").read_text(encoding="utf-8")
@@ -35,6 +41,9 @@ RAW_SOURCE_TERMS = (
     "sleeper_roster_players",
     "sleeper_lineups",
     "sleeper_available_players",
+    "draft_picks",
+    "college_player_stats",
+    "rookie_scouting_metrics",
 )
 
 
@@ -58,6 +67,10 @@ class StreamlitCompatRolloutTests(unittest.TestCase):
             USE_COMPAT_TRADE_ASSETS: ("use_compat_trade_assets()", "load_compat_trade_assets"),
             USE_COMPAT_TRADE_PLAYER_HISTORY: ("use_compat_trade_player_history()", "query_compat_trade_player_history"),
             USE_COMPAT_VIEWER_TEAM_CONTEXT: ("use_compat_viewer_team_context()", "get_compat_sleeper_viewer_team_context"),
+            USE_TRADE_ANALYZER_SCORE_V0: ("use_trade_analyzer_score_v0()", "use_trade_score_ui()"),
+            USE_COMPAT_TRADE_PLAYER_SCORE: ("use_compat_trade_player_score()", "load_trade_player_scores_current"),
+            USE_TRADE_PICK_SCORE_V0: ("use_trade_pick_score_v0()", "use_trade_pick_score_ui()"),
+            USE_COMPAT_TRADE_PICK_SCORE: ("use_compat_trade_pick_score()", "load_trade_pick_scores_current"),
         }
 
         for flag_name, snippets in expected.items():
@@ -82,6 +95,8 @@ class StreamlitCompatRolloutTests(unittest.TestCase):
             "fetch_compat_sleeper_watch_candidates_data",
             "load_compat_trade_assets",
             "query_compat_trade_player_history",
+            "load_trade_player_scores_current",
+            "load_trade_pick_scores_current",
             "get_compat_sleeper_viewer_team_context",
         )
 
@@ -94,6 +109,25 @@ class StreamlitCompatRolloutTests(unittest.TestCase):
         self.assertIn("compatibility data is unavailable or empty", APP_SOURCE)
         self.assertIn("compatibility context is unavailable", APP_SOURCE)
         self.assertIn("No legacy viewer-team context was mixed into this flagged path.", APP_SOURCE)
+
+    def test_trade_history_staging_marker_is_visible(self):
+        self.assertIn("Trade player history source: compat_trade_player_history", APP_SOURCE)
+        self.assertIn("render_compat_metadata(hist", APP_SOURCE)
+
+    def test_trade_score_ui_is_flag_gated_and_uses_compat_view(self):
+        self.assertIn("Pigskin Trade Score source: compat_trade_player_scores_current", APP_SOURCE)
+        self.assertIn("use_trade_score_ui()", APP_SOURCE)
+        self.assertIn("load_trade_player_scores_current()", APP_SOURCE)
+        self.assertIn("Pigskin Trade Score unavailable", APP_SOURCE)
+
+    def test_pick_score_ui_is_flag_gated_and_uses_compat_view(self):
+        self.assertIn("Pick Score source: compat_trade_pick_scores_current", APP_SOURCE)
+        self.assertIn("use_trade_pick_score_ui()", APP_SOURCE)
+        self.assertIn("load_trade_pick_scores_current()", APP_SOURCE)
+        self.assertIn("Pick Score unavailable", APP_SOURCE)
+        self.assertIn("No compatible pick score row for this scoring context", APP_SOURCE)
+        self.assertIn("trade_pick_slot_display(score)", APP_SOURCE)
+        self.assertIn("Components: market, slot capital, time discount, liquidity, college context, uncertainty.", APP_SOURCE)
 
     def test_player_profiles_list_query_uses_compat_view(self):
         sql, job_config = build_player_profiles_list_query(
@@ -109,6 +143,37 @@ class StreamlitCompatRolloutTests(unittest.TestCase):
             {param.name: param.value for param in job_config.query_parameters}["limit"],
             50,
         )
+
+    def test_trade_player_scores_query_uses_compat_view(self):
+        sql, job_config = build_current_trade_player_scores_query(
+            project_id="fantasy-football-498121",
+            dataset_id="fantasy_football_brain",
+            limit=50,
+        )
+
+        self.assertIn("compat_trade_player_scores_current", sql)
+        for raw_term in RAW_SOURCE_TERMS:
+            self.assertNotIn(raw_term, sql)
+        self.assertEqual(
+            {param.name: param.value for param in job_config.query_parameters}["limit"],
+            50,
+        )
+
+    def test_trade_pick_scores_query_uses_compat_view(self):
+        sql, job_config = build_current_trade_pick_scores_query(
+            project_id="fantasy-football-498121",
+            dataset_id="fantasy_football_brain",
+            source_pick_key="sleeper:PICK:2026:1:1",
+            limit=50,
+        )
+
+        self.assertIn("compat_trade_pick_scores_current", sql)
+        self.assertIn("source_pick_key = @source_pick_key", sql)
+        for raw_term in RAW_SOURCE_TERMS:
+            self.assertNotIn(raw_term, sql)
+        params = {param.name: param.value for param in job_config.query_parameters}
+        self.assertEqual(params["source_pick_key"], "sleeper:PICK:2026:1:1")
+        self.assertEqual(params["limit"], 50)
 
     def _top_level_function_body(self, function_name: str) -> str:
         match = re.search(

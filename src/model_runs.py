@@ -84,31 +84,67 @@ def create_model_run(
     dataset_id = dataset_id or get_bigquery_dataset()
     model_run_id = model_run_id or _generate_model_run_id(run_type, season, week)
 
-    row = {
-        "model_run_id": model_run_id,
-        "run_type": run_type,
-        "model_name": model_name,
-        "model_version": model_version,
-        "prompt_version": prompt_version,
-        "code_version": code_version,
-        "season": season,
-        "week": week,
-        "scoring_profile_id": scoring_profile_id,
-        "league_type_id": league_type_id,
-        "roster_format_id": roster_format_id,
-        "feature_config_version_id": feature_config_version_id,
-        "source_freshness_snapshot_id": source_freshness_snapshot_id,
-        "status": "running",
-        "created_by": created_by,
-        "created_at": _utc_timestamp(),
-        "completed_at": None,
-        "error_message": None,
-        "notes": notes,
-    }
-
-    errors = client.insert_rows_json(_table_id(client, dataset_id, MODEL_RUNS_TABLE), [row])
-    if errors:
-        raise RuntimeError(f"Failed to insert model run {model_run_id}: {errors}")
+    sql = f"""
+    INSERT INTO `{_table_id(client, dataset_id, MODEL_RUNS_TABLE)}` (
+        model_run_id,
+        run_type,
+        model_name,
+        model_version,
+        prompt_version,
+        code_version,
+        season,
+        week,
+        scoring_profile_id,
+        league_type_id,
+        roster_format_id,
+        feature_config_version_id,
+        source_freshness_snapshot_id,
+        status,
+        created_by,
+        created_at,
+        completed_at,
+        error_message,
+        notes
+    )
+    VALUES (
+        @model_run_id,
+        @run_type,
+        @model_name,
+        @model_version,
+        @prompt_version,
+        @code_version,
+        @season,
+        @week,
+        @scoring_profile_id,
+        @league_type_id,
+        @roster_format_id,
+        @feature_config_version_id,
+        @source_freshness_snapshot_id,
+        'running',
+        @created_by,
+        CURRENT_TIMESTAMP(),
+        NULL,
+        NULL,
+        @notes
+    )
+    """
+    client.query(sql, job_config=_job_config([
+        ("model_run_id", "STRING", model_run_id),
+        ("run_type", "STRING", run_type),
+        ("model_name", "STRING", model_name),
+        ("model_version", "STRING", model_version),
+        ("prompt_version", "STRING", prompt_version),
+        ("code_version", "STRING", code_version),
+        ("season", "INT64", season),
+        ("week", "INT64", week),
+        ("scoring_profile_id", "STRING", scoring_profile_id),
+        ("league_type_id", "STRING", league_type_id),
+        ("roster_format_id", "STRING", roster_format_id),
+        ("feature_config_version_id", "STRING", feature_config_version_id),
+        ("source_freshness_snapshot_id", "STRING", source_freshness_snapshot_id),
+        ("created_by", "STRING", created_by),
+        ("notes", "STRING", notes),
+    ])).result()
     return model_run_id
 
 

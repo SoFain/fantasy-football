@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 
 from src import content_briefs
 
@@ -29,6 +30,23 @@ class FakeClient:
     def insert_rows_json(self, table_id, rows):
         self.insert_calls.append((table_id, rows))
         return []
+
+
+class FakeLoadJob:
+    errors = None
+
+    def result(self):
+        return []
+
+
+class FakeLoadClient(FakeClient):
+    def __init__(self, rows=None):
+        super().__init__(rows=rows)
+        self.load_calls = []
+
+    def load_table_from_json(self, rows, table_id, job_config=None):
+        self.load_calls.append((table_id, rows, job_config))
+        return FakeLoadJob()
 
 
 def fraud_row(**overrides):
@@ -228,6 +246,21 @@ class ContentBriefTests(unittest.TestCase):
         self.assertNotIn("sleeper_roster_players", sql)
         self.assertNotIn("market_values", sql)
 
+    def test_ranking_loader_dedupes_player_rows(self):
+        client = FakeClient(rows=[])
+
+        content_briefs.build_weekly_streamers_brief(
+            season=2025,
+            week=1,
+            client=client,
+            dataset_id="test_dataset",
+        )
+
+        sql = client.query_calls[0][0]
+        self.assertIn("projection_rankings_current", sql)
+        self.assertIn("QUALIFY ROW_NUMBER()", sql)
+        self.assertIn("PARTITION BY COALESCE(player_id_internal", sql)
+
     def test_llm_prompt_payload_is_deterministic(self):
         first = content_briefs.build_fraud_watch_brief(season=2025, week=7, packets=[fraud_row()])
         second = content_briefs.build_fraud_watch_brief(season=2025, week=7, packets=[fraud_row()])
@@ -237,6 +270,18 @@ class ContentBriefTests(unittest.TestCase):
             second["brief_json"]["llm_prompt_payload_json"],
         )
 
+    def test_builder_source_does_not_call_llms(self):
+        source = Path("src/content_briefs.py").read_text(encoding="utf-8")
+
+        for forbidden in ("google.genai", "openai", "generate_content"):
+            self.assertNotIn(forbidden, source)
+
+    def test_demo_brief_marker_requires_guard(self):
+        source = Path("src/content_briefs.py").read_text(encoding="utf-8")
+
+        if "DEMO BRIEF - DO NOT USE FOR PUBLIC CONTENT" in source:
+            self.assertIn("ENABLE_DEMO_CONTENT_BRIEFS", source)
+
     def test_save_content_brief_dry_run(self):
         brief = content_briefs.build_fraud_watch_brief(season=2025, week=7, packets=[fraud_row()])
 
@@ -244,6 +289,16 @@ class ContentBriefTests(unittest.TestCase):
 
         self.assertTrue(result["dry_run"])
         self.assertEqual(result["item_count"], 1)
+
+    def test_save_content_brief_uses_load_job_for_reviewable_rows(self):
+        client = FakeLoadClient()
+        brief = content_briefs.build_fraud_watch_brief(season=2025, week=7, packets=[fraud_row()])
+
+        result = content_briefs.save_content_brief(brief, client=client, dataset_id="test_dataset")
+
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(len(client.load_calls), 3)
+        self.assertEqual(client.insert_calls, [])
 
 
 if __name__ == "__main__":

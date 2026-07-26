@@ -187,7 +187,12 @@ class BacktestingTests(unittest.TestCase):
         backtesting.mark_backtest_run_failed("bt_1", "primary failure", client=client, dataset_id="test_dataset")
 
         self.assertEqual(backtest_run_id, "bt_1")
-        self.assertEqual(client.insert_calls[0][0], "test-project.test_dataset.backtest_runs")
+        create_sql, create_config = client.query_calls[0]
+        self.assertIn("INSERT INTO `test-project.test_dataset.backtest_runs`", create_sql)
+        self.assertIn("'running'", create_sql)
+        create_params = {param.name: param.value for param in create_config.query_parameters}
+        self.assertEqual(create_params["backtest_run_id"], "bt_1")
+        self.assertEqual(create_params["model_run_id"], "run_1")
         failed_sql, failed_config = client.query_calls[-1]
         self.assertIn("error_message = @error_message", failed_sql)
         params = {param.name: param.value for param in failed_config.query_parameters}

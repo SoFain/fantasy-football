@@ -1,5 +1,11 @@
 # Audit and Rebuild Plan
 
+Status: **historical, partially superseded.** This document audited the repository as a single Streamlit application and laid out a phased plan to move data access and job orchestration out of the UI. Phases 1 through 12 delivered the warehouse and job layers; the UI was then retired outright rather than migrated.
+
+Sections 1 through 3 have been updated to describe the current repository. Sections 4 onward are preserved as the original audit record: they describe problems in code that no longer exists, and their remediation roadmap is largely complete by deletion. Read them for the reasoning, not the current state.
+
+Current state lives in [docs/README.md](../README.md), [cloud-run-operating-model.md](cloud-run-operating-model.md), and [ui-query-debt-register.md](ui-query-debt-register.md).
+
 Source of truth: [docs/CODEX_PROJECT_CONTEXT.md](../CODEX_PROJECT_CONTEXT.md)
 
 This audit is repository-based. It does not change runtime behavior.
@@ -25,145 +31,128 @@ Consequences:
 
 ## 1. Current Repository Structure
 
-Tracked repository files are currently a compact Python application and ETL stack:
+The original audit described a compact single-app ETL stack. Phases 1 through 12 added a warehouse contract layer, a job layer, and a test suite. The tracked repository is now as follows, abbreviated to directories and primary entrypoints:
 
 ```text
 .
-├── AGENTS.md
-├── AI_VS_VIBES_ANALYTICS_PLAN.md
-├── Dockerfile
-├── Launch_Studio.bat
-├── app.py
-├── bootstrap.py
-├── cloudbuild.yaml
-├── data/
-│   ├── context_events.csv
-│   └── sample_rookie_scouting.csv
-├── deploy_guide.md
+├── AGENTS.md                     agent working rules
+├── Dockerfile                    Cloud Run Jobs image
+├── cloudbuild.yaml               Cloud Build deploy config
+├── validate.py                   standalone validation sweep
 ├── requirements.txt
-├── src/
-│   ├── extract.py
-│   ├── fetch_market_values.py
-│   ├── generate_pigskin_rankings.py
-│   ├── ingest_college_data.py
-│   ├── ingest_context_events.py
-│   ├── ingest_news.py
-│   ├── ingest_sleeper_league.py
-│   ├── load.py
-│   ├── materialize.py
-│   ├── pipeline.py
-│   ├── setup_college_tables.py
-│   ├── transform.py
-│   └── verify_player_context.py
-└── validate.py
+├── bigquery/
+│   ├── contracts/                44 table contracts, one per warehouse object
+│   ├── migrations/               24 numbered forward-only DDL migrations
+│   ├── validations/              138 validation queries
+│   └── views/                    6 view definitions
+├── data/                         sample CSV fixtures
+├── docs/
+│   ├── CODEX_PROJECT_CONTEXT.md  architectural source of truth
+│   └── rebuild/                  phase design docs and validation reports
+├── scripts/
+│   ├── check_doc_refs.py         verifies doc code references still resolve
+│   ├── run_bigquery_migrations.py
+│   └── run_bigquery_validations.py
+├── src/                          46 modules: ingest, materialize, projections,
+│                                 packets, claims, backtests, job runner
+└── tests/                        24 unittest modules
 ```
 
-Important local or generated items are present but are not part of the tracked app contract: `build/`, `dist/`, `venv/`, `__pycache__/`, `.codex-remote-attachments/`, `.codex-tools/`, `AI_vs_Vibes_Project_Resume_Report.md`, `partner_github_workflow_rules.md`, and the local service account JSON file.
+See [docs/README.md](../README.md) for an index of the documentation set.
 
-The current runtime is Streamlit on Cloud Run. `Dockerfile:34` exposes port 8501 and `Dockerfile:37` starts `streamlit run app.py`. `requirements.txt:7` pins Streamlit as a dependency. `deploy_guide.md:91-107` documents Cloud Run deployment with BigQuery, Secret Manager, Gemini, and Vertex AI Search environment settings.
+Untracked local or generated items include `build/`, `dist/`, `venv/`, `__pycache__/`, `.codex-remote-attachments/`, `.codex-tools/`, and the local service account JSON file. Note that `AI_vs_Vibes_Project_Resume_Report.md` and `partner_github_workflow_rules.md` are tracked, contrary to the original audit.
+
+The runtime is Cloud Run Jobs. `Dockerfile` builds a jobs image whose entrypoint is `src/job_runner.py`; it has no HTTP listener and exposes no port. [deploy_guide.md](../../deploy_guide.md) documents deployment with BigQuery, Secret Manager, Gemini, and Vertex AI Search environment settings.
 
 No Firebase implementation exists in the tracked repository. That is now an explicit platform decision, not a gap to fill.
 
-## 2. Existing Cloud Runtime, Admin Routes, UI Pages, Scheduled Jobs, and Data-Access Patterns
+## 2. Runtime, Entrypoints, Scheduled Jobs, and Data-Access Patterns
 
-### Cloud Runtime
+### Runtime
 
-The current runtime is a single Streamlit service on Cloud Run. No Cloud Run Jobs or Cloud Scheduler triggers are currently defined in the tracked repository.
+The runtime is Cloud Run Jobs. There is no service, no web routes, and no UI.
 
-### Admin and UI Routes
+The Streamlit admin app described by the original audit was retired. Its seven tabs (Pigskin Studio, Show Prep, Player Profiles, Versus Finder, Viewer Team Lab, Trade Lab, Data Ops) no longer exist. What each tab did is recorded in [ui-query-debt-register.md](ui-query-debt-register.md) along with the backend module that now owns the equivalent read.
 
-There are no web routes in a conventional Flask/FastAPI/Next sense. The admin panel is a single Streamlit app in [app.py](../../app.py).
+Authentication is no longer relevant: there is no interactive surface to gate. `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` are unused.
 
-Current authentication is a basic Streamlit session gate using `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` in `app.py:28-29`.
+### Entrypoints
 
-Current top-level tabs are defined in `app.py:3319`:
+`src/job_runner.py` is the single entrypoint. It accepts `--job-name` from a fixed list and dispatches to a module:
 
-- Pigskin Studio
-- Show Prep
-- Player Profiles
-- Versus Finder
-- Viewer Team Lab
-- Trade Lab
-- Data Ops
+- `ingest-nflverse`, `ingest-sleeper-news`, `ingest-sleeper-league`, `ingest-context-events`, `ingest-market-values`, `ingest-college-stats`, `ingest-rookie-scouting`
+- `materialize-analytics`
+- `generate-pigskin-rankings`, `generate-evidence-packets`
+- `run-projections`, `run-backtests`
+- `validate-warehouse`, `verify-external-context`
 
-Notable UI sections and functions:
+Every execution records a row in `cloud_run_job_runs` through `src/cloud_run_jobs.py`.
 
-- Runtime status: `app.py:444-457`, `app.py:562-627`, and `app.py:632`.
-- Fraud Watch segment: `app.py:733`.
-- Sleeper Watch segment: `app.py:788`.
-- Player Profiles: `app.py:1475`.
-- Versus Finder: `app.py:2071`.
-- Reddit topic scout: `app.py:2458`.
-- Pigskin chat/cohost: `app.py:2506`.
-- Trade and value analyzer: `app.py:2860`.
-- Sleeper viewer team context and console: `app.py:3390`, `app.py:3618`, and `app.py:3679`.
-- Data Ops admin controls: `app.py:3743-4025`.
+Two supporting scripts run outside the job runner: `scripts/run_bigquery_migrations.py` and `scripts/run_bigquery_validations.py`.
 
 ### Scheduled Jobs
 
-No scheduled job definitions were found in the repo. There is no Cloud Scheduler config, GitHub Actions schedule, cron file, or equivalent scheduled worker.
+No scheduled job definitions exist in the repo. There is no Cloud Scheduler config, GitHub Actions schedule, cron file, or equivalent scheduled worker. [cloud-scheduler-plan.md](cloud-scheduler-plan.md) describes the intended triggers.
 
-Current ingestion and admin jobs are manually triggered from Streamlit Data Ops or run as CLI modules. `app.py:3358` runs subprocesses from the UI, and Data Ops invokes modules such as `src.ingest_news`, `src.ingest_context_events`, `src.fetch_market_values`, `src.verify_player_context`, `src.ingest_college_data`, `src.pipeline`, and `src.generate_pigskin_rankings` in `app.py:3767-3941`.
+Jobs are currently invoked manually through the CLI. Live Cloud Run Job dispatch exists in `src/cloud_run_jobs.py` but stays behind `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS` and `DATA_OPS_ALLOW_JOB_TRIGGER`, both default false.
 
 ### Data-Access Patterns
 
-BigQuery is accessed directly from `app.py` through a cached query helper at `app.py:656`. Pigskin previously exposed a model tool named `execute_bigquery_sql`; the chat path now uses named context tools in `src/pigskin_context_tools.py`.
+All BigQuery access is server-side, in `src/`, through `src/bigquery_guardrails.py`.
 
-The app includes defensive SQL repair logic around `app.py:666-697`, including repairs for `analytics_player_weekly_truth`, `weekly_metrics`, NGS tables, and `market_values`. That repair layer helps with bad model SQL, but it also confirms the UI and writing AI are currently too close to raw warehouse schema details.
+The request-time patterns the original audit flagged are gone with the UI: the cached query helper, the defensive SQL-repair layer for model-generated SQL, the warehouse-metrics table scan, and the `dashboard_job_runs` admin writes. `cloud_run_job_runs` supersedes `dashboard_job_runs` for job metadata.
 
-Warehouse metrics are read by listing BigQuery tables and summing table bytes in `app.py:444-457`.
-
-Job-success metadata is stored in BigQuery table `dashboard_job_runs` from `app.py:562-627`. This is consistent with the current decision to store operational metadata in BigQuery admin tables unless a later migration introduces a dedicated metadata store.
+Pigskin previously exposed a model tool named `execute_bigquery_sql`. That was removed in 7.2C in favor of parameterized declarations in `src/pigskin_context_tools.py`, and the chat surface that would have registered them is itself now retired. No LLM path can generate SQL.
 
 ## 3. Existing BigQuery Datasets, Tables, Queries, and Migrations Found
 
-Default dataset name is `fantasy_football_brain`. The BigQuery project is intended to be `fantasy-football-498121`, and `src/load.py:54-101` loads DataFrames to partitioned tables using range partitioning on `season`.
+Default dataset name is `fantasy_football_brain`. The BigQuery project is intended to be `fantasy-football-498121`, and `src/load.py:load_df_to_partitioned_table` loads DataFrames to partitioned tables using range partitioning on `season`.
 
 ### Raw and Source-Like Tables
 
-The main NFL pipeline is `src/pipeline.py:29`. It extracts, transforms, loads, then calls `materialize_all` in `src/pipeline.py:191`.
+The main NFL pipeline is `src/pipeline.py:run_pipeline`. It extracts, transforms, loads, then calls `materialize_all` in `src/pipeline.py:run_pipeline`.
 
 Tables loaded by the main pipeline include:
 
-- `play_by_play`, `src/pipeline.py:128`.
-- `weekly_metrics`, `src/pipeline.py:137`.
-- `team_descriptions`, `src/pipeline.py:146`.
-- `draft_picks`, `src/pipeline.py:155`.
-- `player_rosters`, `src/pipeline.py:164`.
-- `player_contracts`, `src/pipeline.py:173`.
-- `ngs_passing`, `ngs_rushing`, `ngs_receiving`, `ftn_charting`, `weekly_snap_counts`, `injury_reports`, and `depth_charts`, `src/pipeline.py:178-188`.
+- `play_by_play`, `src/pipeline.py:run_pipeline`.
+- `weekly_metrics`, `src/pipeline.py:run_pipeline`.
+- `team_descriptions`, `src/pipeline.py:run_pipeline`.
+- `draft_picks`, `src/pipeline.py:run_pipeline`.
+- `player_rosters`, `src/pipeline.py:run_pipeline`.
+- `player_contracts`, `src/pipeline.py:run_pipeline`.
+- `ngs_passing`, `ngs_rushing`, `ngs_receiving`, `ftn_charting`, `weekly_snap_counts`, `injury_reports`, and `depth_charts`, `src/pipeline.py:run_pipeline`.
 
 ### Analytics and Evidence Marts
 
 `src/materialize.py` creates current analytics marts:
 
-- `analytics_game_environment`, `src/materialize.py:16`.
-- `analytics_player_weekly_truth`, `src/materialize.py:274`.
-- `analytics_fraud_watch`, `src/materialize.py:591`.
-- `analytics_pigskin_rankings_candidates`, `src/materialize.py:703`.
-- `analytics_pigskin_rankings_history`, `src/materialize.py:1146`.
-- `analytics_player_qb_weekly`, `src/materialize.py:1249`.
-- `analytics_player_qb_splits`, `src/materialize.py:1350`.
+- `analytics_game_environment`, `src/materialize.py:build_game_environment_sql`.
+- `analytics_player_weekly_truth`, `src/materialize.py:build_player_weekly_truth_sql`.
+- `analytics_fraud_watch`, `src/materialize.py:build_fraud_watch_sql`.
+- `analytics_pigskin_rankings_candidates`, `src/materialize.py:build_pigskin_rankings_sql`.
+- `analytics_pigskin_rankings_history`, `src/materialize.py:build_pigskin_rankings_history_create_sql`.
+- `analytics_player_qb_weekly`, `src/materialize.py:build_player_qb_weekly_sql`.
+- `analytics_player_qb_splits`, `src/materialize.py:build_player_qb_splits_sql`.
 
-`src/generate_pigskin_rankings.py` reads candidates from `analytics_pigskin_rankings_candidates` at `src/generate_pigskin_rankings.py:49`, then writes:
+`src/generate_pigskin_rankings.py` reads candidates from `analytics_pigskin_rankings_candidates` at `src/generate_pigskin_rankings.py:fetch_candidates`, then writes:
 
-- `analytics_pigskin_rankings`, `src/generate_pigskin_rankings.py:325-331`.
-- `analytics_pigskin_rankings_history`, `src/generate_pigskin_rankings.py:326-339`.
+- `analytics_pigskin_rankings`, `src/generate_pigskin_rankings.py:write_rankings`.
+- `analytics_pigskin_rankings_history`, `src/generate_pigskin_rankings.py:write_rankings`.
 
 ### External Context, News, and Market Tables
 
-- `analytics_api_usage_daily`, `src/verify_player_context.py:53`.
-- `analytics_external_context_search_results`, `src/verify_player_context.py:63` and `src/verify_player_context.py:283-287`.
-- `sleeper_players_current`, `src/ingest_news.py:139-161`.
-- `realtime_player_news`, `src/ingest_news.py:179-185`.
-- `market_values`, `src/fetch_market_values.py:11` and `src/fetch_market_values.py:97`.
-- `analytics_context_events`, `src/ingest_context_events.py:62-69`.
-- `college_player_stats`, `src/setup_college_tables.py:14-15` and `src/ingest_college_data.py:13`.
-- `rookie_scouting_metrics`, `src/setup_college_tables.py:32-33`, with UI CSV loading in `app.py:4018-4025`.
+- `analytics_api_usage_daily`, `src/verify_player_context.py:ensure_usage_table`.
+- `analytics_external_context_search_results`, `src/verify_player_context.py:ensure_results_table` and `src/verify_player_context.py:store_results`.
+- `sleeper_players_current`, `src/ingest_news.py:load_realtime_news`.
+- `realtime_player_news`, `src/ingest_news.py:load_realtime_news`.
+- `market_values`, `src/fetch_market_values.py:TABLE_ID` and `src/fetch_market_values.py:upload_to_bigquery`.
+- `analytics_context_events`, `src/ingest_context_events.py:load_context_events`.
+- `college_player_stats`, `src/setup_college_tables.py:create_college_tables` and `src/ingest_college_data.py:TABLE_ID`.
+- `rookie_scouting_metrics`, `src/setup_college_tables.py:create_college_tables`, loaded by the `ingest-rookie-scouting` job via `src/ingest_rookie_scouting.py:load_rookie_scouting`.
 
 ### Sleeper League Tables
 
-`src/ingest_sleeper_league.py:17-62` defines schemas for:
+`src/ingest_sleeper_league.py:SLEEPER_TABLE_SCHEMAS` defines schemas for:
 
 - `sleeper_leagues`
 - `sleeper_league_users`
@@ -174,55 +163,55 @@ Tables loaded by the main pipeline include:
 - `sleeper_available_players`
 - `sleeper_viewer_team_snapshots`
 
-Rows are assembled into those tables in `src/ingest_sleeper_league.py:312-319` and appended to BigQuery in `src/ingest_sleeper_league.py:331-340`.
+Rows are assembled into those tables in `src/ingest_sleeper_league.py:build_records` and appended to BigQuery in `src/ingest_sleeper_league.py:load_rows`.
 
 ### Migrations and Schema Governance
 
 No conventional migration directory was found. There are inline `CREATE TABLE`, `CREATE OR REPLACE TABLE`, `MERGE`, and load-job schemas inside Python modules. This is workable for the prototype, but it is not enough for the source-of-truth requirements in `docs/CODEX_PROJECT_CONTEXT.md:24-29`, especially versioned runs, repeatability, validation, and data dictionaries.
 
-`validate.py` provides partition and dry-run validation utilities at `validate.py:17-27` and `validate.py:57-151`, but it does not validate every transformation or all analytics mart invariants.
+`validate.py` provides partition and dry-run validation utilities at `validate.py:run_dry_run` and `validate.py:validate_pipeline_upload`, but it does not validate every transformation or all analytics mart invariants.
 
 ## 4. Current Data Ingestion Paths for nflverse and Sleeper
 
 ### nflverse and nflreadpy
 
-`src/extract.py:7` imports `nflreadpy as nfl`. Current extractors cover:
+the `nflreadpy` import in `src/extract.py` imports `nflreadpy as nfl`. Current extractors cover:
 
-- Play-by-play, `src/extract.py:83-88`.
-- Weekly player stats, `src/extract.py:118-126`.
-- Teams, draft picks, players, and contracts, `src/extract.py:154-190`.
-- NGS passing, rushing, and receiving, `src/extract.py:207-241`.
-- FTN charting, `src/extract.py:258-260`.
-- Snap counts, `src/extract.py:275-277`.
-- Injuries, `src/extract.py:292-294`.
-- Depth charts, `src/extract.py:309-313`.
+- Play-by-play, `src/extract.py:get_pbp_data`.
+- Weekly player stats, `src/extract.py:get_weekly_data`.
+- Teams, draft picks, players, and contracts, `src/extract.py:get_team_data`.
+- NGS passing, rushing, and receiving, `src/extract.py:get_ngs_passing_data`.
+- FTN charting, `src/extract.py:get_ftn_charting_data`.
+- Snap counts, `src/extract.py:get_snap_counts_data`.
+- Injuries, `src/extract.py:get_injury_reports_data`.
+- Depth charts, `src/extract.py:get_depth_charts_data`.
 
-The end-to-end pipeline is `src/pipeline.py:29`, with extracts imported at `src/pipeline.py:6`, transforms imported at `src/pipeline.py:7`, and materialization imported at `src/pipeline.py:9`.
+The end-to-end pipeline is `src/pipeline.py:run_pipeline`, with extracts imported at the `src.extract`, `src.transform`, `src.load`, and `src.materialize` imports in `src/pipeline.py`, transforms imported at the `src.extract`, `src.transform`, `src.load`, and `src.materialize` imports in `src/pipeline.py`, and materialization imported at the `src.extract`, `src.transform`, `src.load`, and `src.materialize` imports in `src/pipeline.py`.
 
 ### Sleeper API
 
 Sleeper global player and trending data is loaded by `src/ingest_news.py`.
 
-- The Sleeper throttle is set to `SLEEPER_MAX_CALLS_PER_MINUTE = 900` in `src/ingest_news.py:14`.
-- Sleeper API calls use `sleeper_get` in `src/ingest_news.py:18-34`.
-- Global player map is fetched from `/players/nfl` at `src/ingest_news.py:41`.
-- Trending adds and drops are fetched at `src/ingest_news.py:46-47`.
-- Current player metadata is written to `sleeper_players_current` at `src/ingest_news.py:139-161`.
-- Trending records are written to `realtime_player_news` at `src/ingest_news.py:179-185`.
+- The Sleeper throttle is set to `SLEEPER_MAX_CALLS_PER_MINUTE = 900` in `src/ingest_news.py:SLEEPER_MAX_CALLS_PER_MINUTE`.
+- Sleeper API calls use `sleeper_get`.
+- Global player map is fetched from `/players/nfl` at `src/ingest_news.py:load_realtime_news`.
+- Trending adds and drops are fetched at `src/ingest_news.py:load_realtime_news`.
+- Current player metadata is written to `sleeper_players_current` at `src/ingest_news.py:load_realtime_news`.
+- Trending records are written to `realtime_player_news` at `src/ingest_news.py:load_realtime_news`.
 
 Sleeper league and viewer-team snapshots are loaded by `src/ingest_sleeper_league.py`.
 
-- The base URL is defined at `src/ingest_sleeper_league.py:15`.
-- API calls reuse `sleeper_get` at `src/ingest_sleeper_league.py:9` and `src/ingest_sleeper_league.py:72`.
-- The CLI entrypoint is defined at `src/ingest_sleeper_league.py:378-388`.
-- The Streamlit Viewer Team Lab calls this module in `app.py:3679-3728`.
+- The base URL is defined at `src/ingest_sleeper_league.py:SLEEPER_TABLE_SCHEMAS`.
+- API calls reuse `sleeper_get` at `src/ingest_sleeper_league.py:SLEEPER_TABLE_SCHEMAS` and `src/ingest_sleeper_league.py:fetch_json`.
+- The CLI entrypoint is defined at `src/ingest_sleeper_league.py:main`.
+- The retired Viewer Team Lab called this module; `src/viewer_team_context.py` is the current consumer.
 
 ### Other Adapters
 
-- FantasyCalc market values: `src/fetch_market_values.py:11-23`, loaded via `insert_rows_json` at `src/fetch_market_values.py:97`.
-- CFBD college stats: `src/ingest_college_data.py:13-32`, loaded at `src/ingest_college_data.py:172`.
-- User or manually curated context events: `src/ingest_context_events.py:62-69`.
-- External verification through Vertex AI Search: `src/verify_player_context.py:146-251`, with daily usage limits enforced in `src/verify_player_context.py:293-316`.
+- FantasyCalc market values: `src/fetch_market_values.py:TABLE_ID`, loaded via `insert_rows_json` at `src/fetch_market_values.py:upload_to_bigquery`.
+- CFBD college stats: `src/ingest_college_data.py:TABLE_ID`, loaded at `src/ingest_college_data.py:upload_to_bigquery`.
+- User or manually curated context events: `src/ingest_context_events.py:load_context_events`.
+- External verification through Vertex AI Search: `src/verify_player_context.py:build_vertex_serving_config`, with daily usage limits enforced in `src/verify_player_context.py:verify_player_context`.
 
 ## 5. Current Projection and Ranking Logic
 
@@ -230,60 +219,62 @@ Sleeper league and viewer-team snapshots are loaded by `src/ingest_sleeper_leagu
 
 The ranking flow is now partially LLM-authored:
 
-1. `src/materialize.py:703` creates `analytics_pigskin_rankings_candidates`.
-2. `src/generate_pigskin_rankings.py:49` fetches candidates.
-3. `src/generate_pigskin_rankings.py:129-178` builds the Pigskin prompt.
+1. `src/materialize.py:build_pigskin_rankings_sql` creates `analytics_pigskin_rankings_candidates`.
+2. `src/generate_pigskin_rankings.py:fetch_candidates` fetches candidates.
+3. `src/generate_pigskin_rankings.py:build_prompt` builds the Pigskin prompt.
 4. The prompt explicitly says the SQL rank is evidence, not the final ranking, and tells the model to adjudicate using opportunity quality, split EPA, WOPR history, target-share history, carry-share history, role quality, role fragility, current Sleeper team, current Sleeper depth chart, and sustainability.
-5. `src/generate_pigskin_rankings.py:199-212` calls Gemini with `google-genai`.
-6. `src/generate_pigskin_rankings.py:227-254` validates the model output against the candidate set and fails if candidates are missing, duplicated, or unknown.
-7. `src/generate_pigskin_rankings.py:325-339` writes active and history tables.
+5. `src/generate_pigskin_rankings.py:call_gemini` calls Gemini with `google-genai`.
+6. `src/generate_pigskin_rankings.py:normalize_model_rankings` validates the model output against the candidate set and fails if candidates are missing, duplicated, or unknown.
+7. `src/generate_pigskin_rankings.py:write_rankings` writes active and history tables.
 
-This is directionally correct for the Pigskin identity. The major gap is that the version key is `ranking_version`, generated in `src/generate_pigskin_rankings.py:368`, not a full `model_run_id` with source freshness, feature config version, scoring profile, league type, roster format, and creation timestamp.
+This is directionally correct for the Pigskin identity. The major gap is that the version key is `ranking_version`, generated in `src/generate_pigskin_rankings.py:generate_rankings`, not a full `model_run_id` with source freshness, feature config version, scoring profile, league type, roster format, and creation timestamp.
 
 ### Player Profiles
 
 Player Profiles read several warehouse tables directly, including:
 
-- `player_rosters`, `app.py:1095` and `app.py:1116`.
-- `analytics_player_weekly_truth`, `app.py:1124`, `app.py:1153`, `app.py:1359`, and `app.py:1381`.
-- `player_contracts`, `app.py:1165`.
-- `depth_charts`, `app.py:1180`.
-- `college_player_stats`, `app.py:1198`.
-- `rookie_scouting_metrics`, `app.py:1213`.
-- `analytics_pigskin_rankings`, `app.py:1325`.
+- `player_rosters`, `src/player_profiles.py`.
+- `analytics_player_weekly_truth`, `src/player_profiles.py`.
+- `player_contracts`, `src/player_profiles.py`.
+- `depth_charts`, `src/player_profiles.py`.
+- `college_player_stats`, `src/player_profiles.py`.
+- `rookie_scouting_metrics`, `src/player_profiles.py`.
+- `analytics_pigskin_rankings`, written by `src/generate_pigskin_rankings.py`.
 
-The UI caption says canonical Pigskin rankings are loaded from `analytics_pigskin_rankings` in `app.py:1552`.
+Canonical Pigskin rankings live in `analytics_pigskin_rankings`, with history in `analytics_pigskin_rankings_history`.
 
 ### Pigskin Chat
 
-Pigskin chat has a detailed schema and behavioral prompt in `app.py:2579-2733`. It instructs the model to query `analytics_pigskin_rankings` first for ranking questions, to use `analytics_pigskin_rankings_history` for older ranking calls, and to prefer `analytics_player_weekly_truth` for non-ranking player analysis.
+Pigskin chat has a detailed schema and behavioral prompt in `src/pigskin_context_tools.py`. It instructs the model to query `analytics_pigskin_rankings` first for ranking questions, to use `analytics_pigskin_rankings_history` for older ranking calls, and to prefer `analytics_player_weekly_truth` for non-ranking player analysis.
 
 The model no longer receives a general SQL execution tool. It now calls fixed context tools backed by curated marts and compatibility objects. The remaining risk is incomplete mart coverage, not arbitrary model-written SQL.
 
 ### Trade Lab
 
-Trade Lab still has legacy direct `market_values` reads in `app.py:2761-2769` and runs local value/projection logic in the Streamlit app. `compat_trade_assets_current` now provides a production mart/view/helper path for future default-off wiring. Its AI outlook still has separate query debt around weekly history and external leads.
+The retired Trade Lab read `market_values` directly and ran local value/projection logic in the app process. `compat_trade_assets_current` now provides a production mart/view/helper path for future default-off wiring. Its AI outlook still has separate query debt around weekly history and external leads.
 
 There is no model-runed projection system for trade values, rest-of-season rankings, dynasty rankings, best ball rankings, or weekly projections yet.
 
 ## 6. Current Admin Panel Capabilities
 
-The Streamlit admin panel currently supports:
+The retired Streamlit admin panel supported the following. Each Data Ops control below now corresponds to a job name in `src/job_runner.py`; the status and upload surfaces have no replacement.
 
-- Basic login through environment variables, `app.py:28-29`.
-- Warehouse status cards based on `client.list_tables` and `table.num_bytes`, `app.py:444-457`.
-- Last successful run display using `dashboard_job_runs`, `app.py:562-627`.
-- Validation sweep, `app.py:3767-3776`, running `validate.py`.
-- Realtime Sleeper/news ingest, `app.py:3786-3795`, running `src.ingest_news`.
-- Context event ledger ingest, `app.py:3799-3808`, running `src.ingest_context_events`.
-- FantasyCalc market values ingest, `app.py:3810-3824`, running `src.fetch_market_values`.
-- External player context verification, `app.py:3828-3862`, running `src.verify_player_context`.
-- CFBD college stats ingest, `app.py:3864-3884`, running `src.ingest_college_data`.
-- Main NFL statistics ingestion, `app.py:3893-3926`, running `src.pipeline`.
-- Pigskin ranking generation, `app.py:3930-3941`, running `src.generate_pigskin_rankings`.
-- Rookie scouting CSV upload to BigQuery, `app.py:3945-4025`.
-- Viewer team load and console from Sleeper, `app.py:3679-3740`.
-- Show Prep with Fraud Watch, Sleeper Watch, and Reddit topic scout, `app.py:4033-4059`.
+- Basic login through environment variables. No replacement; there is no interactive surface.
+- Warehouse status cards based on `client.list_tables` and `table.num_bytes`. No replacement.
+- Last successful run display using `dashboard_job_runs`. Superseded by `cloud_run_job_runs` via `src/cloud_run_jobs.py`.
+- Validation sweep, the "Run Validation Sweep" control, running `validate.py`.
+- Realtime Sleeper/news ingest, the "Ingest Realtime Player News" control, running `src.ingest_news`.
+- Context event ledger ingest, the "Load Context Event Ledger" control, running `src.ingest_context_events`.
+- FantasyCalc market values ingest, the "Ingest FantasyCalc Market Values" control, running `src.fetch_market_values`.
+- External player context verification, the "Verify Player Context" control, running `src.verify_player_context`.
+- CFBD college stats ingest, the "Ingest CFBD College Stats" control, running `src.ingest_college_data`.
+- Main NFL statistics ingestion, the "Run Ingestion Pipeline" control, running `src.pipeline`.
+- Pigskin ranking generation, the "Generate Pigskin Rankings" control, running `src.generate_pigskin_rankings`.
+- Rookie scouting CSV upload to BigQuery, the `scouting_csv_uploader` file uploader and its "Upload and Import Scouting Metrics" control.
+- Viewer team load and console from Sleeper. Backend read survives in `src/viewer_team_context.py`; the console does not.
+- Show Prep with Fraud Watch, Sleeper Watch, and Reddit topic scout. Fraud and sleeper reads survive in `src/segment_packets.py` and `src/sleeper_watch.py`; the Reddit scout does not.
+
+The control names above are historical. Use `python -m src.job_runner --help` for the current job list.
 
 This is useful for an early operating console, but it combines UI, job orchestration, warehouse mutation, BigQuery querying, and LLM workflows in one large file.
 
@@ -295,12 +286,12 @@ Present.
 
 Examples:
 
-- Sleeper Watch uses raw `weekly_metrics` in the UI query, `app.py:814`.
-  - Rebuild status: `compat_sleeper_watch_candidates` now has a production backing mart, view, materializer, helper, and validations. `app.py` is intentionally not wired yet and should use `USE_COMPAT_SLEEPER_WATCH=false` when wiring begins.
-- Player Profiles read source-like `player_rosters`, `player_contracts`, `depth_charts`, `college_player_stats`, and `rookie_scouting_metrics` directly, `app.py:1095-1213`.
-- Trade AI context reads raw `weekly_metrics`, `app.py:3150`.
-- Viewer Team Lab builds ad hoc joins across Sleeper tables and `analytics_player_weekly_truth` from UI code, `app.py:3420-3549`.
-- Pigskin chat exposes arbitrary BigQuery SQL execution through a model tool, `app.py:508` and `app.py:2782-2796`.
+- Sleeper Watch uses raw `weekly_metrics` in the UI query, `src/sleeper_watch.py`.
+  - Rebuild status: `compat_sleeper_watch_candidates` has a production backing mart, view, materializer, helper, and validations. `src/sleeper_watch.py` is now the only read path.
+- Player Profiles read source-like `player_rosters`, `player_contracts`, `depth_charts`, `college_player_stats`, and `rookie_scouting_metrics` directly, `src/player_profiles.py`.
+- Trade AI context reads raw `weekly_metrics`, `src/trade_history.py`.
+- Viewer Team Lab builds ad hoc joins across Sleeper tables and `analytics_player_weekly_truth` from UI code, `src/viewer_team_context.py`.
+- Pigskin chat previously exposed arbitrary BigQuery SQL execution through a model tool. This has since been resolved: the `get_bigquery_tool_declaration` and `execute_bigquery_sql` pair was removed from `app.py`, and `src/pigskin_context_tools.py` now registers only the parameterized declarations in `src/pigskin_context_tools.py`. See UI-006 in [ui-query-debt-register.md](ui-query-debt-register.md).
 
 This violates the project context rule that UI and writing AI should read precomputed player, team, projection, ranking, and content evidence marts instead of raw source tables.
 
@@ -314,7 +305,7 @@ Pigskin rankings have `ranking_version`, but there is no full `model_run_id` tab
 
 Partially present, but not canonical.
 
-The repo uses Sleeper IDs, GSIS IDs, names, and team fallbacks. Examples include Sleeper schemas with `sleeper_player_id` in `src/ingest_sleeper_league.py:37-58`, Pigskin chat guidance to join viewer teams by `gsis_id` with fallback to name plus team in `app.py:2710`, and Player Profiles joining depth charts on `gsis_id` in `app.py:1270`.
+The repo uses Sleeper IDs, GSIS IDs, names, and team fallbacks. Examples include Sleeper schemas with `sleeper_player_id` in `src/ingest_sleeper_league.py:SLEEPER_TABLE_SCHEMAS`, Pigskin chat guidance to join viewer teams by `gsis_id` with fallback to name plus team in `src/pigskin_context_tools.py`, and Player Profiles joining depth charts on `gsis_id` in `src/player_profiles.py`.
 
 There is no single canonical `player_identity_bridge` mart with source IDs, name aliases, active status, team history, confidence, and reconciliation timestamps.
 
@@ -371,8 +362,8 @@ There is no durable claim ledger for Pigskin takes, rankings, show scripts, frau
 
 - Monolithic Streamlit app: `app.py` handles UI, auth, jobs, SQL, AI prompts, data repair, and admin workflows.
 - Inline schemas and migrations: BigQuery schema is spread across Python modules rather than migration files and data dictionaries.
-- UI-triggered subprocess jobs: `app.py:3358` launches ingestion modules from the web process.
-- Raw table awareness in Pigskin prompt: `app.py:2606-2630` includes `weekly_metrics` and `play_by_play`, increasing the risk of schema drift and expensive or invalid queries.
+- UI-triggered subprocess jobs: `src/job_runner.py` launches ingestion modules from the web process.
+- Raw table awareness in Pigskin prompt: `src/pigskin_context_tools.py` includes `weekly_metrics` and `play_by_play`, increasing the risk of schema drift and expensive or invalid queries.
 - Broad IAM direction in deploy docs: `deploy_guide.md:66-68` recommends BigQuery Admin for the Cloud Run service account, which is expedient but too broad for a mature setup.
 - Validation is narrow: `validate.py` covers partitioning and dry-run costs, not semantic invariants for every transformation.
 
