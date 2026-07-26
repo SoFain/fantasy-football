@@ -66,28 +66,30 @@ if ($refreshExit -eq 0) {
     exit 1
 }
 
-# Stage 1b: the refresh emits a fresh player-situation dataset artifact.
-# Upload the immutable object (content-addressed: a re-upload of identical
-# bytes fails the precondition harmlessly), then hand the manifest entry to
-# the publisher. If the artifact is missing (gate-tripped day), the publisher
-# carries yesterday's datasets forward and nothing is lost.
-$situationEntry = Join-Path $branchRoot 'build\feeds\player_situation.manifest-entry.json'
-$situationObject = Join-Path $branchRoot 'build\feeds\player_situation.json'
+# Stage 1b: the refresh emits fresh dataset artifacts (player situation, market
+# context). Upload each immutable object (content-addressed: a re-upload of
+# identical bytes fails the precondition harmlessly), then hand the manifest
+# entries to the publisher. Any artifact missing (gate-tripped day, Sleeper API
+# hiccup) is skipped and the publisher carries that dataset forward unchanged.
 $publisherArgs = ('"{0}\scripts\publish_public_rankings.py" --publish --gcloud-auth' -f $root)
-if ((Test-Path $situationEntry) -and (Test-Path $situationObject)) {
-    try {
-        $entry = Get-Content $situationEntry -Raw | ConvertFrom-Json
-        $null = Invoke-Logged 'upload-situation-object' 'gcloud' `
-            ('storage cp "{0}" "gs://fantasy-football-498121-public-rankings/{1}" --content-type="application/json; charset=utf-8" --cache-control="public, max-age=31536000, immutable" --if-generation-match=0' -f $situationObject, $entry.object) $root
-        # A nonzero exit here is expected when the object already exists;
-        # content addressing guarantees identical bytes, so proceed either way.
-        $publisherArgs = $publisherArgs + (' --dataset-entry "{0}"' -f $situationEntry)
-        Write-Log ('situation dataset entry attached: {0}' -f $entry.object)
-    } catch {
-        Write-Log ('situation dataset skipped (unreadable entry): {0}' -f $_.Exception.Message)
+foreach ($datasetId in @('player_situation', 'market_context')) {
+    $entryPath = Join-Path $branchRoot ("build\feeds\{0}.manifest-entry.json" -f $datasetId)
+    $objectPath = Join-Path $branchRoot ("build\feeds\{0}.json" -f $datasetId)
+    if ((Test-Path $entryPath) -and (Test-Path $objectPath)) {
+        try {
+            $entry = Get-Content $entryPath -Raw | ConvertFrom-Json
+            $null = Invoke-Logged ("upload-{0}-object" -f $datasetId) 'gcloud' `
+                ('storage cp "{0}" "gs://fantasy-football-498121-public-rankings/{1}" --content-type="application/json; charset=utf-8" --cache-control="public, max-age=31536000, immutable" --if-generation-match=0' -f $objectPath, $entry.object) $root
+            # A nonzero exit here is expected when the object already exists;
+            # content addressing guarantees identical bytes, so proceed either way.
+            $publisherArgs = $publisherArgs + (' --dataset-entry "{0}"' -f $entryPath)
+            Write-Log ('{0} dataset entry attached: {1}' -f $datasetId, $entry.object)
+        } catch {
+            Write-Log ('{0} dataset skipped (unreadable entry): {1}' -f $datasetId, $_.Exception.Message)
+        }
+    } else {
+        Write-Log ('{0} dataset artifacts absent; publisher will carry the prior dataset forward.' -f $datasetId)
     }
-} else {
-    Write-Log 'situation dataset artifacts absent; publisher will carry forward the prior datasets.'
 }
 
 $publishExit = Invoke-Logged 'publish-public-rankings' "$root\venv\Scripts\python.exe" $publisherArgs $root

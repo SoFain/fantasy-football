@@ -32,6 +32,7 @@ VALID_JOB_NAMES = (
     "coaching-staff-feed",
     "build-situation-layer",
     "situation-feed",
+    "market-context-feed",
     "materialize-analytics",
     "generate-pigskin-rankings",
     "generate-evidence-packets",
@@ -450,6 +451,20 @@ def dispatch_situation_feed(args: argparse.Namespace, client: Any) -> dict[str, 
     return {"row_count": result["row_count"], "object": result["object"], "sha256": result["sha256"]}
 
 
+def dispatch_market_context_feed(args: argparse.Namespace, client: Any) -> dict[str, Any]:
+    from src.market_context_feed import build_market_context_feed
+
+    if args.dry_run:
+        return {"row_count": 0, "dry_run": True, "note": "would render the market context dataset"}
+    result = build_market_context_feed(out_dir=args.out, client=client)
+    return {
+        "row_count": result["row_count"],
+        "adp_available": result["adp_available"],
+        "object": result["object"],
+        "sha256": result["sha256"],
+    }
+
+
 def dispatch_materialize_analytics(args: argparse.Namespace, client: Any) -> dict[str, Any]:
     from src.materialize import materialize_all
     from src.materialize_fantasy_points import materialize_fantasy_points
@@ -753,6 +768,7 @@ JOB_DISPATCHERS: dict[str, Callable[[argparse.Namespace, Any], dict[str, Any] | 
     "coaching-staff-feed": dispatch_coaching_staff_feed,
     "build-situation-layer": dispatch_build_situation_layer,
     "situation-feed": dispatch_situation_feed,
+    "market-context-feed": dispatch_market_context_feed,
     "materialize-analytics": dispatch_materialize_analytics,
     "generate-pigskin-rankings": dispatch_generate_pigskin_rankings,
     "generate-evidence-packets": dispatch_generate_evidence_packets,

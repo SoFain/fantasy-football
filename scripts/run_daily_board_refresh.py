@@ -412,6 +412,7 @@ def main() -> int:
     # upload, and write the owner-review queue (which now shows the adjusted
     # ranks). The layer itself was rebuilt at stage 5.5, before adjustments.
     run("8.6 situation feed artifacts", [PYTHON, "-m", "src.job_runner", "--job-name", "situation-feed"], cwd=BRANCH_ROOT)
+    run("8.7 market context feed artifacts", [PYTHON, "-m", "src.job_runner", "--job-name", "market-context-feed"], cwd=BRANCH_ROOT)
     write_situation_review()
 
     # Stage 9: local publish validation. The wrapper publishes only after this.

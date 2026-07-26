@@ -39,6 +39,7 @@ SELECT
   boards.scoring_profile_id,
   boards.position,
   boards.player_id,
+  COALESCE(boards.sleeper_player_id, market.sleeper_player_id) AS sleeper_player_id,
   boards.player_name,
   boards.current_team,
   boards.pigskin_position_rank,
