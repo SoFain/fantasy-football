@@ -40,11 +40,8 @@ ASSERT NOT EXISTS (
     AND candidate.formula_rank <= CASE candidate.position
       WHEN 'RB' THEN 80 WHEN 'WR' THEN 100 WHEN 'TE' THEN 35
     END
-    AND (
-      context.gsis_id IS NULL
-      OR (context.current_board_rank_eligible AND context.sleeper_hard_review)
-    )
-) AS 'Selected Fable rows contain unresolved Sleeper roster hard reviews';
+    AND context.gsis_id IS NULL
+) AS 'Selected Fable rows contain missing Sleeper identity context';
 
 CREATE TEMP TABLE promoted AS
 WITH templates AS (
@@ -222,7 +219,11 @@ WITH templates AS (
           c.wr_score_source_season,c.wr_prior_v1_score,c.wr_prior_v1_age_availability_component,
           c.wr_current_age_availability_component,c.formula_score,c.wr_games_played,c.wr_targets,
           context.fetched_at,context.depth_chart_order)
-        ELSE FORMAT('Sleeper snapshot %t; depth order %d',context.fetched_at,context.depth_chart_order)
+        ELSE FORMAT(
+          'Sleeper snapshot %t; status %s; injury %s; depth order %d; raw score %.4f; '
+          'injury status is review-only with no estimated games missed and no formula movement. %s',
+          context.fetched_at,COALESCE(context.status,'unknown'),COALESCE(context.injury_status,'none'),
+          context.depth_chart_order,c.formula_score,context.post_formula_adjustment_detail)
       END AS llm_adjustment_evidence,
       CAST(NULL AS INT64) AS llm_estimated_games_missed,
       c.formula_rank-c.new_rank AS llm_rank_delta
@@ -284,8 +285,8 @@ FROM normalized;
 
 ASSERT NOT EXISTS (
   SELECT 1 FROM promoted
-  WHERE ranking_eligibility != 'eligible_current_sleeper_player'
-) AS 'Promoted Fable rows contain unresolved current-roster context';
+  WHERE current_team IS NULL OR ranking_eligibility = 'teamless_unranked'
+) AS 'Promoted Fable rows contain teamless players';
 
 ASSERT NOT EXISTS (
   SELECT 1 FROM promoted

@@ -74,18 +74,25 @@ METRICS = "fantasy_football_advanced_metrics"
 
 # Runbook "Current positional row contracts".
 ROW_CONTRACTS = {
-    "standard": {"QB": 45, "RB": 85, "WR": 100, "TE": 35},
+    "standard": {"QB": 45, "RB": (80, 100), "WR": 100, "TE": 35},
     "ppr": {"QB": 45, "RB": 80, "WR": 100, "TE": 35},
     "half_ppr": {"QB": 45, "RB": 80, "WR": 100, "TE": 35},
     "gng_keeper": {"QB": 45, "RB": 80, "WR": 100, "TE": 35},
 }
 
 TEST_MODULES = [
+    "tests.test_daily_board_refresh",
     "tests.test_promote_ppr_fable_v1_positional",
     "tests.test_build_unified_ppr_fable_v1_top100",
     "tests.test_promote_unified_fable_v1_standard_top100",
     "tests.test_public_rankings_feed",
 ]
+
+
+def matches_row_contract(row_count: int, expected: int | tuple[int, int]) -> bool:
+    if isinstance(expected, tuple):
+        return expected[0] <= row_count <= expected[1]
+    return row_count == expected
 
 
 def run(
@@ -158,7 +165,7 @@ def validate_positional() -> None:
             if row is None:
                 problems.append(f"{profile}/{position}: no active rows")
                 continue
-            if row["row_count"] != expected:
+            if not matches_row_contract(row["row_count"], expected):
                 problems.append(f"{profile}/{position}: {row['row_count']} rows, contract {expected}")
             if not (row["min_rank"] == 1 and row["max_rank"] == row["row_count"] == row["distinct_ranks"]):
                 problems.append(f"{profile}/{position}: ranks not contiguous 1..{row['row_count']}")

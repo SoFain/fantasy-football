@@ -51,6 +51,19 @@ class GngAdvancedHypothesesTest(unittest.TestCase):
         self.assertEqual(result["sleeper_role_adjustment"], 0.02)
         self.assertIn("INJURY_UNCERTAIN", result["sleeper_review_flags"])
 
+    def test_rostered_ir_status_is_review_only_without_score_penalty(self):
+        result = apply_sleeper_safety({
+            "sleeper_active": True,
+            "sleeper_team": "SF",
+            "sleeper_status": "Inactive",
+            "sleeper_injury_status": "IR",
+            "sleeper_depth_chart_order": 3,
+        })
+        self.assertFalse(result["sleeper_hard_review"])
+        self.assertEqual(result["sleeper_role_adjustment"], 0.0)
+        self.assertIn("SLEEPER_ROSTER_REVIEW", result["sleeper_review_flags"])
+        self.assertIn("INJURY_UNCERTAIN", result["sleeper_review_flags"])
+
     def test_2026_board_contract_uses_locked_formulas_and_limits(self):
         self.assertEqual({position: formula[0] for position, formula in FORMULAS.items()}, {
             "QB": "q4_gng_bonus_proxy", "RB": "r7_h1_r2_compromise",

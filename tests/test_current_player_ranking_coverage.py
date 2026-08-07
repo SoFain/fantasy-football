@@ -4,6 +4,7 @@ import unittest
 
 from scripts.audit_current_player_ranking_coverage import (
     classify_omission,
+    coverage_gate_review_only_reason,
     identity_keys,
     live_frontline_players,
     normalize_name,
@@ -50,6 +51,19 @@ class CurrentPlayerRankingCoverageTest(unittest.TestCase):
                 {"ppr", "half_ppr"},
             ),
         )
+
+    def test_theo_wease_sleeper_slot_false_positive_is_review_only_within_bounds(self) -> None:
+        omission = {
+            "player_name": "Theo Wease",
+            "position": "WR",
+            "team": "MIA",
+            "years_exp": 1,
+            "qualification": {"games_played": 3, "qualification_volume": 10.0},
+        }
+        self.assertIn("third column", coverage_gate_review_only_reason(omission) or "")
+
+        omission["qualification"]["qualification_volume"] = 11.0
+        self.assertIsNone(coverage_gate_review_only_reason(omission))
 
 
 if __name__ == "__main__":

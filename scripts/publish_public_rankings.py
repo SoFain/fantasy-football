@@ -69,6 +69,12 @@ def parse_args() -> argparse.Namespace:
             "remains the single writer of v1/manifest.json."
         ),
     )
+    parser.add_argument(
+        "--publisher-warning",
+        action="append",
+        default=None,
+        help="Add a visible warning to every profile's manifest metadata.",
+    )
     return parser.parse_args()
 
 
@@ -393,6 +399,9 @@ def main() -> int:
     validate_identifier(args.dataset, "dataset")
     validate_identifier(args.metrics_dataset, "metrics dataset")
     profiles = tuple(args.profile or SCORING_PROFILES)
+    publisher_warnings = [
+        warning.strip() for warning in (args.publisher_warning or []) if warning.strip()
+    ]
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     bigquery_client = bigquery.Client(project=args.project)
@@ -438,7 +447,7 @@ def main() -> int:
             "position_counts": {
                 position: board["count"] for position, board in payload["positions"].items()
             },
-            "warnings": payload["warnings"],
+            "warnings": [*payload["warnings"], *publisher_warnings],
         }
 
     dataset_entries: dict[str, dict[str, Any]] = fetch_current_datasets(bucket, args.bucket)

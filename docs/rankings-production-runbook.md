@@ -65,12 +65,12 @@ Current positional row contracts:
 
 | Profile | QB | RB | WR | TE |
 |---|---:|---:|---:|---:|
-| Standard | 45 | 85 | 100 | 35 |
+| Standard | 45 | 80-100 | 100 | 35 |
 | PPR | 45 | 80 | 100 | 35 |
 | Half-PPR | 45 | 80 | 100 | 35 |
 | GNG Keeper | 45 | 80 | 100 | 35 |
 
-Standard has 85 RB rows because teamless players are unranked. Do not manufacture fallback players to reach a round number.
+Standard RB uses a bounded `80-100` integrity contract because its formula-qualified pool changes when a player gains or loses a current team. Teamless players remain unranked. Do not manufacture fallback players to reach a round number.
 
 ## Release Procedure
 
@@ -250,19 +250,19 @@ Since 2026-07-24 the scheduled task `PigskinDailyPublishImport` runs daily at 07
 
 1. **Board refresh** — the release procedure above as a chain: safety context rebuilt from today's saved Sleeper snapshot (`build_sleeper_current_player_context.py --from-warehouse`, zero API calls), focused tests, the coverage gate, dry-run of every positional promoter, gated applies, positional invariants, unified builds and promotions, unified invariants, GNG context, and a local all-profile publish validation. Formula changes still require owner review: the chain re-runs approved formulas on fresh data and stops if any guardrail trips.
 2. **Publish** — `publish_public_rankings.py --publish --gcloud-auth`, all four profiles, `datasets` carried forward.
-3. **Site import** — `run_remote_php.py --file scripts/trigger_site_rankings_import.php`; unchanged profiles skip by sha256.
+3. **Site import** — `run_remote_php.py --file scripts/trigger_site_rankings_import.php`; unchanged profiles skip by sha256. The wrapper retries one transient import failure after 10 seconds.
 
 After GNG context, the chain rebuilds the player situation layer from the freshly promoted boards, emits the `player_situation` public dataset artifacts (the wrapper uploads the immutable object and passes `--dataset-entry`), and writes the owner-review queue of flagged ranked players to `output\daily-publish\situation-review-<date>.md`. Boards publish at schema 1.3 with per-player `situation` and `metrics` blocks; situation facts never move ranks.
 
-Refresh exit policy: `0` publish the new boards; `1` a pre-write gate tripped (for example the QB24 cutline guardrail) — boards are untouched, the last-approved state is republished, and the gate output in `output\daily-publish\` is an owner-review item; `3` failure after writes began — publication is skipped per Recovery below.
+Refresh exit policy: `0` publish the new boards; `1` a pre-write gate tripped (for example the QB24 cutline guardrail) — boards are untouched, the last-approved state is republished with a named manifest warning, and the gate output in `output\daily-publish\` is an owner-review item; `3` failure after writes began — publication is skipped per Recovery below. Dataset uploads invoke `gcloud.cmd` on Windows so the scheduled task does not fail with `%1 is not a valid Win32 application`.
 
 Remove with `schtasks /delete /tn "PigskinDailyPublishImport" /f`. The prior publish-only wrapper `scripts/daily_publish_and_import.ps1` remains as a fallback.
 
 ### 11. Verify anonymously
 
-Fetch the public manifest without credentials:
+Fetch the public manifest without credentials. During the five-minute CDN cache window after publication, append a unique query parameter for verification:
 
-`https://storage.googleapis.com/fantasy-football-498121-public-rankings/v1/manifest.json`
+`https://storage.googleapis.com/fantasy-football-498121-public-rankings/v1/manifest.json?verify=<timestamp>`
 
 Confirm:
 

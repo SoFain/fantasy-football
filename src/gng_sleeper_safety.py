@@ -7,6 +7,16 @@ from typing import Any
 ACTIVE_STATUSES = {"Active", "ACT"}
 
 
+def is_rostered_injury_review_only(row: dict[str, Any]) -> bool:
+    """Return whether an inactive status is explained only by a rostered injury tag."""
+    return (
+        row.get("sleeper_active") is True
+        and bool(row.get("sleeper_team"))
+        and row.get("sleeper_status") == "Inactive"
+        and bool(row.get("sleeper_injury_status"))
+    )
+
+
 def apply_sleeper_safety(row: dict[str, Any]) -> dict[str, Any]:
     """Return current-board eligibility, bounded role adjustment, and review flags."""
     active = row.get("sleeper_active") is True
@@ -31,7 +41,7 @@ def apply_sleeper_safety(row: dict[str, Any]) -> dict[str, Any]:
         flags.append("ROOKIE_CONTEXT_REQUIRED")
     return {
         **row,
-        "sleeper_hard_review": not context_active,
+        "sleeper_hard_review": not context_active and not is_rostered_injury_review_only(row),
         "sleeper_role_adjustment": role_adjustment,
         "sleeper_review_flags": flags,
     }

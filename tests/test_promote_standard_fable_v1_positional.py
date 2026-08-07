@@ -46,6 +46,11 @@ class StandardFablePositionalPromotionTest(unittest.TestCase):
         )
         self.assertNotIn("STRUCT('A.J. Brown' AS player_name, 13 AS expected_rank)", self.sql)
 
+    def test_rb_preflight_allows_bounded_roster_growth(self):
+        self.assertIn("COUNT(*) BETWEEN 80 AND 100", self.sql)
+        self.assertIn("COUNT(DISTINCT source.candidate_internal_player_id) = COUNT(*)", self.sql)
+        self.assertNotIn("COUNT(*) = 85", self.sql)
+
 
 if __name__ == "__main__":
     unittest.main()

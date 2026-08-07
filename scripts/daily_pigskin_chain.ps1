@@ -57,10 +57,24 @@ function Invoke-Logged([string]$label, [string]$exe, [string]$argumentString, [s
 
 $refreshExit = Invoke-Logged 'daily-board-refresh' "$root\venv\Scripts\python.exe" `
     ('"{0}\scripts\run_daily_board_refresh.py" --apply' -f $branchRoot) $root
+$refreshWarning = $null
 if ($refreshExit -eq 0) {
     Write-Log 'board refresh complete; publishing the new boards'
 } elseif ($refreshExit -eq 1) {
     Write-Log 'BOARD REFRESH GATE TRIPPED (no writes). Publishing last-approved boards; the gate output above is an owner-review item.'
+    $auditPath = Join-Path $root 'output\current-player-ranking-coverage-audit.json'
+    try {
+        $audit = Get-Content $auditPath -Raw | ConvertFrom-Json
+        $blockingNames = @($audit.blocking_omissions | ForEach-Object { $_.player_name } | Where-Object { $_ })
+        $refreshWarning = if ($blockingNames.Count -gt 0) {
+            'Automated board refresh blocked by coverage gate: {0}. Serving the last-approved boards.' -f ($blockingNames -join ', ')
+        } else {
+            'Automated board refresh stopped at a pre-write gate. Serving the last-approved boards; inspect the daily chain log.'
+        }
+    } catch {
+        $refreshWarning = 'Automated board refresh stopped at a pre-write gate. Serving the last-approved boards; the gate detail file was unreadable.'
+    }
+    Write-Log $refreshWarning
 } else {
     Write-Log "BOARD REFRESH FAILED after writes began (exit=$refreshExit); skipping publish and import per runbook Recovery."
     exit 1
@@ -72,13 +86,16 @@ if ($refreshExit -eq 0) {
 # entries to the publisher. Any artifact missing (gate-tripped day, Sleeper API
 # hiccup) is skipped and the publisher carries that dataset forward unchanged.
 $publisherArgs = ('"{0}\scripts\publish_public_rankings.py" --publish --gcloud-auth' -f $root)
+if ($refreshWarning) {
+    $publisherArgs = $publisherArgs + (' --publisher-warning "{0}"' -f $refreshWarning.Replace('"', '\"'))
+}
 foreach ($datasetId in @('player_situation', 'market_context')) {
     $entryPath = Join-Path $branchRoot ("build\feeds\{0}.manifest-entry.json" -f $datasetId)
     $objectPath = Join-Path $branchRoot ("build\feeds\{0}.json" -f $datasetId)
     if ((Test-Path $entryPath) -and (Test-Path $objectPath)) {
         try {
             $entry = Get-Content $entryPath -Raw | ConvertFrom-Json
-            $null = Invoke-Logged ("upload-{0}-object" -f $datasetId) 'gcloud' `
+            $null = Invoke-Logged ("upload-{0}-object" -f $datasetId) 'gcloud.cmd' `
                 ('storage cp "{0}" "gs://fantasy-football-498121-public-rankings/{1}" --content-type="application/json; charset=utf-8" --cache-control="public, max-age=31536000, immutable" --if-generation-match=0' -f $objectPath, $entry.object) $root
             # A nonzero exit here is expected when the object already exists;
             # content addressing guarantees identical bytes, so proceed either way.
@@ -101,8 +118,14 @@ if ($publishExit -ne 0) {
 $importExit = Invoke-Logged 'ionos-site-import' 'C:\Python314\python.exe' `
     ('"{0}\scripts\run_remote_php.py" --file "{1}\scripts\trigger_site_rankings_import.php"' -f $cbs, $root) $cbs
 if ($importExit -ne 0) {
-    Write-Log 'IMPORT FAILED; the published feed is live but the site did not refresh.'
-    exit 1
+    Write-Log 'IONOS import failed once; retrying after 10 seconds.'
+    Start-Sleep -Seconds 10
+    $importExit = Invoke-Logged 'ionos-site-import-retry' 'C:\Python314\python.exe' `
+        ('"{0}\scripts\run_remote_php.py" --file "{1}\scripts\trigger_site_rankings_import.php"' -f $cbs, $root) $cbs
+    if ($importExit -ne 0) {
+        Write-Log 'IMPORT FAILED twice; the published feed is live but the site did not refresh.'
+        exit 1
+    }
 }
 
 Write-Log 'done: chain succeeded'

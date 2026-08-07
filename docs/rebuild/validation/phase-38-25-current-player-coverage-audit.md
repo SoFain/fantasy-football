@@ -11,7 +11,7 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | Profile | Position | Rows | Expected | Result |
 |---|---|---|---|---|
 | standard | QB | 45 | 45 | PASS |
-| standard | RB | 85 | 85 | PASS |
+| standard | RB | 86 | 85 | FAIL |
 | standard | WR | 100 | 100 | PASS |
 | standard | TE | 35 | 35 | PASS |
 | ppr | QB | 45 | 45 | PASS |
@@ -23,18 +23,18 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | half_ppr | WR | 100 | 100 | PASS |
 | half_ppr | TE | 35 | 35 | PASS |
 
-- Live Sleeper fetch: `2026-07-26T13:36:07.511900+00:00`.
-- BigQuery Sleeper snapshot: `2026-07-26 11:02:09.827171+00:00` (2 hours old).
+- Live Sleeper fetch: `2026-08-07T05:50:10.325925+00:00`.
+- BigQuery Sleeper snapshot: `2026-08-07 05:17:03.259619+00:00` (0 hours old).
 - BigQuery 72-hour safety status: `CURRENT`.
 - PPR versus Half-PPR presence mismatches: `0`.
-- Depth-order-1 current players missing at least one redraft board: `12`.
-- High-signal omissions supported by GNG or market rank: `7`.
+- Depth-order-1 current players missing at least one redraft board: `10`.
+- High-signal omissions supported by GNG or market rank: `5`.
 - Blocking veteran pipeline omissions: `0`.
 
 ## What The Current Omissions Mean
 
-- `6` are rookies. GNG admits them through its market overlay; redraft intentionally has no approved rookie path yet.
-- `0` established player falls below a one-season Fable threshold: Malik Nabers.
+- `4` are rookies. GNG admits them through its market overlay; redraft intentionally has no approved rookie path yet.
+- `1` established player falls below a one-season Fable threshold: Malik Nabers.
 - `0` established player is blocked by an identity collision: Marvin Harrison.
 - `5` tight ends have valid formula and candidate rows but land below the active TE35 cutoff. Isaiah Likely is the only high-signal market disagreement in that group.
 
@@ -43,12 +43,10 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | Player | Pos | Team | Exp | Standard | PPR | Half | GNG | Market Pos | PPR Candidate | Trace |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Jeremiyah Love | RB | ARI | 0 | missing | missing | missing | 5 | 4 | n/a | ROOKIE_SYSTEM_REQUIRED |
-| Kenyon Sadiq | TE | NYJ | 0 | missing | missing | missing | 9 | 9 | n/a | ROOKIE_SYSTEM_REQUIRED |
+| Kenyon Sadiq | TE | NYJ | 0 | missing | missing | missing | 10 | 9 | n/a | ROOKIE_SYSTEM_REQUIRED |
 | Carnell Tate | WR | TEN | 0 | missing | missing | missing | 14 | 13 | n/a | ROOKIE_SYSTEM_REQUIRED |
 | Jadarian Price | RB | SEA | 0 | missing | missing | missing | 19 | 17 | n/a | ROOKIE_SYSTEM_REQUIRED |
 | Isaiah Likely | TE | NYG | 4 | missing | missing | missing | 33 | 11 | 39 | POSITIONAL_PROMOTION_OR_BOARD_CUTOFF |
-| KC Concepcion | WR | CLE | 0 | missing | missing | missing | 34 | 30 | n/a | ROOKIE_SYSTEM_REQUIRED |
-| Chris Bell | WR | MIA | 0 | missing | missing | missing | 57 | 50 | n/a | ROOKIE_SYSTEM_REQUIRED |
 
 ## PPR And Half-PPR Presence Differences
 

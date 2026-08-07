@@ -16,6 +16,7 @@ from google.cloud import bigquery
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.sleeper_player_snapshot import fetch_sleeper_players
+from src.ranking_owner_decisions import COVERAGE_GATE_REVIEW_ONLY_DECISIONS
 
 
 PROFILES = ("standard", "ppr", "half_ppr")
@@ -153,6 +154,25 @@ def classify_omission(
     if not candidate_profiles:
         return "NOT_IN_RECEPTION_CANDIDATE_TABLES"
     return "POSITIONAL_PROMOTION_OR_BOARD_CUTOFF"
+
+
+def coverage_gate_review_only_reason(row: dict[str, Any]) -> str | None:
+    decision = COVERAGE_GATE_REVIEW_ONLY_DECISIONS.get(
+        (str(row.get("position") or ""), str(row.get("player_name") or ""))
+    )
+    if decision is None:
+        return None
+    qualification = row.get("qualification") or {}
+    if not qualification:
+        return None
+    if (
+        row.get("team") != decision["team"]
+        or row.get("years_exp") != decision["years_exp"]
+        or float(qualification.get("games_played") or 0) > decision["max_games_played"]
+        or float(qualification.get("qualification_volume") or 0) > decision["max_qualification_volume"]
+    ):
+        return None
+    return str(decision["reason"])
 
 
 def markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
@@ -549,10 +569,15 @@ def main() -> int:
             and (row["market"].get("rank_position") or 999) <= HIGH_SIGNAL_POSITION_RANK[row["position"]]
         )
     ]
+    for row in omissions:
+        row["coverage_gate_review_only_reason"] = coverage_gate_review_only_reason(row)
     blocking = [
         row for row in omissions
-        if row.get("years_exp") not in (None, 0) and row["trace_code"] in BLOCKING_TRACE_CODES
+        if row.get("years_exp") not in (None, 0)
+        and row["trace_code"] in BLOCKING_TRACE_CODES
+        and row["coverage_gate_review_only_reason"] is None
     ]
+    review_only = [row for row in omissions if row["coverage_gate_review_only_reason"] is not None]
 
     ppr_half_mismatches = []
     for key in sorted(set(active_canonical["ppr"]) | set(active_canonical["half_ppr"])):
@@ -585,6 +610,7 @@ def main() -> int:
         "ppr_half_ppr_presence_mismatches": ppr_half_mismatches,
         "high_signal_omissions": high_signal,
         "blocking_omissions": blocking,
+        "review_only_omissions": review_only,
         "frontline_omissions": omissions,
         "omission_trace_counts": dict(trace_counts),
         "gng_pipeline_differences": {
@@ -611,6 +637,7 @@ def main() -> int:
         "frontline_omissions": len(omissions),
         "high_signal_omissions": [row["player_name"] for row in high_signal],
         "blocking_omissions": [row["player_name"] for row in blocking],
+        "review_only_omissions": [row["player_name"] for row in review_only],
         "bigquery_context_age_hours": freshness["context_age_hours"],
     }, indent=2, default=json_value))
     return 2 if args.fail_on_blocking and blocking else 0

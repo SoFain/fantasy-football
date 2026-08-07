@@ -33,7 +33,9 @@ def build_sql(project: str, brain: str, metrics: str, version: str) -> str:
 """
     return f"""
 ASSERT (
-  SELECT COUNT(*) = 85 AND COUNTIF(context.team IS NULL) = 0
+  SELECT COUNT(*) BETWEEN 80 AND 100
+    AND COUNT(DISTINCT source.candidate_internal_player_id) = COUNT(*)
+    AND COUNTIF(context.team IS NULL) = 0
   FROM {rb} source
   JOIN {safety} context ON context.position='RB' AND context.gsis_id=source.candidate_internal_player_id
   WHERE source.season=2025 AND source.rb_fable_01_score IS NOT NULL

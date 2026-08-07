@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.run_gng_advanced_hypotheses import weighted_average
 from scripts.run_gng_position_candidate_expansion import percent_ranks
 from src.ranking_owner_decisions import GNG_WATCHLIST_NAMES
+from src.gng_sleeper_safety import is_rostered_injury_review_only
 
 
 FORMULAS = {
@@ -134,7 +135,10 @@ WHERE is_active AND scoring_profile_id='gng_keeper' AND position IN ('QB','RB','
             row["formula_score"]=base
             row["current_score"]=base+(row.get("sleeper_role_adjustment") or 0.0) if base is not None else None
             row["formula_id"]=formula
-            row["sleeper_hard_review"]=row.get("sleeper_hard_review") is not False
+            row["sleeper_hard_review"]=(
+                row.get("sleeper_hard_review") is not False
+                and not is_rostered_injury_review_only(row)
+            )
             row["sleeper_review_flags_json"]=row.get("sleeper_review_flags_json") or '["SLEEPER_CONTEXT_MISSING"]'
             scored.append(row)
         scored.sort(key=lambda row:(-(row["current_score"] or -1),row["player_name"]))

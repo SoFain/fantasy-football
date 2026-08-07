@@ -9,7 +9,7 @@ class PromotePprFableV1PositionalTest(unittest.TestCase):
         self.assertIn("WHEN 'RB' THEN 80 WHEN 'WR' THEN 100 WHEN 'TE' THEN 35",sql)
         self.assertIn("v_ranking_post_formula_safety",sql)
         self.assertIn("formula_score + context.post_formula_adjustment",sql)
-        self.assertIn("Selected Fable rows contain unresolved Sleeper roster hard reviews",sql)
+        self.assertIn("Selected Fable rows contain missing Sleeper identity context",sql)
         self.assertIn("context.current_board_rank_eligible",sql)
         self.assertIn("AND COALESCE(context.current_board_rank_eligible,FALSE)",sql)
         self.assertIn("candidate.formula_rank <= CASE candidate.position",sql)
@@ -18,6 +18,13 @@ class PromotePprFableV1PositionalTest(unittest.TestCase):
         self.assertIn("COALESCE(context.ranking_eligibility,'current_roster_review_required')",sql)
         self.assertIn("NOT EXISTS(SELECT 1 FROM `p.d.ppr_fable_rankings_current`",sql)
         self.assertNotIn("position='QB'",sql)
+
+    def test_rostered_injury_context_is_review_only(self):
+        sql=build_sql("p","d","ppr","m")
+        self.assertIn("AND context.gsis_id IS NULL",sql)
+        self.assertIn("injury status is review-only with no estimated games missed",sql)
+        self.assertIn("current_team IS NULL OR ranking_eligibility = 'teamless_unranked'",sql)
+        self.assertNotIn("context.current_board_rank_eligible AND context.sleeper_hard_review",sql)
     def test_gate(self): self.assertEqual(WRITE_GATE,"ALLOW_PPR_FABLE_POSITIONAL_PROMOTION")
 
     def test_reception_profiles_normalize_scores_and_build_metric_verdicts(self):
