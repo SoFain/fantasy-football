@@ -248,6 +248,8 @@ The publisher uploads content-addressed board objects first, then an immutable v
 
 The existing Windows task `PigskinDailyPublishImport` runs `scripts/daily_pigskin_chain.ps1` at 07:30 and 12:30 America/New_York. It starts when a missed run becomes available, rejects overlapping executions, and retries failures twice at 30-minute intervals. Cloud Run still ingests Sleeper at 07:00 and detects player changes at 07:15.
 
+The Windows host uses `Eastern Standard Time`. Both daily trigger boundaries omit a fixed UTC offset, so their local clock times follow daylight-saving changes.
+
 1. Refresh the current NFL season in `weekly_metrics` transactionally. Preserve historical seasons, reject lost source keys, and report games awaiting upstream stats. See `docs/current-season-stats-refresh.md`.
 2. Refresh roster safety context and rebuild the materialized Standard WR safety candidates. A candidate snapshot must match the current safety timestamp and team before promotion. Rostered inactive injuries remain review-only with zero absence adjustment; missing identity, teamless players, stale context, and other hard reviews still block.
 3. Run focused tests, coverage audit, positional dry runs and gated promotions, then recheck coverage. Rebuild unified boards and the existing situation adjustments. Every profile must pass the release invariants before publication.
