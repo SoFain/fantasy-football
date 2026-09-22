@@ -201,6 +201,16 @@ def print_plan(migrations: list[Migration], applied_ids: set[str] | None = None)
     return pending
 
 
+def print_discovered_migrations(migrations: list[Migration]) -> list[Migration]:
+    print("Dry run mode: local discovery only. This does not connect to BigQuery or read the schema_migrations ledger.")
+    print("Use --list-pending for ledger-aware pending migration status.")
+    print("Discovered migration files:")
+    for migration in migrations:
+        statement_count = "sql" if has_executable_sql(migration.sql) else "no-op"
+        print(f"- {migration.migration_id}: {migration.description} ({statement_count})")
+    return migrations
+
+
 def build_client(project_id: str):
     bigquery = get_bigquery_module()
     return bigquery.Client(project=project_id)
@@ -251,7 +261,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="Print planned local migrations without connecting.")
+    mode.add_argument("--dry-run", action="store_true", help="List discovered local migration files without connecting to BigQuery.")
     mode.add_argument("--apply", action="store_true", help="Apply pending migrations and record them.")
     mode.add_argument("--list-pending", action="store_true", help="List migrations not recorded in the ledger.")
     mode.add_argument("--record", help="Record a migration ID as applied without executing SQL.")
@@ -270,7 +280,7 @@ def main() -> None:
     print(f"Migrations dir: {migrations_dir}")
 
     if args.dry_run or not any([args.apply, args.list_pending, args.record]):
-        print_plan(migrations)
+        print_discovered_migrations(migrations)
         return
 
     client = build_client(args.project)

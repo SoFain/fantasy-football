@@ -1,0 +1,36 @@
+# Git and local metadata
+.git/
+.gitignore
+.gcloudignore
+
+# Python environments and caches
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local generated evidence and logs
+cache/
+*.parquet
+*.log
+pipeline_execution.log
+output/
+.codex-remote-attachments/
+.codex-tools/
+
+# Local credentials and env files
+.env
+.env.*
+*.json
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# IDE configs
+.vscode/
+.idea/

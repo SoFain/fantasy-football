@@ -1,10 +1,12 @@
 import argparse
 import json
 import logging
+import math
 import os
 import re
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,7 +39,7 @@ DEFAULT_POSITION_LIMITS = {
     "QB": 45,
     "RB": 80,
     "WR": 100,
-    "TE": 60,
+    "TE": 35,
 }
 VALID_POSITIONS = tuple(DEFAULT_POSITION_LIMITS)
 RANKING_SOURCE_TABLES = (
@@ -52,6 +54,39 @@ RANKING_MAX_VALUE_TABLES = (
     "analytics_pigskin_rankings_candidates",
     "analytics_player_weekly_truth",
 )
+SCORING_PROFILE_LABELS = {
+    "ppr": "PPR",
+    "standard": "Standard",
+    "gng_keeper": "GNG Keeper",
+}
+LLM_ADJUSTMENT_RULES = {
+    "NO_ADJUSTMENT": {"max_movement": 0},
+    "CURRENT_ROLE_UPGRADE": {"min_movement": 1, "max_movement": 3},
+    "CURRENT_ROLE_DOWNGRADE": {"min_movement": -8, "max_movement": -1},
+    "ROOKIE_CONTEXT": {"min_movement": -3, "max_movement": 3},
+    "INJURY_1_2": {"min_movement": -2, "max_movement": -1, "games_min": 1, "games_max": 2},
+    "INJURY_3_5": {"min_movement": -5, "max_movement": -1, "games_min": 3, "games_max": 5},
+    "INJURY_6_8": {"min_movement": -10, "max_movement": -1, "games_min": 6, "games_max": 8},
+    "INJURY_9_PLUS": {"min_movement": -15, "max_movement": -1, "games_min": 9, "games_max": 17},
+    "INJURY_UNCERTAIN": {"max_movement": 0},
+    "SUSPENSION_1_2": {"min_movement": -2, "max_movement": -1, "games_min": 1, "games_max": 2},
+    "SUSPENSION_3_5": {"min_movement": -5, "max_movement": -1, "games_min": 3, "games_max": 5},
+    "SUSPENSION_6_8": {"min_movement": -10, "max_movement": -1, "games_min": 6, "games_max": 8},
+    "SUSPENSION_9_PLUS": {"min_movement": -15, "max_movement": -1, "games_min": 9, "games_max": 17},
+    "SUSPENSION_UNCERTAIN": {"max_movement": 0},
+    "ORDER_REBALANCE": {"min_movement": -15, "max_movement": 15, "application_only": True},
+}
+NON_SUBSTANTIVE_ADJUSTMENT_CODES = {
+    "NO_ADJUSTMENT",
+    "INJURY_UNCERTAIN",
+    "SUSPENSION_UNCERTAIN",
+}
+MAX_ADJUSTMENT_SHARE = 0.15
+MAX_TOTAL_REQUESTED_MOVEMENT = 12
+
+
+def scoring_profile_label(scoring_profile_id):
+    return SCORING_PROFILE_LABELS.get(str(scoring_profile_id), str(scoring_profile_id).replace("_", " ").title())
 
 
 def parse_positions(value):
@@ -68,17 +103,19 @@ def get_position_limit(position, override):
     return DEFAULT_POSITION_LIMITS[position]
 
 
-def fetch_candidates(client, dataset_id, position, limit):
+def fetch_candidates(client, dataset_id, position, limit, scoring_profile_id=DEFAULT_SCORING_PROFILE_ID):
     query = f"""
     SELECT
         *
     FROM `{client.project}.{dataset_id}.analytics_pigskin_rankings_candidates`
     WHERE position = @position
+      AND scoring_profile_id = @scoring_profile_id
     ORDER BY rank ASC, ranking_score DESC, sleeper_search_rank ASC
     LIMIT @limit
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("position", "STRING", position),
+        bigquery.ScalarQueryParameter("scoring_profile_id", "STRING", scoring_profile_id),
         bigquery.ScalarQueryParameter("limit", "INT64", int(limit)),
     ])
     return client.query(query, job_config=job_config).result().to_dataframe()
@@ -156,8 +193,10 @@ def build_evidence_lines(df):
                 f"depth={row.sleeper_depth_chart_order}",
                 f"candidate_rank={row.rank}",
                 f"candidate_score={format_num(row.ranking_score)}",
+                f"candidate_rationale={getattr(row, 'rank_rationale', '')}",
                 f"raw_score={format_num(row.raw_ranking_score)}",
                 f"depth_penalty={format_num(row.depth_chart_penalty)}",
+                f"profile_pts_pg={format_num(getattr(row, 'avg_profile_points', row.avg_ppr))}",
                 f"ppr_pg={format_num(row.avg_ppr)}",
                 f"grade={format_num(row.avg_grade)}",
                 f"opp={format_num(row.avg_opportunity)}",
@@ -182,22 +221,16 @@ def build_evidence_lines(df):
     return "\n".join(lines)
 
 
-def build_prompt(position, df, ranking_version):
-    tier_contract = {
-        "QB": "elite QB1, QB1, QB2 or streamer, backup or handcuff, bench or watchlist",
-        "RB": "elite, front-line starter, starter, flex or matchup, deep or watchlist",
-        "WR": "elite, front-line starter, starter, flex or matchup, deep or watchlist",
-        "TE": "elite, front-line starter, starter, flex or matchup, deep or watchlist",
-    }[position]
+def build_prompt(position, df, ranking_version, scoring_profile_id=DEFAULT_SCORING_PROFILE_ID):
+    profile_label = scoring_profile_label(scoring_profile_id)
     evidence = build_evidence_lines(df)
     player_count = len(df)
     return f"""
 You are Pigskin, the analytical co-host for AI vs Vibes.
-You are generating the official 2026 PPR {position} rankings for the show.
+    You are generating the official 2026 {profile_label} {position} rankings for the show.
 
-This is not a vibes list and not a popularity list. Use the candidate board as evidence, not as an order you must obey.
-The SQL rank is only `candidate_rank`. It is not your final ranking.
-Your job is to adjudicate the board with deeper analytics: opportunity quality, split EPA, WOPR history, target-share history, carry-share history, role quality, role fragility, current Sleeper team, current Sleeper depth chart, and whether the prior fantasy output is sustainable.
+This is not a vibes list and not a popularity list. The candidate board is the default order.
+You are an exception-repair layer, not a second ranking formula. The candidate board is authoritative. Request a movement only when current source-backed context identifies something the deterministic formula cannot know, such as a verified current-role change, a rookie-context exception, or expected regular-season games missed.
 
 Hard rules:
 1. Rank every listed player exactly once.
@@ -206,12 +239,13 @@ Hard rules:
 4. Current Sleeper role is a hard constraint. If `sleeper_active` is false, `sleeper_team` is null, or status is not Active/ACT, bury the player as watchlist material and flag the stale roster problem.
 5. Do not rank a backup QB as a normal QB1. If `depth` is greater than 1, the player must be a backup or handcuff and should rank behind every current QB1 with a credible sample unless the evidence contains an obvious current starter path.
 6. Do not put backup QBs in elite QB1 or QB1 tiers. A player can be talented and still be a fantasy bench stash if the role says bench.
-7. Penalize players with no stable current role, high fragility, bad EPA, or volume that looks like box-score cosplay.
-8. Prefer repeatable role and efficiency over touchdown spikes.
-9. For WR and TE, WOPR history and target share matter. For RB, carry share history, receiving role, and rushing EPA matter. For QB, passing EPA, rushing EPA, rushing role, depth chart, and volume matter.
-10. Be ruthless, but do not invent facts not present in the evidence.
-
-Allowed tiers for {position}: {tier_contract}.
+7. Do not reinterpret formula metrics, sustainability, efficiency, touchdown regression, age, or opportunity. The deterministic formula already owns those judgments.
+8. Valid model adjustment codes are: NO_ADJUSTMENT, CURRENT_ROLE_UPGRADE, CURRENT_ROLE_DOWNGRADE, ROOKIE_CONTEXT, INJURY_1_2, INJURY_3_5, INJURY_6_8, INJURY_9_PLUS, INJURY_UNCERTAIN, SUSPENSION_1_2, SUSPENSION_3_5, SUSPENSION_6_8, SUSPENSION_9_PLUS, SUSPENSION_UNCERTAIN. ORDER_REBALANCE is application-only and must never be returned.
+9. Current-role upgrades are limited to three ranks. Current-role downgrades are limited to eight. Rookie context is limited to three ranks in either direction. Injury adjustments can only lower a player: one to two estimated missed regular-season games permits two ranks, three to five permits five, six to eight permits ten, and nine or more permits fifteen.
+10. Request no more than {max(3, math.ceil(player_count * MAX_ADJUSTMENT_SHARE))} substantive adjustments. The sum of absolute requested movements cannot exceed {MAX_TOTAL_REQUESTED_MOVEMENT}.
+11. Use an injury or suspension adjustment only when the supplied evidence explicitly states an estimated regular-season games-missed count. A Sleeper injury status or unverified suspension report alone is not enough. If the absence is unresolved, use the matching UNCERTAIN code and do not move the player for it.
+12. Preseason Questionable status alone has zero rank effect. Use INJURY_UNCERTAIN with requested_rank_delta 0 if it deserves a visible warning.
+13. NO_ADJUSTMENT, INJURY_UNCERTAIN, and SUSPENSION_UNCERTAIN require requested_rank_delta 0. Every code except NO_ADJUSTMENT must have non-empty adjustment detail and evidence copied from supplied fields.
 
 Return strict JSON only. Do not include markdown. The JSON shape must be:
 {{
@@ -220,18 +254,16 @@ Return strict JSON only. Do not include markdown. The JSON shape must be:
   "rankings": [
     {{
       "player_id": "exact id from evidence",
-      "rank": 1,
-      "tier": "one allowed tier",
-      "ranking_score": 0.0,
-      "pigskin_verdict": "one sharp sentence",
-      "rank_rationale": "one or two evidence-heavy sentences citing the strongest metrics",
-      "risk_flags": "semicolon-separated analytical risks, or no major Pigskin ranking flag",
-      "what_would_change_mind": "specific evidence that would move the rank"
+      "requested_rank_delta": 0,
+      "adjustment_code": "one approved code",
+      "adjustment_detail": "brief source-backed explanation of the movement, or no adjustment",
+      "adjustment_evidence": "specific supplied metrics or current-role fields used",
+      "estimated_regular_season_games_missed": null
     }}
   ]
 }}
 
-Use ranking_score as your final 0-100 conviction score after your adjudication, not the candidate score.
+Do not replace the candidate score. The application preserves it as the deterministic score and records your rank overlay separately.
 
 Evidence:
 {evidence}
@@ -283,10 +315,14 @@ def call_gemini(api_key, model_name, prompt):
 def normalize_model_rankings(position, candidates_df, model_payload, ranking_version, model_name, run_metadata):
     candidate_by_id = {str(row.player_id): row for row in candidates_df.itertuples(index=False)}
     model_rows = model_payload.get("rankings") or []
+    returned_ids = [str(item.get("player_id", "")).strip() for item in model_rows]
+    missing_ids = [player_id for player_id in candidate_by_id if player_id not in returned_ids]
+    if missing_ids:
+        raise ValueError(f"{position} model omitted {len(missing_ids)} candidates: {', '.join(missing_ids[:8])}")
     seen = set()
     normalized = []
 
-    for item in sorted(model_rows, key=lambda row: safe_int(row.get("rank"))):
+    for item in model_rows:
         player_id = str(item.get("player_id", "")).strip()
         if player_id not in candidate_by_id:
             raise ValueError(f"{position} model returned unknown player_id {player_id!r}.")
@@ -294,24 +330,50 @@ def normalize_model_rankings(position, candidates_df, model_payload, ranking_ver
             raise ValueError(f"{position} model returned duplicate player_id {player_id!r}.")
         seen.add(player_id)
         candidate = candidate_by_id[player_id]._asdict()
-        normalized.append(build_final_row(candidate, item, ranking_version, model_name, run_metadata))
-
-    missing_ids = [str(row.player_id) for row in candidates_df.itertuples(index=False) if str(row.player_id) not in seen]
-    if missing_ids:
-        raise ValueError(f"{position} model omitted {len(missing_ids)} candidates: {', '.join(missing_ids[:8])}")
+        row = build_final_row(candidate, item, ranking_version, model_name, run_metadata)
+        row["_requested_rank_delta"] = safe_int(item.get("requested_rank_delta"), 0)
+        row["llm_rank_delta"] = row["_requested_rank_delta"]
+        validate_adjustment(row, requested=True)
+        normalized.append(row)
 
     if len(normalized) != len(candidates_df):
         raise ValueError(f"{position} model returned {len(normalized)} rows for {len(candidates_df)} candidates.")
 
+    substantive = [
+        row for row in normalized
+        if row["llm_adjustment_code"] not in NON_SUBSTANTIVE_ADJUSTMENT_CODES
+    ]
+    max_adjustments = max(3, math.ceil(len(normalized) * MAX_ADJUSTMENT_SHARE))
+    if len(substantive) > max_adjustments:
+        raise ValueError(f"{position} model requested {len(substantive)} adjustments; maximum is {max_adjustments}.")
+    total_requested = sum(abs(row["_requested_rank_delta"]) for row in substantive)
+    if total_requested > MAX_TOTAL_REQUESTED_MOVEMENT:
+        raise ValueError(
+            f"{position} model requested {total_requested} total ranks of movement; "
+            f"maximum is {MAX_TOTAL_REQUESTED_MOVEMENT}."
+        )
+
+    normalized.sort(key=lambda row: (
+        safe_int(row.get("candidate_rank")) - row["_requested_rank_delta"],
+        safe_int(row.get("candidate_rank")),
+    ))
     for index, row in enumerate(normalized, start=1):
         row["rank"] = index
+        row["llm_rank_delta"] = safe_int(row.get("candidate_rank")) - index
+        if row["llm_adjustment_code"] in NON_SUBSTANTIVE_ADJUSTMENT_CODES and row["llm_rank_delta"] != 0:
+            row["llm_adjustment_code"] = "ORDER_REBALANCE"
+            row["llm_adjustment_detail"] = "Mechanical displacement caused by a separate coded repair."
+            row["llm_adjustment_evidence"] = "application deterministic reorder"
+        validate_adjustment(row)
+        row["rank_rationale"] = build_scientific_rank_rationale(row)
+        row.pop("_requested_rank_delta", None)
         row["is_active"] = True
 
     return normalized
 
 
 def generate_position_rows(api_key, model_name, position, candidates_df, ranking_version, run_metadata):
-    prompt = build_prompt(position, candidates_df, ranking_version)
+    prompt = build_prompt(position, candidates_df, ranking_version, run_metadata["scoring_profile_id"])
     last_error = None
     for attempt in range(1, 4):
         try:
@@ -344,23 +406,110 @@ def build_final_row(candidate, model_item, ranking_version, model_name, run_meta
     row["source_freshness_snapshot_id"] = run_metadata["source_freshness_snapshot_id"]
     row["candidate_rank"] = candidate.get("rank")
     row["candidate_ranking_score"] = candidate.get("ranking_score")
-    row["rank"] = safe_int(model_item.get("rank"), 999999)
+    row["rank"] = safe_int(candidate.get("rank"), 999999)
     row["ranking_version"] = ranking_version
     row["generated_at"] = adjudicated_at
-    row["ranking_score"] = safe_float(model_item.get("ranking_score"), safe_float(candidate.get("ranking_score")))
-    row["tier"] = str(model_item.get("tier") or candidate.get("tier") or "watchlist")
-    row["pigskin_verdict"] = str(model_item.get("pigskin_verdict") or candidate.get("pigskin_verdict") or "")
-    row["rank_rationale"] = str(model_item.get("rank_rationale") or candidate.get("rank_rationale") or "")
-    row["risk_flags"] = str(model_item.get("risk_flags") or candidate.get("risk_flags") or "")
-    row["what_would_change_mind"] = str(
-        model_item.get("what_would_change_mind") or candidate.get("what_would_change_mind") or ""
-    )
+    row["ranking_score"] = safe_float(candidate.get("ranking_score"))
+    row["tier"] = str(candidate.get("tier") or "watchlist")
+    row["pigskin_verdict"] = str(candidate.get("pigskin_verdict") or "")
+    row["rank_rationale"] = str(candidate.get("rank_rationale") or "")
+    row["risk_flags"] = str(candidate.get("risk_flags") or "")
+    row["what_would_change_mind"] = str(candidate.get("what_would_change_mind") or "")
     row["model_name"] = model_name
     row["prompt_version"] = run_metadata["prompt_version"]
     row["rank_source"] = "llm_pigskin_adjudicated"
+    row["llm_adjustment_code"] = str(model_item.get("adjustment_code") or "").strip().upper()
+    row["llm_adjustment_detail"] = str(model_item.get("adjustment_detail") or "").strip()
+    row["llm_adjustment_evidence"] = str(model_item.get("adjustment_evidence") or "").strip()
+    row["llm_estimated_games_missed"] = parse_optional_int(model_item.get("estimated_regular_season_games_missed"))
+    row["llm_rank_delta"] = safe_int(model_item.get("requested_rank_delta"), 0)
     row["adjudicated_at"] = adjudicated_at
     row["data_snapshot_label"] = f"{candidate.get('data_snapshot_label')}_llm"
     return row
+
+
+def parse_optional_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError("estimated_regular_season_games_missed must be an integer or null.")
+
+
+def build_scientific_rank_rationale(row):
+    base = str(row.get("rank_rationale") or "").strip()
+    code = str(row.get("llm_adjustment_code") or "").strip().upper()
+    if not code or code == "NO_ADJUSTMENT":
+        return base
+
+    detail = str(row.get("llm_adjustment_detail") or "").strip().rstrip(".")
+    evidence = str(row.get("llm_adjustment_evidence") or "").strip().rstrip(".")
+    position = str(row.get("position") or "").strip().upper()
+    candidate_rank = safe_int(row.get("candidate_rank"), 0)
+    final_rank = safe_int(row.get("rank"), 0)
+    movement = safe_int(row.get("llm_rank_delta"), 0)
+
+    if code == "ORDER_REBALANCE":
+        adjustment = "Post-formula mechanical reorder"
+    elif code.startswith("INJURY_"):
+        adjustment = "Post-formula injury review" if code == "INJURY_UNCERTAIN" else "Post-formula injury adjustment"
+    elif code.startswith("SUSPENSION_"):
+        adjustment = "Post-formula suspension review" if code == "SUSPENSION_UNCERTAIN" else "Post-formula suspension adjustment"
+    else:
+        adjustment = f"Post-formula {code.lower().replace('_', ' ')} adjustment"
+
+    parts = [base, f"{adjustment}: {detail or code}."]
+    games_missed = row.get("llm_estimated_games_missed")
+    if games_missed is not None:
+        parts.append(f"Estimated regular-season games missed: {int(games_missed)}.")
+    elif code in {"INJURY_UNCERTAIN", "SUSPENSION_UNCERTAIN"}:
+        parts.append("No absence penalty was applied because missed time is unconfirmed.")
+    if evidence:
+        parts.append(f"Evidence: {evidence}.")
+    if candidate_rank > 0 and final_rank > 0:
+        rank_prefix = position if position else "rank "
+        parts.append(
+            f"Candidate {rank_prefix}{candidate_rank} became final {rank_prefix}{final_rank} "
+            f"({movement:+d} ranks); formula score unchanged."
+        )
+    return " ".join(part for part in parts if part)
+
+
+def validate_adjustment(row, *, requested=False):
+    code = row.get("llm_adjustment_code")
+    if code not in LLM_ADJUSTMENT_RULES:
+        raise ValueError(f"Unsupported LLM adjustment code: {code!r}.")
+
+    movement = row["llm_rank_delta"]
+    rule = LLM_ADJUSTMENT_RULES[code]
+    if requested and rule.get("application_only"):
+        raise ValueError(f"{code} is application-only.")
+    min_movement = rule.get("min_movement", 0)
+    max_movement = rule["max_movement"]
+    if not min_movement <= movement <= max_movement:
+        raise ValueError(
+            f"{code} permits rank movement from {min_movement} through {max_movement}; got {movement}."
+        )
+
+    games_missed = row.get("llm_estimated_games_missed")
+    if "games_min" in rule:
+        if games_missed is None or not rule["games_min"] <= games_missed <= rule["games_max"]:
+            raise ValueError(
+                f"{code} requires estimated_regular_season_games_missed from "
+                f"{rule['games_min']} through {rule['games_max']}."
+            )
+    elif games_missed is not None:
+        raise ValueError(f"{code} cannot include an estimated games-missed value.")
+
+    injury_status = str(row.get("sleeper_injury_status") or "").strip().lower()
+    if injury_status == "questionable" and code.startswith("INJURY_") and code != "INJURY_UNCERTAIN":
+        raise ValueError("Preseason Questionable status cannot move a rank.")
+
+    if code != "NO_ADJUSTMENT" and (
+        not row.get("llm_adjustment_detail") or not row.get("llm_adjustment_evidence")
+    ):
+        raise ValueError(f"{code} requires adjustment detail and evidence.")
 
 
 def ensure_history_table(client, final_table_id, history_table_id):
@@ -379,6 +528,17 @@ def ensure_history_table(client, final_table_id, history_table_id):
         client.update_table(history_table, ["schema"])
 
 
+def ranking_load_schema(client, final_table_id, history_table_id):
+    for table_id in (history_table_id, final_table_id):
+        try:
+            table = client.get_table(table_id)
+        except NotFound:
+            continue
+        if table.schema:
+            return list(table.schema)
+    return None
+
+
 def write_rankings(client, dataset_id, rows):
     if not rows:
         raise RuntimeError("No Pigskin ranking rows were generated.")
@@ -386,22 +546,141 @@ def write_rankings(client, dataset_id, rows):
     df = pd.DataFrame(rows)
     final_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings"
     history_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings_history"
+    staging_table_id = f"{client.project}.{dataset_id}.analytics_pigskin_rankings_staging_{uuid.uuid4().hex}"
+    load_schema = ranking_load_schema(client, final_table_id, history_table_id)
+    positions = sorted({str(row["position"]) for row in rows if row.get("position")})
+    scoring_profile_ids = sorted({str(row["scoring_profile_id"]) for row in rows if row.get("scoring_profile_id")})
+    league_type_ids = sorted({str(row["league_type_id"]) for row in rows if row.get("league_type_id")})
+    roster_format_ids = sorted({str(row["roster_format_id"]) for row in rows if row.get("roster_format_id")})
+    if not positions or not scoring_profile_ids or not league_type_ids or not roster_format_ids:
+        raise RuntimeError("Pigskin ranking rows must include position and profile scope fields.")
+    if load_schema:
+        df = df.reindex(columns=[field.name for field in load_schema])
 
-    final_job = client.load_table_from_dataframe(
+    staging_job = client.load_table_from_dataframe(
         df,
-        final_table_id,
-        job_config=bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE),
+        staging_table_id,
+        job_config=bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_EMPTY,
+            schema=load_schema,
+        ),
     )
-    final_job.result()
+    staging_job.result()
+
+    delete_sql, insert_sql = build_profile_aware_rankings_replace_sql(client.project, dataset_id, staging_table_id.split(".")[-1])
+    query_parameters = [
+        bigquery.ArrayQueryParameter("scoring_profile_ids", "STRING", scoring_profile_ids),
+        bigquery.ArrayQueryParameter("league_type_ids", "STRING", league_type_ids),
+        bigquery.ArrayQueryParameter("roster_format_ids", "STRING", roster_format_ids),
+        bigquery.ArrayQueryParameter("positions", "STRING", positions),
+    ]
+    query_config = bigquery.QueryJobConfig(query_parameters=query_parameters)
+    try:
+        client.query(delete_sql, job_config=query_config).result()
+        client.query(insert_sql).result()
+    finally:
+        client.delete_table(staging_table_id, not_found_ok=True)
 
     ensure_history_table(client, final_table_id, history_table_id)
     history_job = client.load_table_from_dataframe(
         df,
         history_table_id,
-        job_config=bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND),
+        job_config=bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            schema=load_schema,
+        ),
     )
     history_job.result()
     logger.info("Loaded %s LLM-authored Pigskin ranking rows.", len(df))
+
+
+def build_profile_aware_rankings_replace_sql(project_id, dataset_id, staging_table_name):
+    """Return a future-safe selected-profile replace plan for active rankings."""
+
+    final_table_id = f"`{project_id}.{dataset_id}.analytics_pigskin_rankings`"
+    staging_table_id = f"`{project_id}.{dataset_id}.{staging_table_name}`"
+    delete_sql = f"""
+    DELETE FROM {final_table_id} target_board
+    WHERE EXISTS (
+        SELECT 1
+        FROM {staging_table_id} source_board
+        WHERE target_board.scoring_profile_id = source_board.scoring_profile_id
+          AND target_board.league_type_id = source_board.league_type_id
+          AND target_board.roster_format_id = source_board.roster_format_id
+          AND target_board.position = source_board.position
+          AND target_board.scoring_profile_id IN UNNEST(@scoring_profile_ids)
+          AND target_board.league_type_id IN UNNEST(@league_type_ids)
+          AND target_board.roster_format_id IN UNNEST(@roster_format_ids)
+          AND target_board.position IN UNNEST(@positions)
+    )
+    """.strip()
+    insert_sql = f"""
+    INSERT INTO {final_table_id}
+    SELECT *
+    FROM {staging_table_id}
+    """.strip()
+    return delete_sql, insert_sql
+
+
+def build_candidate_historical_metrics_gap_query(project_id, dataset_id, scoring_profile_id=DEFAULT_SCORING_PROFILE_ID):
+    return f"""
+    SELECT
+        candidate.position,
+        candidate.player_id,
+        candidate.player_name,
+        candidate.current_team,
+        candidate.sleeper_player_id,
+        candidate.weekly_rows,
+        COUNT(DISTINCT CONCAT(CAST(metrics.season AS STRING), '-', CAST(metrics.week AS STRING))) AS metric_week_count
+    FROM `{project_id}.{dataset_id}.analytics_pigskin_rankings_candidates` candidate
+    JOIN `{project_id}.{dataset_id}.player_week_advanced_metrics` metrics
+        ON metrics.player_id_internal = candidate.player_id
+    WHERE candidate.scoring_profile_id = @scoring_profile_id
+      AND COALESCE(candidate.weekly_rows, 0) = 0
+    GROUP BY
+        candidate.position,
+        candidate.player_id,
+        candidate.player_name,
+        candidate.current_team,
+        candidate.sleeper_player_id,
+        candidate.weekly_rows
+    HAVING metric_week_count > 0
+    ORDER BY metric_week_count DESC, candidate.position, candidate.player_name
+    """.strip()
+
+
+def require_current_sleeper_pool(client, dataset_id, *, allow_stale=False):
+    """Fail unless sleeper_players_current holds today's snapshot.
+
+    Enforces the "run Sleeper first" rule: the daily Sleeper pull defines the
+    eligible, active player pool, so rankings must not run against a stale or
+    empty snapshot. In dry-run mode this downgrades to a warning so the pipeline
+    can be exercised without a live snapshot.
+    """
+    table_id = f"{client.project}.{dataset_id}.sleeper_players_current"
+    row = next(iter(client.query(
+        f"SELECT MAX(DATE(snapshot_at)) AS latest, COUNT(1) AS n FROM `{table_id}`"
+    ).result()))
+    today = datetime.now(timezone.utc).date()
+
+    if not row.n or row.latest is None:
+        message = (
+            "sleeper_players_current is empty. Run the ingest-sleeper-news job before "
+            "generating rankings: the Sleeper snapshot defines the eligible active player pool."
+        )
+    elif row.latest < today:
+        message = (
+            f"sleeper_players_current is stale (latest snapshot {row.latest}, expected {today}). "
+            "Run ingest-sleeper-news first: rankings must be built from today's active player pool."
+        )
+    else:
+        logger.info("Sleeper pool is current as of %s.", row.latest)
+        return
+
+    if allow_stale:
+        logger.warning("%s Proceeding because this is a dry run.", message)
+        return
+    raise RuntimeError(message)
 
 
 def generate_rankings(
@@ -428,10 +707,23 @@ def generate_rankings(
 
     if refresh_sleeper:
         logger.info("Refreshing Sleeper current player map before ranking generation.")
-        load_realtime_news()
+        load_realtime_news(client=client)
+
+    # Hard rule: rankings are built from today's Sleeper active pool. The
+    # snapshot defines who is eligible, and only Sleeper-active players are
+    # rankable, so a stale or missing snapshot must stop the run rather than
+    # silently rank last-known players.
+    require_current_sleeper_pool(client, dataset_id, allow_stale=dry_run)
 
     logger.info("Materializing Pigskin ranking candidate evidence.")
-    materialize_pigskin_rankings(client, dataset_id=dataset_id, dry_run=False)
+    materialize_pigskin_rankings(
+        client,
+        dataset_id=dataset_id,
+        dry_run=False,
+        scoring_profile_id=scoring_profile_id,
+        league_type_id=league_type_id,
+        roster_format_id=roster_format_id,
+    )
 
     ranking_version = f"pigskin-llm-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     generation_context = fetch_generation_context(client, dataset_id)
@@ -488,7 +780,7 @@ def generate_rankings(
         final_rows = []
         for position in positions or list(VALID_POSITIONS):
             limit = get_position_limit(position, position_limit)
-            candidates_df = fetch_candidates(client, dataset_id, position, limit)
+            candidates_df = fetch_candidates(client, dataset_id, position, limit, scoring_profile_id=scoring_profile_id)
             if candidates_df.empty:
                 logger.warning("No candidate rows found for %s.", position)
                 continue

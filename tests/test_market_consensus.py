@@ -78,6 +78,11 @@ def market_row(**overrides):
 
 
 class MarketConsensusTests(unittest.TestCase):
+    def test_name_normalization_cases(self):
+        self.assertEqual(market_consensus._normalize_name("A.J. Brown"), "ajbrown")
+        self.assertEqual(market_consensus._normalize_name("A J Brown"), "ajbrown")
+        self.assertEqual(market_consensus._normalize_name("Ja'Marr Chase"), "jamarrchase")
+
     def test_register_market_source_dry_run_builds_source_object(self):
         result = market_consensus.register_market_source(
             source_id="FantasyPros-ECR-Manual",
@@ -151,6 +156,104 @@ class MarketConsensusTests(unittest.TestCase):
         self.assertEqual(resolved[0]["match_method"], "name_team_position")
         self.assertIn("identity_name_fallback_match", flags)
 
+    def test_player_resolution_exact_name_position_when_unique(self):
+        rows = market_consensus.normalize_market_rows(
+            [{"player": "A.J. Brown", "position": "WR"}],
+            snapshot_id="snap_1",
+            source_id="manual_ecr",
+            season=2025,
+        )
+
+        resolved = market_consensus.resolve_market_players(rows, identity_rows=[identity_row()])
+        flags = json.loads(resolved[0]["missing_data_flags"])
+
+        self.assertEqual(resolved[0]["player_id_internal"], "pid_1")
+        self.assertEqual(resolved[0]["match_method"], "name_position")
+        self.assertIn("identity_name_fallback_match", flags)
+
+    def test_player_resolution_alias_match(self):
+        rows = market_consensus.normalize_market_rows(
+            [{"player": "Hollywood Brown", "position": "WR", "team": "KC"}],
+            snapshot_id="snap_1",
+            source_id="manual_ecr",
+            season=2025,
+        )
+
+        resolved = market_consensus.resolve_market_players(
+            rows,
+            identity_rows=[
+                identity_row(
+                    player_id_internal="pid_hollywood",
+                    normalized_name="marquisebrown",
+                    display_name="Marquise Brown",
+                    current_team="KC",
+                )
+            ],
+            alias_rows=[
+                {
+                    "alias_name": "Hollywood Brown",
+                    "player_id_internal": "pid_hollywood",
+                    "position": "WR",
+                    "team": "KC",
+                }
+            ],
+        )
+        flags = json.loads(resolved[0]["missing_data_flags"])
+
+        self.assertEqual(resolved[0]["player_id_internal"], "pid_hollywood")
+        self.assertEqual(resolved[0]["match_method"], "alias_name_team_position")
+        self.assertIn("identity_alias_match", flags)
+
+    def test_manual_override_wins(self):
+        rows = market_consensus.normalize_market_rows(
+            [{"player": "A.J. Brown", "position": "WR", "team": "PHI", "source_player_key": "vendor_ajb"}],
+            snapshot_id="snap_1",
+            source_id="manual_ecr",
+            season=2025,
+        )
+
+        resolved = market_consensus.resolve_market_players(
+            rows,
+            identity_rows=[
+                identity_row(),
+                identity_row(
+                    player_id_internal="pid_2",
+                    normalized_name="ajbrown",
+                    display_name="A.J. Brown",
+                    position="WR",
+                    current_team="PHI",
+                ),
+            ],
+            manual_override_rows=[
+                {
+                    "source": "manual_ecr",
+                    "source_player_id": "vendor_ajb",
+                    "player_id_internal": "pid_2",
+                    "active": True,
+                }
+            ],
+        )
+
+        self.assertEqual(resolved[0]["player_id_internal"], "pid_2")
+        self.assertEqual(resolved[0]["match_method"], "manual_override")
+
+    def test_non_player_asset_is_flagged_as_not_applicable(self):
+        rows = market_consensus.normalize_market_rows(
+            [{"player": "2026 Pick 1.01", "position": "PICK", "market_value": "7000"}],
+            snapshot_id="snap_1",
+            source_id="manual_market_values",
+            season=2026,
+        )
+
+        resolved = market_consensus.resolve_market_players(rows, identity_rows=[identity_row()])
+        flags = json.loads(resolved[0]["missing_data_flags"])
+
+        self.assertIsNone(resolved[0]["player_id_internal"])
+        self.assertEqual(resolved[0]["match_method"], "non_player_asset")
+        self.assertIn("non_player_market_asset", flags)
+        self.assertIn("player_identity_not_applicable", flags)
+        self.assertNotIn("missing_player_id_internal", flags)
+
     def test_unknown_player_retained_with_missing_flag(self):
         rows = market_consensus.normalize_market_rows(
             [{"player": "Mystery Player", "position": "WR", "team": "FA"}],
@@ -165,6 +268,21 @@ class MarketConsensusTests(unittest.TestCase):
         self.assertEqual(resolved[0]["match_method"], "unmatched")
         self.assertIsNone(resolved[0]["player_id_internal"])
         self.assertTrue(resolved[0]["source_player_key"].startswith("name:"))
+        self.assertIn("missing_player_id_internal", flags)
+
+    def test_no_unsafe_fuzzy_auto_match(self):
+        rows = market_consensus.normalize_market_rows(
+            [{"player": "A.J. Browne", "position": "WR", "team": "PHI"}],
+            snapshot_id="snap_1",
+            source_id="manual_ecr",
+            season=2025,
+        )
+
+        resolved = market_consensus.resolve_market_players(rows, identity_rows=[identity_row()])
+        flags = json.loads(resolved[0]["missing_data_flags"])
+
+        self.assertEqual(resolved[0]["match_method"], "unmatched")
+        self.assertIsNone(resolved[0]["player_id_internal"])
         self.assertIn("missing_player_id_internal", flags)
 
     def test_snapshot_id_required(self):

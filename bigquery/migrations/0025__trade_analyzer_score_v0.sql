@@ -1,0 +1,127 @@
+-- Trade Analyzer deterministic score v0 contract.
+-- Additive schema-only migration. No scores are generated, backfilled, renamed, or deleted.
+
+CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.trade_player_scores` (
+    score_run_id STRING NOT NULL,
+    model_run_id STRING,
+    model_version STRING NOT NULL,
+    player_id STRING NOT NULL,
+    player_name STRING,
+    normalized_name STRING,
+    position STRING NOT NULL,
+    team STRING,
+    season INT64 NOT NULL,
+    week INT64 NOT NULL,
+    scoring_profile_id STRING NOT NULL,
+    league_type_id STRING NOT NULL,
+    roster_format_id STRING NOT NULL,
+    current_market_value FLOAT64,
+    projected_3_year_value FLOAT64,
+    market_score FLOAT64,
+    projection_score FLOAT64,
+    recent_production_score FLOAT64,
+    role_usage_score FLOAT64,
+    positional_scarcity_score FLOAT64,
+    efficiency_score FLOAT64,
+    normalized_risk_score FLOAT64,
+    fraud_score FLOAT64,
+    confidence_score FLOAT64,
+    trade_score FLOAT64,
+    score_tier STRING,
+    source_freshness_json STRING,
+    missing_flags_json STRING,
+    component_json STRING,
+    ranking_version STRING,
+    feature_config_version_id STRING,
+    created_by STRING,
+    created_at TIMESTAMP NOT NULL
+)
+PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(1999, 2050, 1))
+CLUSTER BY model_version, scoring_profile_id, league_type_id, roster_format_id;
+
+CREATE OR REPLACE VIEW `{{PROJECT_ID}}.{{DATASET_ID}}.trade_player_scores_current` AS
+SELECT
+    score_run_id,
+    model_run_id,
+    model_version,
+    player_id,
+    player_name,
+    normalized_name,
+    position,
+    team,
+    season,
+    week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    current_market_value,
+    projected_3_year_value,
+    market_score,
+    projection_score,
+    recent_production_score,
+    role_usage_score,
+    positional_scarcity_score,
+    efficiency_score,
+    normalized_risk_score,
+    fraud_score,
+    confidence_score,
+    trade_score,
+    score_tier,
+    source_freshness_json,
+    missing_flags_json,
+    component_json,
+    ranking_version,
+    feature_config_version_id,
+    created_by,
+    created_at
+FROM `{{PROJECT_ID}}.{{DATASET_ID}}.trade_player_scores`
+QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY
+        player_id,
+        scoring_profile_id,
+        league_type_id,
+        roster_format_id
+    ORDER BY
+        season DESC,
+        week DESC,
+        created_at DESC,
+        model_version DESC,
+        score_run_id DESC
+) = 1;
+
+CREATE OR REPLACE VIEW `{{PROJECT_ID}}.{{DATASET_ID}}.compat_trade_player_scores_current` AS
+SELECT
+    player_id,
+    player_id AS player_id_internal,
+    player_name,
+    normalized_name,
+    position,
+    team,
+    season,
+    week,
+    scoring_profile_id,
+    league_type_id,
+    roster_format_id,
+    current_market_value,
+    projected_3_year_value,
+    market_score,
+    projection_score,
+    recent_production_score,
+    role_usage_score,
+    positional_scarcity_score,
+    efficiency_score,
+    normalized_risk_score,
+    fraud_score,
+    confidence_score,
+    trade_score,
+    score_tier,
+    source_freshness_json,
+    missing_flags_json,
+    component_json,
+    model_version,
+    model_run_id,
+    ranking_version,
+    feature_config_version_id,
+    score_run_id,
+    created_at
+FROM `{{PROJECT_ID}}.{{DATASET_ID}}.trade_player_scores_current`;

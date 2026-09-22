@@ -1,0 +1,17 @@
+steps:
+- name: gcr.io/cloud-builders/docker
+  args:
+  - build
+  - --file
+  - Dockerfile.sleeper-archive
+  - --tag
+  - us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/sleeper-snapshot-archive:${_IMAGE_TAG}
+  - .
+- name: gcr.io/cloud-builders/docker
+  args:
+  - push
+  - us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/sleeper-snapshot-archive:${_IMAGE_TAG}
+images:
+- us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/sleeper-snapshot-archive:${_IMAGE_TAG}
+substitutions:
+  _IMAGE_TAG: phase-34-9

@@ -22,6 +22,14 @@ diff_app.txt
 migration_error.log
 validations.log
 
+# Local run artifacts
+output/
+pipeline_execution.log
+*.log
+
 # Google Cloud credentials keys
 *.json
+!config/public_rankings_cors.json
+!docs/inseason-shrinkage-v1-calibration.json
 !requirements.txt
+Advanced Metrics/

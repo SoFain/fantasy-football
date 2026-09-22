@@ -694,6 +694,10 @@ contract_summary AS (
 
 
 def _depth_chart_summary_cte(project_id: str, dataset_id: str, status: SourceTableStatus) -> str:
+    # This summarizes the nflreadpy `depth_charts` table, which is a HISTORICAL
+    # seasonal archive, not a current source. Current depth chart position comes
+    # from Sleeper (sleeper_players_current.depth_chart_position / _order), which
+    # the rankings pipeline uses. Keep this labeled historical in any consumer.
     if not status.exists or "gsis_id" not in status.columns:
         return _empty_summary_cte("depth_chart_summary", "depth_chart_summary_json")
     return f"""

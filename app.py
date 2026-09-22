@@ -4,14 +4,27 @@ import subprocess
 import html
 import logging
 import json
+import re
 import streamlit as st
 
+from src.app_auth import render_login_gate, render_logout_control
 from src.compat_flags import (
     USE_COMPAT_PLAYER_PROFILES,
     USE_COMPAT_SLEEPER_WATCH,
     USE_COMPAT_TRADE_ASSETS,
     USE_COMPAT_TRADE_PLAYER_HISTORY,
     USE_COMPAT_VIEWER_TEAM_CONTEXT,
+    USE_BACKTEST_DASHBOARD,
+    USE_CLAIM_LEDGER_UI,
+    USE_CONTENT_BRIEF_REVIEW_UI,
+    USE_TRADE_ANALYZER_SCORE_V0,
+    USE_COMPAT_TRADE_PLAYER_SCORE,
+    USE_TRADE_PICK_SCORE_V0,
+    USE_COMPAT_TRADE_PICK_SCORE,
+    USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS,
+    DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER,
+    USE_PIGSKIN_PACKET_QA_UI,
+    USE_FORMULA_COMPARISON_DASHBOARD,
     compat_flag_enabled,
 )
 from src.cloud_run_jobs import (
@@ -30,6 +43,36 @@ from src.pigskin_chat_schema import render_pigskin_chat_schema
 from src.pigskin_context_tools import (
     execute_pigskin_context_tool,
     get_pigskin_context_tool_declarations,
+)
+from src.pigskin_live_ranking_context import (
+    build_live_ranking_context_request,
+    format_live_ranking_context_for_prompt,
+)
+from src.pigskin_live_formula_context import load_pigskin_live_formula_context
+from src.pigskin_packet_guardrails import PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL
+from src.pigskin_packet_qa_ui import run_pigskin_packet_qa_lookup
+from src import player_profile_ranking_profiles as profile_ranking_profiles
+from src.ui_data_guards import (
+    collect_selected_trade_assets,
+    attach_trade_pick_scores_to_assets,
+    attach_trade_scores_to_assets,
+    ensure_player_profile_display_columns,
+    ensure_sleeper_watch_display_columns,
+    is_trade_pick_asset,
+    summarize_trade_pick_score_side,
+    summarize_trade_score_side,
+    trade_asset_selector_count_with_blank,
+    trade_pick_slot_display,
+    trade_pick_warning_labels,
+    trade_side_has_mixed_player_and_pick_assets,
+    unresolved_trade_asset_labels,
+)
+from src.trade_player_scores import (
+    trade_score_model_context,
+    trade_score_model_context_label,
+    trade_score_source_freshness_rows,
+    trade_score_unavailable_reason,
+    trade_score_warning_summary_rows,
 )
 
 DEFAULT_BIGQUERY_PROJECT = "fantasy-football-498121"
@@ -63,8 +106,64 @@ def use_compat_viewer_team_context():
     return compat_flag_enabled(USE_COMPAT_VIEWER_TEAM_CONTEXT)
 
 
+def use_backtest_dashboard():
+    return compat_flag_enabled(USE_BACKTEST_DASHBOARD)
+
+
+def use_claim_ledger_ui():
+    return compat_flag_enabled(USE_CLAIM_LEDGER_UI)
+
+
+def use_content_brief_review_ui():
+    return compat_flag_enabled(USE_CONTENT_BRIEF_REVIEW_UI)
+
+
+def use_trade_analyzer_score_v0():
+    return compat_flag_enabled(USE_TRADE_ANALYZER_SCORE_V0)
+
+
+def use_compat_trade_player_score():
+    return compat_flag_enabled(USE_COMPAT_TRADE_PLAYER_SCORE)
+
+
+def use_trade_score_ui():
+    return use_trade_analyzer_score_v0() and use_compat_trade_player_score()
+
+
+def use_trade_pick_score_v0():
+    return compat_flag_enabled(USE_TRADE_PICK_SCORE_V0)
+
+
+def use_compat_trade_pick_score():
+    return compat_flag_enabled(USE_COMPAT_TRADE_PICK_SCORE)
+
+
+def use_trade_pick_score_ui():
+    return use_trade_pick_score_v0() and use_compat_trade_pick_score()
+
+
 def use_cloud_run_jobs_for_data_ops():
     return should_use_cloud_run_jobs_for_data_ops()
+
+
+def use_data_ops_local_subprocess_controls():
+    return compat_flag_enabled(USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS)
+
+
+def data_ops_local_subprocess_trigger_allowed():
+    return compat_flag_enabled(DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER)
+
+
+def data_ops_local_subprocess_controls_enabled():
+    return use_data_ops_local_subprocess_controls() and data_ops_local_subprocess_trigger_allowed()
+
+
+def use_pigskin_packet_qa_ui():
+    return compat_flag_enabled(USE_PIGSKIN_PACKET_QA_UI)
+
+
+def use_formula_comparison_dashboard():
+    return compat_flag_enabled(USE_FORMULA_COMPARISON_DASHBOARD)
 
 # Set Streamlit Page Configuration
 st.set_page_config(
@@ -74,54 +173,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-def check_password():
-    """Returns True if the user entered the correct credentials."""
-    target_user = os.environ.get("DASHBOARD_USERNAME", "admin")
-    target_pass = os.environ.get("DASHBOARD_PASSWORD", "fantasy2026")
-
-    def password_entered():
-        # Strip whitespaces defensively to prevent copy-paste space typos
-        u_input = st.session_state.get("username", "").strip()
-        p_input = st.session_state.get("password", "").strip()
-
-        # Log attempts securely for diagnostic debugging
-        import logging
-        login_logger = logging.getLogger("app.login")
-        login_logger.info(
-            f"Login check - Entered User: '{u_input}' (len={len(u_input)}), "
-            f"Expected User: '{target_user}' (len={len(target_user)}), "
-            f"Pass len={len(p_input)} (Expected len={len(target_pass)}), "
-            f"Match: {u_input == target_user and p_input == target_pass}"
-        )
-
-        if u_input == target_user and p_input == target_pass:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-            del st.session_state["username"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        # Align login layout elegantly
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown("### 🔑 Data Studio Login")
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Log In", on_click=password_entered)
-        return False
-    elif not st.session_state["password_correct"]:
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown("### 🔑 Data Studio Login")
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Log In", on_click=password_entered)
-            st.error("❌ Username or password incorrect")
-        return False
-    return True
-
-if not check_password():
+if not render_login_gate(st, os.environ):
     st.stop()
 
 # Custom Sleek CSS Styles
@@ -707,7 +759,7 @@ def render_cloud_run_jobs_data_ops_panel():
         f"{'true' if trigger_allowed else 'false'}."
     )
     if not cloud_jobs_enabled:
-        st.info("Cloud Run Job execution is not active. The local subprocess controls below remain the active Data Ops path.")
+        st.info("Cloud Run Job execution is not active. Local subprocess controls use separate default-off gates.")
     elif not trigger_allowed:
         st.warning("Cloud Run Job previews are enabled, but triggering is blocked until the explicit allow flag is set.")
 
@@ -723,7 +775,7 @@ def render_cloud_run_jobs_data_ops_panel():
             for job in jobs
         ],
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     selected_job = st.selectbox(
@@ -758,7 +810,7 @@ def render_cloud_run_jobs_data_ops_panel():
     trigger_disabled = bool(preview_error) or not use_cloud_jobs or not trigger_allowed or not confirmed
     if st.button("Trigger Cloud Run Job", type="primary", disabled=trigger_disabled):
         try:
-            result = trigger_cloud_run_job(selected_job, args_payload, dry_run=False)
+            result = trigger_cloud_run_job(selected_job, args_payload, dry_run=False, confirmed=True)
             st.success(f"Cloud Run Job triggered: {result.get('execution_name') or selected_job}")
         except Exception as ex:
             st.error(f"Cloud Run Job trigger failed: {ex}")
@@ -767,11 +819,173 @@ def render_cloud_run_jobs_data_ops_panel():
         try:
             recent_runs = get_recent_cloud_run_job_runs(limit=25)
             if recent_runs:
-                st.dataframe(recent_runs, hide_index=True, use_container_width=True)
+                st.dataframe(recent_runs, hide_index=True, width="stretch")
             else:
                 st.caption("No Cloud Run Job runs recorded yet.")
         except Exception as ex:
             st.caption(f"Recent job status is unavailable: {ex}")
+
+
+def render_data_ops_local_subprocess_gate():
+    controls_visible = use_data_ops_local_subprocess_controls()
+    trigger_allowed = data_ops_local_subprocess_trigger_allowed()
+    controls_can_run = data_ops_local_subprocess_controls_enabled()
+
+    status_cols = st.columns(2)
+    with status_cols[0]:
+        st.metric("Local controls", "Visible" if controls_visible else "Disabled")
+    with status_cols[1]:
+        st.metric("Local trigger allow flag", "Enabled" if trigger_allowed else "Disabled")
+
+    st.caption(
+        f"`{USE_DATA_OPS_LOCAL_SUBPROCESS_CONTROLS}` is "
+        f"{'true' if controls_visible else 'false'}; `{DATA_OPS_ALLOW_LOCAL_SUBPROCESS_TRIGGER}` is "
+        f"{'true' if trigger_allowed else 'false'}."
+    )
+    if not controls_visible:
+        st.info("Local subprocess, ingestion, external refresh, BigQuery write, and LLM-backed controls are disabled by default.")
+    elif not trigger_allowed:
+        st.warning("Local subprocess controls are visible for review, but execution is disabled until the explicit trigger allow flag is set.")
+    else:
+        st.warning("Local subprocess controls are visible and executable. Use only in an authorized admin session.")
+
+    return controls_visible, controls_can_run
+
+
+def render_pigskin_packet_qa_panel():
+    st.markdown("#### Historical Packet + Current Roster QA")
+    st.caption(
+        "Read-only admin QA. Historical packet team is `historical_team`; current roster status and `current_team` come only from current roster sources."
+    )
+    st.info(
+        "This panel calls deterministic helpers only. It does not call Pigskin chat, Gemini, live Sleeper APIs, materializers, or write paths."
+    )
+
+    with st.form("pigskin_packet_qa_form"):
+        col_season, col_week, col_limit = st.columns(3)
+        with col_season:
+            season = st.number_input("Season", min_value=2014, max_value=2026, value=2025, step=1)
+        with col_week:
+            week = st.number_input("Week", min_value=1, max_value=22, value=15, step=1)
+        with col_limit:
+            limit = st.number_input("Limit", min_value=1, max_value=10, value=5, step=1)
+
+        include_postseason = st.checkbox("Include postseason", value=False)
+        col_player, col_internal = st.columns(2)
+        with col_player:
+            player_name = st.text_input("Player name", value="Patrick Mahomes")
+        with col_internal:
+            player_id_internal = st.text_input("Player ID internal", value="00-0033873")
+
+        col_sleeper, col_gsis = st.columns(2)
+        with col_sleeper:
+            sleeper_player_id = st.text_input("Sleeper player ID", value="")
+        with col_gsis:
+            gsis_id = st.text_input("GSIS ID", value="")
+
+        col_team, col_position = st.columns(2)
+        with col_team:
+            team = st.text_input("Historical packet team filter", value="")
+        with col_position:
+            position = st.text_input("Historical packet position filter", value="")
+
+        col_league, col_available = st.columns(2)
+        with col_league:
+            league_id = st.text_input("League ID for roster/available lookup", value="")
+        with col_available:
+            include_available_players = st.checkbox("Include available-player source", value=False)
+
+        submitted = st.form_submit_button("Run read-only QA lookup", type="secondary")
+
+    if not submitted:
+        st.caption("Try Patrick Mahomes, 2025 week 15, or Tyreek Hill, 2025 week 4. Week 22 stays excluded unless postseason is enabled.")
+        return
+
+    form_values = {
+        "season": int(season),
+        "week": int(week),
+        "include_postseason": bool(include_postseason),
+        "player_name": player_name,
+        "player_id_internal": player_id_internal,
+        "sleeper_player_id": sleeper_player_id,
+        "gsis_id": gsis_id,
+        "team": team,
+        "position": position,
+        "league_id": league_id,
+        "include_available_players": bool(include_available_players),
+        "limit": int(limit),
+    }
+
+    try:
+        summary = run_pigskin_packet_qa_lookup(form_values, dataset_id="fantasy_football_brain")
+    except Exception as ex:
+        st.error(f"Read-only Pigskin packet QA failed: {ex}")
+        return
+
+    status_cols = st.columns(4)
+    with status_cols[0]:
+        st.metric("Status", str(summary.get("status") or "unknown"))
+    with status_cols[1]:
+        st.metric("Historical team", str(summary.get("historical_team") or "unknown"))
+    with status_cols[2]:
+        st.metric("Current team", str(summary.get("current_team") or "unknown"))
+    with status_cols[3]:
+        st.metric("Current source", str(summary.get("current_roster_source") or "unavailable"))
+
+    st.caption(summary.get("safe_wording") or "Historical and current context are separate.")
+    if summary.get("blocked_reason"):
+        st.warning(f"Blocked reason: `{summary['blocked_reason']}`")
+
+    detail_cols = st.columns(4)
+    with detail_cols[0]:
+        st.write("Current roster status")
+        st.code(str(summary.get("current_roster_status") or "unavailable"))
+    with detail_cols[1]:
+        st.write("Current roster as-of")
+        st.code(str(summary.get("current_roster_as_of") or "unavailable"))
+    with detail_cols[2]:
+        st.write("Packet season")
+        st.code(str(summary.get("packet_season") or "unavailable"))
+    with detail_cols[3]:
+        st.write("Packet week")
+        st.code(str(summary.get("packet_week") or "unavailable"))
+
+    warnings = summary.get("warnings") or []
+    if warnings:
+        st.markdown("##### Warnings")
+        for warning in warnings:
+            st.warning(str(warning))
+
+    st.markdown("##### Blocked Metrics")
+    st.caption(summary.get("blocked_metric_policy") or "Blocked metrics are unavailable, not zero.")
+    blocked_metrics = summary.get("blocked_metrics") or []
+    if blocked_metrics:
+        st.write(", ".join(str(metric) for metric in blocked_metrics))
+    else:
+        st.caption("No blocked metrics returned for this lookup.")
+
+    historical_candidates = summary.get("historical_candidates") or []
+    current_candidates = summary.get("current_roster_candidates") or []
+    if historical_candidates or current_candidates:
+        st.markdown("##### Candidate Review")
+        if historical_candidates:
+            st.caption("Historical packet candidates")
+            st.dataframe(historical_candidates, hide_index=True, width="stretch")
+        if current_candidates:
+            st.caption("Current roster candidates")
+            st.dataframe(current_candidates, hide_index=True, width="stretch")
+
+    with st.expander("Identity diagnostics", expanded=False):
+        st.json(summary.get("identity_diagnostics") or {})
+    with st.expander("Source freshness and missing flags", expanded=False):
+        st.json(
+            {
+                "source_freshness": summary.get("source_freshness"),
+                "missing_data_flags": summary.get("missing_data_flags"),
+            }
+        )
+    with st.expander("Raw structured QA JSON", expanded=False):
+        st.json(summary.get("raw_result") or {})
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -779,7 +993,7 @@ def execute_bq_cached(sql_query: str):
     from google.cloud import bigquery
     bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
     query_job = bq_client.query(sql_query)
-    df = query_job.result().to_dataframe()
+    df = query_job.result().to_dataframe(create_bqstorage_client=False)
     return df
 
 
@@ -802,6 +1016,1067 @@ def render_compat_metadata(df, label):
             metadata_parts.append(f"missing flags: `{flag_values[0][:240]}`")
     if metadata_parts:
         st.caption(f"{label} metadata: " + " | ".join(metadata_parts))
+
+
+def render_backtest_dashboard():
+    from src.backtest_readers import (
+        SORT_OPTIONS,
+        export_backtest_summary_markdown,
+        get_backtest_calibration,
+        get_backtest_leaderboard,
+        get_backtest_player_errors,
+        get_backtest_summary,
+        list_backtest_runs,
+    )
+
+    render_tab_bookmarks([
+        ("Latest Runs", "backtest-latest-runs"),
+        ("Summary", "backtest-summary"),
+        ("Player Errors", "backtest-player-errors"),
+        ("Calibration", "backtest-calibration"),
+        ("Job Preview", "backtest-job-preview"),
+    ])
+    render_data_path_status("Backtest Dashboard", True)
+    st.caption("Feature flag: `USE_BACKTEST_DASHBOARD=true`. This view reads only backtest output tables.")
+
+    render_section_header(
+        "Latest Backtest Runs",
+        "backtest-latest-runs",
+        "Recent backtest ledgers and model-run context.",
+        first=True,
+    )
+    try:
+        runs = list_backtest_runs(limit=50)
+    except Exception as ex:
+        st.warning(f"Backtest runs are unavailable: {ex}")
+        return
+
+    if not runs:
+        st.info("No backtest runs are available yet. Run backtests through the Cloud Run Job path before enabling this dashboard for review.")
+        return
+
+    st.dataframe(runs, hide_index=True, width="stretch")
+    run_options = [row.get("backtest_run_id") for row in runs if row.get("backtest_run_id")]
+    if not run_options:
+        st.info("Backtest run rows exist, but none have a usable backtest_run_id.")
+        return
+    selected_run_id = st.selectbox(
+        "Backtest run",
+        options=run_options,
+        format_func=lambda value: _backtest_run_label(value, runs),
+    )
+    selected_run = next((row for row in runs if row.get("backtest_run_id") == selected_run_id), {})
+
+    filter_cols = st.columns(6)
+    with filter_cols[0]:
+        position_value = st.selectbox("Position", ["All", "QB", "RB", "WR", "TE"])
+    with filter_cols[1]:
+        horizon_value = st.selectbox(
+            "Horizon",
+            ["All", "weekly", "ros", "dynasty"],
+            index=_select_index(["All", "weekly", "ros", "dynasty"], selected_run.get("projection_horizon")),
+        )
+    with filter_cols[2]:
+        scoring_value = st.text_input("Scoring", value=str(selected_run.get("scoring_profile_id") or ""))
+    with filter_cols[3]:
+        league_value = st.text_input("League", value=str(selected_run.get("league_type_id") or ""))
+    with filter_cols[4]:
+        roster_value = st.text_input("Roster", value=str(selected_run.get("roster_format_id") or ""))
+    with filter_cols[5]:
+        season_value = st.text_input("Season", value="")
+    week_value = st.text_input("Week", value="")
+
+    position_filter = None if position_value == "All" else position_value
+    horizon_filter = None if horizon_value == "All" else horizon_value
+    scoring_filter = scoring_value.strip() or None
+    league_filter = league_value.strip() or None
+    roster_filter = roster_value.strip() or None
+    season_filter = _optional_int(season_value)
+    week_filter = _optional_int(week_value)
+
+    render_section_header(
+        "Summary",
+        "backtest-summary",
+        "Accuracy, bias, rank error, hit rates, boom and bust precision, and calibration.",
+    )
+    try:
+        summary_rows = get_backtest_summary(
+            backtest_run_id=selected_run_id,
+            scoring_profile_id=scoring_filter,
+            league_type_id=league_filter,
+            roster_format_id=roster_filter,
+            position=position_filter,
+            projection_horizon=horizon_filter,
+            season=season_filter,
+            week=week_filter,
+        )
+        leaderboard_rows = get_backtest_leaderboard(
+            scoring_profile_id=scoring_filter,
+            league_type_id=league_filter,
+            roster_format_id=roster_filter,
+            projection_horizon=horizon_filter,
+            limit=25,
+        )
+    except Exception as ex:
+        st.warning(f"Backtest summary is unavailable: {ex}")
+        summary_rows = []
+        leaderboard_rows = []
+
+    if summary_rows:
+        overall = _backtest_overall_row(summary_rows)
+        metric_cols = st.columns(7)
+        metric_cols[0].metric("Sample", _metric_value(overall.get("player_count")))
+        metric_cols[1].metric("MAE", _metric_value(overall.get("mae")))
+        metric_cols[2].metric("RMSE", _metric_value(overall.get("rmse")))
+        metric_cols[3].metric("Bias", _metric_value(overall.get("mean_bias")))
+        metric_cols[4].metric("Rank Error", _metric_value(overall.get("rank_mae_overall")))
+        metric_cols[5].metric("Top 24 Hit", _percent_value(overall.get("top_24_hit_rate")))
+        metric_cols[6].metric("Calibration", _percent_value(overall.get("range_calibration_rate")))
+        st.dataframe(summary_rows, hide_index=True, width="stretch")
+    else:
+        st.info("No summary rows matched the selected filters.")
+
+    if leaderboard_rows:
+        with st.expander("Backtest leaderboard", expanded=False):
+            st.dataframe(leaderboard_rows, hide_index=True, width="stretch")
+
+    render_section_header(
+        "Player Errors",
+        "backtest-player-errors",
+        "Largest misses, best hits, and rank misses from player-week output rows.",
+    )
+    sort_by = st.selectbox("Sort player errors by", options=list(SORT_OPTIONS.keys()))
+    player_limit = st.number_input("Player row limit", min_value=1, max_value=500, value=100, step=25)
+    try:
+        player_errors = get_backtest_player_errors(
+            selected_run_id,
+            position=position_filter,
+            limit=int(player_limit),
+            sort_by=sort_by,
+        )
+    except Exception as ex:
+        st.warning(f"Backtest player errors are unavailable: {ex}")
+        player_errors = []
+
+    if player_errors:
+        st.dataframe(player_errors, hide_index=True, width="stretch")
+        missing_flags = sorted(
+            {
+                str(row.get("missing_data_flags"))
+                for row in player_errors
+                if row.get("missing_data_flags") not in (None, "", "[]")
+            }
+        )
+        if missing_flags:
+            st.caption(f"Missing-data warnings: `{missing_flags[0][:240]}`")
+    else:
+        st.info("No player error rows matched the selected run and filters.")
+
+    render_section_header(
+        "Calibration",
+        "backtest-calibration",
+        "Projected point buckets compared against actual outcomes.",
+    )
+    try:
+        calibration_rows = get_backtest_calibration(selected_run_id, position=position_filter)
+    except Exception as ex:
+        st.warning(f"Backtest calibration is unavailable: {ex}")
+        calibration_rows = []
+    if calibration_rows:
+        st.dataframe(calibration_rows, hide_index=True, width="stretch")
+    else:
+        st.info("No calibration rows are available for this run.")
+
+    st.caption(
+        "Backtest context: "
+        f"`model_run_id={selected_run.get('model_run_id') or 'unknown'}` | "
+        f"`backtest_run_id={selected_run_id}` | "
+        f"`source_freshness_snapshot_id={selected_run.get('source_freshness_snapshot_id') or 'unknown'}`"
+    )
+    if selected_run.get("error_message"):
+        st.warning(f"Run error: {selected_run['error_message']}")
+    if selected_run.get("notes"):
+        st.caption(f"Run notes: `{str(selected_run['notes'])[:500]}`")
+
+    markdown_export = export_backtest_summary_markdown(selected_run_id)
+    st.download_button(
+        "Download markdown summary",
+        data=markdown_export,
+        file_name=f"{selected_run_id}-backtest-summary.md",
+        mime="text/markdown",
+    )
+
+    render_section_header(
+        "Job Preview",
+        "backtest-job-preview",
+        "Dry-run preview for the Cloud Run backtest job. This does not execute a job.",
+    )
+    if use_cloud_run_jobs_for_data_ops():
+        preview_args = {
+            "season-start": selected_run.get("season_start") or 2024,
+            "season-end": selected_run.get("season_end") or selected_run.get("season_start") or 2024,
+            "week-start": selected_run.get("week_start") or 1,
+            "week-end": selected_run.get("week_end") or 18,
+            "horizon": selected_run.get("projection_horizon") or "weekly",
+            "scoring-profile": selected_run.get("scoring_profile_id") or "ppr",
+            "league-type": selected_run.get("league_type_id") or "redraft",
+            "roster-format": selected_run.get("roster_format_id") or "one_qb",
+        }
+        try:
+            preview = trigger_cloud_run_job("run-backtests", preview_args, dry_run=True)
+            st.code(preview["command_preview"], language="powershell")
+        except Exception as ex:
+            st.caption(f"Backtest job preview is unavailable: {ex}")
+    else:
+        st.caption("Cloud Run Job preview is hidden until `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`.")
+
+
+def render_formula_comparison_dashboard():
+    from src.formula_review_dashboard import (
+        MODEL_TABLES,
+        MOVEMENT_TABLES,
+        POSITION_TABLES,
+        PROFILE_OPTIONS,
+        RISK_FILTERS,
+        build_formula_review_payload,
+        filter_formula_review_rows,
+        get_profile_decision,
+        get_profile_model_summary,
+        get_profile_table,
+        load_formula_review_markdown,
+    )
+
+    try:
+        markdown_text = load_formula_review_markdown()
+    except Exception as ex:
+        st.warning(f"Formula review boards are unavailable: {ex}")
+        return
+
+    payload = build_formula_review_payload(markdown_text)
+    render_tab_bookmarks([
+        ("Status", "formula-review-status"),
+        ("Profile Boards", "formula-profile-boards"),
+        ("Global Context", "formula-global-context"),
+        ("Safety", "formula-read-only-safety"),
+    ])
+    render_data_path_status("Formula Review", True)
+
+    render_section_header(
+        "Formula Review Status",
+        "formula-review-status",
+        "Read-only 2026 owner-review boards. Current Pigskin remains the live baseline.",
+        first=True,
+    )
+    st.warning(
+        "Review-only dashboard. Current Pigskin is the live baseline. No champion is active. "
+        "No live rankings were changed."
+    )
+    st.caption(
+        "Data source: committed Markdown review boards from `docs/rebuild/live-2026-ranking-review-boards.md`. "
+        "This page does not run BigQuery, Gemini, Pigskin chat, Sleeper API calls, or ranking generation."
+    )
+    st.caption(
+        "BQML outputs are owner-review evidence only. Enriched Linear Points is context only. "
+        "BQML NGS is context only and is not displayed as a candidate board here."
+    )
+
+    status_cols = st.columns(5)
+    status_cols[0].metric("Review version", payload.get("review_version") or "unknown")
+    status_cols[1].metric("Scoring profiles", len(PROFILE_OPTIONS))
+    status_cols[2].metric("TE review cap", "35")
+    status_cols[3].metric("Champion active", "No")
+    status_cols[4].metric("Live ranking writes", "No")
+    st.info(
+        "Missingness is high. Phase 32.32 reported about 69 percent average missing feature rate, "
+        "NGS direct near 89.6 percent missing, and injury/availability near 90.2 percent missing."
+    )
+
+    render_section_header(
+        "Profile Boards",
+        "formula-profile-boards",
+        "Standard is first. Each scoring profile is reviewed separately.",
+    )
+    profile_tabs = st.tabs([profile["label"] for profile in PROFILE_OPTIONS])
+    for tab, profile in zip(profile_tabs, PROFILE_OPTIONS):
+        profile_id = profile["id"]
+        with tab:
+            decision = get_profile_decision(payload, profile_id)
+            logistic = get_profile_model_summary(payload, profile_id, "enriched_logistic")
+            linear = get_profile_model_summary(payload, profile_id, "enriched_linear_points")
+            riser_rows = get_profile_table(markdown_text, profile_id, "Logistic Risers")
+            faller_rows = get_profile_table(markdown_text, profile_id, "Logistic Fallers")
+            wr_movement_count = _formula_wr_movement_count(riser_rows + faller_rows)
+
+            profile_cols = st.columns(5)
+            profile_cols[0].metric("Board status", decision.get("Board status") or "unknown")
+            profile_cols[1].metric("Best challenger", "Logistic Elite")
+            profile_cols[2].metric("Current Pigskin", "holds")
+            profile_cols[3].metric("Avg missingness", logistic.get("Missing %") or "n/a")
+            profile_cols[4].metric("WR movement >20", wr_movement_count)
+            st.caption(
+                f"`{profile_id}` review: Current Pigskin holds. "
+                "Enriched Logistic Elite is the review-only challenger. "
+                "Enriched Linear Points is context only."
+            )
+
+            filter_cols = st.columns(3)
+            with filter_cols[0]:
+                model_label = st.selectbox(
+                    "Board model",
+                    list(MODEL_TABLES.keys()),
+                    key=f"formula_model_{profile_id}",
+                )
+            with filter_cols[1]:
+                position_label = st.selectbox(
+                    "Position board",
+                    list(POSITION_TABLES.keys()),
+                    key=f"formula_position_{profile_id}",
+                )
+            with filter_cols[2]:
+                movement_label = st.selectbox(
+                    "Movement view",
+                    list(MOVEMENT_TABLES.keys()),
+                    key=f"formula_movement_{profile_id}",
+                )
+            selected_filters = st.multiselect(
+                "Risk and warning filters",
+                RISK_FILTERS,
+                key=f"formula_filters_{profile_id}",
+            )
+
+            model_rows = filter_formula_review_rows(
+                get_profile_table(markdown_text, profile_id, MODEL_TABLES[model_label]),
+                selected_filters,
+            )
+            st.markdown(f"##### {model_label}")
+            if model_rows:
+                st.dataframe(model_rows, hide_index=True, width="stretch")
+            else:
+                st.info("No rows matched the selected model and risk filters.")
+
+            position_rows = filter_formula_review_rows(
+                get_profile_table(markdown_text, profile_id, POSITION_TABLES[position_label]),
+                selected_filters,
+            )
+            st.markdown(f"##### {position_label} board")
+            if position_rows:
+                st.dataframe(position_rows, hide_index=True, width="stretch")
+            else:
+                st.info("No position rows matched the selected filters.")
+
+            movement_rows = filter_formula_review_rows(
+                get_profile_table(markdown_text, profile_id, MOVEMENT_TABLES[movement_label]),
+                selected_filters,
+            )
+            st.markdown(f"##### {movement_label}")
+            if movement_rows:
+                st.dataframe(movement_rows, hide_index=True, width="stretch")
+            else:
+                st.info("No movement rows matched the selected filters.")
+
+            if position_label == "TE":
+                st.caption(
+                    "TE owner-review output is capped at TE35. TE6, TE12, and TE18 cutlines stay visible. "
+                    "Future owner-approved live-ranking depth change: reduce TE from 60 to 35."
+                )
+
+    render_section_header(
+        "Global Context",
+        "formula-global-context",
+        "All-profile aggregates are stability context only, not a decision rule.",
+    )
+    st.markdown("##### Profile Decision Summary")
+    st.dataframe(payload.get("profile_decisions") or [], hide_index=True, width="stretch")
+    st.markdown("##### Model Summary")
+    st.dataframe(payload.get("model_summary") or [], hide_index=True, width="stretch")
+    st.markdown("##### Candidate Coverage")
+    st.dataframe(payload.get("candidate_coverage") or [], hide_index=True, width="stretch")
+
+    render_section_header(
+        "Read-Only Safety",
+        "formula-read-only-safety",
+        "The dashboard reads committed Markdown evidence and does not invoke production ranking paths.",
+    )
+    st.markdown(
+        """
+        - Does not write `analytics_pigskin_rankings`.
+        - Does not overwrite `analytics_pigskin_rankings_candidates`.
+        - Does not select or activate formula champions.
+        - Does not write formula backtest data.
+        - Does not call Gemini, Pigskin chat, Sleeper API, or `src.generate_pigskin_rankings`.
+        - Does not require or fabricate `pigskin_context_score`.
+        - Does not silently fall back to PPR when reviewing Standard, Half PPR, or GNG Keeper.
+        """
+    )
+
+
+def _formula_wr_movement_count(rows):
+    count = 0
+    for row in rows:
+        if row.get("Pos") != "WR":
+            continue
+        try:
+            delta = abs(float(str(row.get("Delta") or "0").replace("+", "").replace(",", "")))
+        except ValueError:
+            delta = 0
+        if delta > 20:
+            count += 1
+    return count
+
+
+def _backtest_run_label(backtest_run_id, runs):
+    row = next((item for item in runs if item.get("backtest_run_id") == backtest_run_id), {})
+    return (
+        f"{backtest_run_id} | {row.get('status') or 'unknown'} | "
+        f"{row.get('projection_horizon') or 'unknown'} | {row.get('created_at') or ''}"
+    )
+
+
+def _backtest_overall_row(rows):
+    for row in rows:
+        if row.get("position") is None and row.get("season") is None and row.get("week") is None:
+            return row
+    return rows[0]
+
+
+def _metric_value(value):
+    if value in (None, ""):
+        return "n/a"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _percent_value(value):
+    if value in (None, ""):
+        return "n/a"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _optional_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _select_index(options, value):
+    try:
+        return options.index(value)
+    except ValueError:
+        return 0
+
+
+def render_content_brief_review_ui():
+    from src.content_brief_review import (
+        REVIEW_STATUS_VALUES,
+        build_content_brief_generation_preview_command,
+        export_content_brief_markdown,
+        get_content_brief_detail,
+        list_content_brief_runs,
+        list_content_briefs,
+        update_content_brief_review_status,
+    )
+    from src.content_briefs import SUPPORTED_BRIEF_TYPES
+
+    render_tab_bookmarks([
+        ("Brief Runs", "content-brief-runs"),
+        ("Brief List", "content-brief-list"),
+        ("Brief Detail", "content-brief-detail"),
+        ("Brief Items", "content-brief-items"),
+        ("Review Actions", "content-brief-actions"),
+        ("Generation Preview", "content-brief-generation-preview"),
+    ])
+    render_data_path_status("Content Brief Review", True)
+    st.caption("Feature flag: `USE_CONTENT_BRIEF_REVIEW_UI=true`. This view reads only content brief output tables and never calls an LLM.")
+
+    brief_type_options = ["All"] + sorted(SUPPORTED_BRIEF_TYPES)
+    review_status_options = ["All"] + sorted(REVIEW_STATUS_VALUES)
+    run_status_options = ["All", "created", "completed", "failed"]
+
+    render_section_header(
+        "Brief Runs",
+        "content-brief-runs",
+        "Recent deterministic content-brief generation runs and model-run context.",
+        first=True,
+    )
+    run_cols = st.columns(7)
+    with run_cols[0]:
+        run_brief_type = st.selectbox("Run brief type", brief_type_options, key="content_brief_run_type")
+    with run_cols[1]:
+        run_season = st.text_input("Run season", value="", key="content_brief_run_season")
+    with run_cols[2]:
+        run_week = st.text_input("Run week", value="", key="content_brief_run_week")
+    with run_cols[3]:
+        run_scoring = st.text_input("Run scoring", value="", key="content_brief_run_scoring")
+    with run_cols[4]:
+        run_league = st.text_input("Run league", value="", key="content_brief_run_league")
+    with run_cols[5]:
+        run_roster = st.text_input("Run roster", value="", key="content_brief_run_roster")
+    with run_cols[6]:
+        run_status = st.selectbox("Run status", run_status_options, key="content_brief_run_status")
+
+    try:
+        runs = list_content_brief_runs(
+            brief_type=None if run_brief_type == "All" else run_brief_type,
+            season=_optional_int(run_season),
+            week=_optional_int(run_week),
+            scoring_profile_id=run_scoring.strip() or None,
+            league_type_id=run_league.strip() or None,
+            roster_format_id=run_roster.strip() or None,
+            status=None if run_status == "All" else run_status,
+            limit=100,
+        )
+    except Exception as ex:
+        st.warning(f"Content brief runs are unavailable: {ex}")
+        runs = []
+
+    if runs:
+        st.dataframe(runs, hide_index=True, width="stretch")
+    else:
+        st.info("No content brief runs matched the selected filters.")
+
+    render_section_header(
+        "Brief List",
+        "content-brief-list",
+        "Draft, reviewed, approved, and archived content briefs ready for human review.",
+    )
+    brief_cols = st.columns(6)
+    with brief_cols[0]:
+        brief_type = st.selectbox("Brief type", brief_type_options, key="content_brief_list_type")
+    with brief_cols[1]:
+        review_status = st.selectbox("Review status", review_status_options, key="content_brief_list_review_status")
+    with brief_cols[2]:
+        brief_season = st.text_input("Brief season", value="", key="content_brief_list_season")
+    with brief_cols[3]:
+        brief_week = st.text_input("Brief week", value="", key="content_brief_list_week")
+    with brief_cols[4]:
+        model_run_id = st.text_input("Model run", value="", key="content_brief_list_model_run")
+    with brief_cols[5]:
+        brief_run_id = st.text_input("Brief run", value="", key="content_brief_list_run")
+
+    try:
+        briefs = list_content_briefs(
+            brief_type=None if brief_type == "All" else brief_type,
+            review_status=None if review_status == "All" else review_status,
+            season=_optional_int(brief_season),
+            week=_optional_int(brief_week),
+            model_run_id=model_run_id.strip() or None,
+            content_brief_run_id=brief_run_id.strip() or None,
+            limit=200,
+        )
+    except Exception as ex:
+        st.warning(f"Content briefs are unavailable: {ex}")
+        briefs = []
+
+    if briefs:
+        list_columns = [
+            "content_brief_id",
+            "title",
+            "brief_type",
+            "season",
+            "week",
+            "token_estimate",
+            "review_status",
+            "source_freshness_json",
+            "missing_data_flags",
+            "model_run_id",
+            "updated_at",
+        ]
+        st.dataframe(
+            [{key: row.get(key) for key in list_columns} for row in briefs],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.info("No content briefs matched the selected filters.")
+
+    selected_brief_id = st.selectbox(
+        "Selected brief",
+        options=[row.get("content_brief_id") for row in briefs if row.get("content_brief_id")] or [""],
+        format_func=lambda value: _content_brief_label(value, briefs),
+        key="content_brief_selected_id",
+    )
+
+    render_section_header(
+        "Brief Detail",
+        "content-brief-detail",
+        "Review the deterministic brief text, structured JSON, freshness, and missing-data flags.",
+    )
+    detail = {"brief": None, "items": [], "empty": True}
+    if selected_brief_id:
+        try:
+            detail = get_content_brief_detail(selected_brief_id)
+        except Exception as ex:
+            st.warning(f"Content brief detail is unavailable: {ex}")
+
+    brief = detail.get("brief")
+    items = detail.get("items") or []
+    if brief:
+        brief_payload = _content_brief_json(brief.get("brief_json"))
+        ranking_version = brief_payload.get("ranking_version") if isinstance(brief_payload, dict) else None
+        meta_cols = st.columns(5)
+        meta_cols[0].metric("Tokens", _metric_value(brief.get("token_estimate")))
+        meta_cols[1].metric("Review", brief.get("review_status") or "unknown")
+        meta_cols[2].metric("Season", _metric_value(brief.get("season")))
+        meta_cols[3].metric("Week", _metric_value(brief.get("week")))
+        meta_cols[4].metric("Items", len(items))
+        st.caption(
+            "Brief context: "
+            f"`model_run_id={brief.get('model_run_id') or 'unknown'}` | "
+            f"`ranking_version={ranking_version or 'unknown'}` | "
+            f"`content_brief_run_id={brief.get('content_brief_run_id') or 'unknown'}` | "
+            f"`updated_at={brief.get('updated_at') or 'unknown'}`"
+        )
+        st.markdown("#### Brief Text")
+        st.markdown(str(brief.get("brief_text") or "_No brief text available._"))
+        with st.expander("Structured brief JSON", expanded=False):
+            st.json(brief_payload)
+        with st.expander("Freshness and missing-data flags", expanded=False):
+            st.json(
+                {
+                    "source_freshness_json": _content_brief_json(brief.get("source_freshness_json")),
+                    "missing_data_flags": _content_brief_json(brief.get("missing_data_flags"), default=[]),
+                }
+            )
+        prompt_payload = _content_brief_prompt_payload(brief)
+        if prompt_payload:
+            with st.expander("Copy show-writer prompt payload", expanded=False):
+                st.code(json.dumps(prompt_payload, indent=2, sort_keys=True, default=str), language="json")
+    else:
+        st.info("Select a content brief to inspect detail.")
+
+    render_section_header(
+        "Brief Items",
+        "content-brief-items",
+        "Linked players, claims, trades, evidence summaries, counterarguments, snark hooks, confidence, and missing flags.",
+    )
+    if items:
+        item_columns = [
+            "item_order",
+            "item_type",
+            "player_id_internal",
+            "claim_id",
+            "trade_review_id",
+            "packet_id",
+            "title",
+            "claim",
+            "evidence_summary",
+            "counterargument",
+            "snark_hook",
+            "confidence_score",
+            "missing_data_flags",
+        ]
+        st.dataframe(
+            [{key: row.get(key) for key in item_columns} for row in items],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.info("No content brief items are available for the selected brief.")
+
+    render_section_header(
+        "Review Actions",
+        "content-brief-actions",
+        "Status changes are explicit. Reviewer notes are visible here but not persisted until the table schema supports them.",
+    )
+    if brief:
+        note_value = st.text_area("Reviewer notes", value="", height=90, key="content_brief_reviewer_notes")
+        action_cols = st.columns(5)
+        for index, status_value in enumerate(["draft", "reviewed", "approved", "archived"]):
+            with action_cols[index]:
+                if st.button(f"Mark {status_value}", key=f"content_brief_mark_{status_value}"):
+                    try:
+                        result = update_content_brief_review_status(
+                            selected_brief_id,
+                            status_value,
+                            reviewer_notes=note_value,
+                        )
+                        if result.get("reviewer_notes_ignored"):
+                            st.info("Review status updated. Reviewer notes were not saved because the warehouse schema does not support them yet.")
+                        else:
+                            st.success(f"Review status updated to {status_value}.")
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"Review status update failed: {ex}")
+        with action_cols[4]:
+            try:
+                markdown_export = export_content_brief_markdown(selected_brief_id)
+                st.download_button(
+                    "Export Markdown",
+                    data=markdown_export,
+                    file_name=f"{selected_brief_id}-content-brief.md",
+                    mime="text/markdown",
+                )
+            except Exception as ex:
+                st.caption(f"Markdown export is unavailable: {ex}")
+    else:
+        st.caption("Review actions are enabled after selecting a content brief.")
+
+    render_section_header(
+        "Generation Preview",
+        "content-brief-generation-preview",
+        "Dry-run command for deterministic brief generation. This does not execute generation in Streamlit.",
+    )
+    preview_cols = st.columns(6)
+    with preview_cols[0]:
+        preview_type = st.selectbox("Preview type", sorted(SUPPORTED_BRIEF_TYPES), key="content_brief_preview_type")
+    with preview_cols[1]:
+        preview_season = st.number_input("Preview season", min_value=1999, max_value=2050, value=2026, step=1)
+    with preview_cols[2]:
+        preview_week_text = st.text_input("Preview week", value="", key="content_brief_preview_week")
+    with preview_cols[3]:
+        preview_scoring = st.text_input("Preview scoring", value="ppr", key="content_brief_preview_scoring")
+    with preview_cols[4]:
+        preview_league = st.text_input("Preview league", value="redraft", key="content_brief_preview_league")
+    with preview_cols[5]:
+        preview_roster = st.text_input("Preview roster", value="one_qb", key="content_brief_preview_roster")
+    preview_model_run = st.text_input("Preview model run", value="", key="content_brief_preview_model_run")
+    preview_command = build_content_brief_generation_preview_command(
+        brief_type=preview_type,
+        season=int(preview_season),
+        week=_optional_int(preview_week_text),
+        scoring_profile_id=preview_scoring.strip() or "ppr",
+        league_type_id=preview_league.strip() or "redraft",
+        roster_format_id=preview_roster.strip() or "one_qb",
+        model_run_id=preview_model_run.strip() or None,
+    )
+    st.code(" ".join(preview_command), language="powershell")
+    if use_cloud_run_jobs_for_data_ops():
+        st.caption("Cloud Run Jobs are enabled for Data Ops. Use the Data Ops Cloud Run Jobs panel for any real trigger.")
+    else:
+        st.caption("Cloud Run Job triggering is hidden until `USE_CLOUD_RUN_JOBS_FOR_DATA_OPS=true`.")
+
+
+def _content_brief_label(content_brief_id, briefs):
+    if not content_brief_id:
+        return "No brief selected"
+    row = next((item for item in briefs if item.get("content_brief_id") == content_brief_id), {})
+    return f"{row.get('title') or content_brief_id} | {row.get('review_status') or 'unknown'} | {row.get('updated_at') or ''}"
+
+
+def _content_brief_json(value, default=None):
+    fallback = {} if default is None else default
+    if isinstance(value, (dict, list)):
+        return value
+    if value in (None, ""):
+        return fallback
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _content_brief_prompt_payload(brief):
+    brief_json = _content_brief_json((brief or {}).get("brief_json"))
+    payload = brief_json.get("llm_prompt_payload_json") if isinstance(brief_json, dict) else None
+    if isinstance(payload, str):
+        return _content_brief_json(payload)
+    return payload if isinstance(payload, dict) else None
+
+
+def render_claim_ledger_ui():
+    from src import claim_import, claim_ledger
+    from src.load import get_bigquery_client
+
+    render_tab_bookmarks([
+        ("Sources", "claim-sources"),
+        ("Manual Entry", "manual-claim-entry"),
+        ("CSV Import", "claim-csv-import"),
+        ("Review Board", "claim-review-board"),
+        ("Claim Detail", "claim-detail"),
+    ])
+    render_data_path_status("Claim Ledger", True)
+    st.caption("Feature flag: `USE_CLAIM_LEDGER_UI=true`. This workflow is manual-entry only: no scraping, no URL fetching, no LLM extraction.")
+
+    render_section_header(
+        "Claim Sources",
+        "claim-sources",
+        "Manage manual analyst, show, channel, article, and internal source metadata.",
+        first=True,
+    )
+    source_search = st.text_input("Search sources", value="", key="claim_source_search")
+    active_only = st.checkbox("Active sources only", value=False, key="claim_source_active_only")
+    sources = []
+    try:
+        sources = claim_import.list_claim_sources(search=source_search, active_only=active_only, limit=200)
+        if sources:
+            st.dataframe(sources, hide_index=True, width="stretch")
+        else:
+            st.info("No claim sources found yet.")
+    except Exception as ex:
+        st.warning(f"Claim sources are unavailable: {ex}")
+
+    with st.form("claim_source_form"):
+        st.markdown("#### Add or Update Source")
+        source_cols = st.columns(3)
+        with source_cols[0]:
+            source_id = st.text_input("Source ID", placeholder="e.g. analyst_x")
+            source_name = st.text_input("Source Name", placeholder="e.g. Analyst X")
+        with source_cols[1]:
+            source_type = st.selectbox("Source Type", sorted(claim_ledger.ALLOWED_SOURCE_TYPES))
+            person_name = st.text_input("Person Name", placeholder="optional")
+        with source_cols[2]:
+            show_name = st.text_input("Show Name", placeholder="optional")
+            source_active = st.checkbox("Active", value=True)
+        source_url = st.text_input("Source URL", placeholder="metadata only, not fetched")
+        source_notes = st.text_area("Source Notes", height=90)
+        save_source = st.form_submit_button("Save Source")
+    if save_source:
+        try:
+            result = claim_ledger.register_claim_source(
+                source_id=source_id,
+                source_name=source_name,
+                source_type=source_type,
+                person_name=person_name or None,
+                show_name=show_name or None,
+                source_url=source_url or None,
+                notes=source_notes or None,
+                active=source_active,
+            )
+            st.success(f"Source saved: {result['source']['source_id']}")
+        except Exception as ex:
+            st.error(f"Source save failed: {ex}")
+
+    render_section_header(
+        "Manual Claim Entry",
+        "manual-claim-entry",
+        "Create one manual claim with optional players, teams, rank, projection, value, and evaluation window.",
+    )
+    source_options = [row.get("source_id") for row in sources if row.get("source_id")]
+    with st.form("manual_claim_form"):
+        manual_cols = st.columns(3)
+        with manual_cols[0]:
+            selected_source_id = st.selectbox("Source", ["Manual new source"] + source_options)
+            manual_source_name = st.text_input("Source Name", value="" if selected_source_id != "Manual new source" else "")
+            manual_source_type = st.selectbox("Source Type", sorted(claim_ledger.ALLOWED_SOURCE_TYPES), key="manual_claim_source_type")
+        with manual_cols[1]:
+            manual_claim_type = st.selectbox("Claim Type", sorted(claim_ledger.ALLOWED_CLAIM_TYPES))
+            manual_claim_direction = st.selectbox("Claim Direction", [""] + sorted(claim_ledger.ALLOWED_DIRECTIONS))
+            manual_time_horizon = st.selectbox("Time Horizon", sorted(claim_ledger.ALLOWED_HORIZONS))
+        with manual_cols[2]:
+            manual_season = st.number_input("Season", min_value=1999, max_value=2050, value=2026, step=1)
+            manual_week = st.number_input("Week", min_value=0, max_value=18, value=0, step=1, help="Use 0 when the claim is not week-specific.")
+            manual_review_status = st.selectbox("Review Status", sorted(claim_ledger.ALLOWED_REVIEW_STATUSES), index=sorted(claim_ledger.ALLOWED_REVIEW_STATUSES).index("draft"))
+        manual_claim_text = st.text_area("Claim Text", height=120)
+        subject_cols = st.columns(2)
+        with subject_cols[0]:
+            manual_players = st.text_input("Player Subjects", placeholder="semicolon-separated")
+            manual_teams = st.text_input("Team Subjects", placeholder="semicolon-separated")
+        with subject_cols[1]:
+            manual_title = st.text_input("Episode or Video Title")
+            manual_url = st.text_input("Source URL", placeholder="metadata only, not fetched")
+        metric_cols = st.columns(3)
+        with metric_cols[0]:
+            manual_rank = st.text_input("Claimed Rank", placeholder="optional")
+        with metric_cols[1]:
+            manual_projection = st.text_input("Claimed Projection", placeholder="optional")
+        with metric_cols[2]:
+            manual_value = st.text_input("Claimed Value", placeholder="optional")
+        context_cols = st.columns(3)
+        with context_cols[0]:
+            manual_scoring = st.text_input("Scoring Profile", value="ppr")
+        with context_cols[1]:
+            manual_league = st.text_input("League Type", value="redraft")
+        with context_cols[2]:
+            manual_roster = st.text_input("Roster Format", value="one_qb")
+        manual_preview_only = st.checkbox("Preview only", value=True)
+        submit_manual_claim = st.form_submit_button("Create Manual Claim")
+    if submit_manual_claim:
+        try:
+            source_row = next((row for row in sources if row.get("source_id") == selected_source_id), {})
+            final_source_id = selected_source_id if selected_source_id != "Manual new source" else _claim_source_id_from_name(manual_source_name)
+            final_source_name = manual_source_name or source_row.get("source_name") or final_source_id
+            final_source_type = source_row.get("source_type") if selected_source_id != "Manual new source" else manual_source_type
+            final_source_type = final_source_type or "manual"
+            if not manual_preview_only:
+                claim_ledger.register_claim_source(
+                    source_id=final_source_id,
+                    source_name=final_source_name,
+                    source_type=final_source_type,
+                    source_url=manual_url or source_row.get("source_url"),
+                    active=True,
+                )
+            result = claim_ledger.create_fantasy_claim(
+                source_id=final_source_id,
+                source_name=final_source_name,
+                claim_source_type=final_source_type,
+                episode_or_video_title=manual_title or None,
+                source_url=manual_url or None,
+                claim_text=manual_claim_text,
+                claim_type=manual_claim_type,
+                claim_direction=manual_claim_direction or None,
+                time_horizon=manual_time_horizon,
+                season=int(manual_season),
+                week=None if int(manual_week) == 0 else int(manual_week),
+                scoring_profile_id=manual_scoring or None,
+                league_type_id=manual_league or None,
+                roster_format_id=manual_roster or None,
+                players=_claim_split_values(manual_players),
+                teams=_claim_split_values(manual_teams),
+                claimed_rank=_optional_int(manual_rank),
+                claimed_projection=_optional_float(manual_projection),
+                claimed_value=_optional_float(manual_value),
+                review_status=manual_review_status,
+                dry_run=manual_preview_only,
+            )
+            if manual_preview_only:
+                st.info("Manual claim preview generated. Uncheck Preview only to write it.")
+            else:
+                st.success(f"Manual claim created: {result['claim']['claim_id']}")
+            st.json(result)
+        except Exception as ex:
+            st.error(f"Manual claim entry failed: {ex}")
+
+    render_section_header(
+        "CSV Import",
+        "claim-csv-import",
+        "Upload the documented claim CSV, preview validation and player resolution, then write valid draft rows.",
+    )
+    st.caption("URLs in the CSV are stored as metadata only. They are not fetched or scraped.")
+    uploaded_claim_csv = st.file_uploader("Claim CSV", type=["csv"], key="claim_import_csv")
+    if uploaded_claim_csv is not None:
+        try:
+            bq_client = get_bigquery_client()
+            preview_rows = claim_import.build_claim_import_preview(
+                uploaded_claim_csv.getvalue(),
+                client=bq_client,
+            )
+        except Exception as ex:
+            st.error(f"CSV import preview failed: {ex}")
+            preview_rows = []
+        if preview_rows:
+            preview_table = claim_import.preview_rows_for_display(preview_rows)
+            st.dataframe(preview_table, hide_index=True, width="stretch")
+            invalid_count = sum(1 for row in preview_rows if not row.get("can_write"))
+            ambiguous_count = sum(1 for row in preview_rows if row.get("player_resolution_status") == "ambiguous")
+            unresolved_count = sum(1 for row in preview_rows if row.get("player_resolution_status") == "unresolved")
+            status_cols = st.columns(4)
+            status_cols[0].metric("Rows", len(preview_rows))
+            status_cols[1].metric("Invalid", invalid_count)
+            status_cols[2].metric("Ambiguous", ambiguous_count)
+            status_cols[3].metric("Unresolved", unresolved_count)
+            if invalid_count:
+                st.download_button(
+                    "Download import errors",
+                    data=claim_import.export_claim_import_errors(preview_rows),
+                    file_name="claim-import-errors.csv",
+                    mime="text/csv",
+                )
+            if st.button("Write Valid Claim Import Rows", type="secondary"):
+                try:
+                    write_result = claim_import.write_claim_import_rows(preview_rows, client=bq_client)
+                    st.success(f"Wrote {write_result['written_count']} claim rows. Skipped {write_result['skipped_count']}.")
+                except Exception as ex:
+                    st.error(f"Claim CSV write failed: {ex}")
+
+    render_section_header(
+        "Claim Review Board",
+        "claim-review-board",
+        "Browse draft, reviewed, ready, graded, and archived claims.",
+    )
+    board_cols = st.columns(4)
+    with board_cols[0]:
+        board_status = st.selectbox("Status", [""] + sorted(claim_ledger.ALLOWED_REVIEW_STATUSES), key="claim_board_status")
+    with board_cols[1]:
+        board_type = st.selectbox("Type", [""] + sorted(claim_ledger.ALLOWED_CLAIM_TYPES), key="claim_board_type")
+    with board_cols[2]:
+        board_season = st.text_input("Season", value="", key="claim_board_season")
+    with board_cols[3]:
+        board_source = st.text_input("Source ID", value="", key="claim_board_source")
+    try:
+        claims = claim_ledger.search_claims(
+            source_id=board_source or None,
+            review_status=board_status or None,
+            claim_type=board_type or None,
+            season=_optional_int(board_season),
+            limit=200,
+        )
+        if claims:
+            st.dataframe(claims, hide_index=True, width="stretch")
+        else:
+            st.info("No claims matched the selected filters.")
+    except Exception as ex:
+        claims = []
+        st.warning(f"Claim board is unavailable: {ex}")
+
+    render_section_header(
+        "Claim Detail",
+        "claim-detail",
+        "Inspect one claim, linked players, evaluation windows, and safe status actions.",
+    )
+    claim_options = [row.get("claim_id") for row in claims if row.get("claim_id")]
+    selected_claim_id = st.selectbox("Claim", claim_options) if claim_options else st.text_input("Claim ID", value="")
+    if selected_claim_id:
+        try:
+            detail = claim_import.get_claim_detail(selected_claim_id)
+            if detail["claim"]:
+                st.json(detail["claim"])
+                if detail["players"]:
+                    st.markdown("#### Linked Players")
+                    st.dataframe(detail["players"], hide_index=True, width="stretch")
+                if detail["evaluation_windows"]:
+                    st.markdown("#### Evaluation Windows")
+                    st.dataframe(detail["evaluation_windows"], hide_index=True, width="stretch")
+                action_cols = st.columns(4)
+                with action_cols[0]:
+                    if st.button("Mark Reviewed"):
+                        _claim_status_action(claim_ledger, selected_claim_id, "reviewed", detail)
+                with action_cols[1]:
+                    if st.button("Mark Ready"):
+                        _claim_status_action(claim_ledger, selected_claim_id, "ready_to_grade", detail)
+                with action_cols[2]:
+                    if st.button("Archive"):
+                        _claim_status_action(claim_ledger, selected_claim_id, "archived", detail)
+                with action_cols[3]:
+                    if st.button("Preview Grading Command"):
+                        st.code(
+                            f".\\venv\\Scripts\\python.exe -m src.claim_grading --claim-id {selected_claim_id} --dry-run",
+                            language="powershell",
+                        )
+            else:
+                st.info("Claim not found.")
+        except Exception as ex:
+            st.warning(f"Claim detail is unavailable: {ex}")
+
+
+def _claim_split_values(value):
+    if value in (None, ""):
+        return []
+    return [part.strip() for part in re.split(r"[;|\n]", str(value)) if part.strip()]
+
+
+def _optional_float(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _claim_source_id_from_name(value):
+    slug = re.sub(r"[^a-z0-9_]+", "_", str(value or "manual_source").strip().lower()).strip("_")
+    return slug or "manual_source"
+
+
+def _claim_status_action(claim_ledger_module, claim_id, status, detail):
+    try:
+        result = claim_ledger_module.update_claim_status(
+            claim_id,
+            status,
+            current_claim=detail["claim"],
+            claim_players=detail.get("players") or [],
+        )
+        st.success(f"Claim status updated to {result['review_status']}")
+    except Exception as ex:
+        st.error(f"Status update failed: {ex}")
 
 
 def _compat_json_value(value):
@@ -937,7 +2212,7 @@ def normalize_compat_player_profiles_data(df):
     out["pos_rank"] = _compat_column(df, "pigskin_rank_position").combine_first(_compat_column(df, "position_rank_by_profile"))
     out["source_freshness_json"] = _compat_column(df, "source_freshness_json")
     out["missing_data_flags"] = _compat_column(df, "missing_data_flags")
-    return out
+    return ensure_player_profile_display_columns(out)
 
 
 def fetch_compat_player_profiles_data():
@@ -972,7 +2247,7 @@ def normalize_compat_sleeper_watch_data(rows):
     out["sleeper_score"] = _compat_column(df, "streamer_score", 0.0).fillna(0.0)
     out["source_freshness_json"] = _compat_column(df, "source_freshness_json")
     out["missing_data_flags"] = _compat_column(df, "missing_data_flags")
-    return out
+    return ensure_sleeper_watch_display_columns(out)
 
 
 def fetch_compat_sleeper_watch_candidates_data():
@@ -992,6 +2267,8 @@ def load_compat_trade_assets():
         return df
     out = pd.DataFrame(index=df.index)
     out["player_display_name"] = _compat_column(df, "display_name")
+    out["source_pick_key"] = _compat_column(df, "source_player_key")
+    out["source_player_key"] = _compat_column(df, "source_player_key")
     out["position"] = _compat_column(df, "position")
     out["team"] = _compat_column(df, "team")
     out["market_value"] = _compat_column(df, "market_value").combine_first(_compat_column(df, "risk_adjusted_trade_value"))
@@ -1010,6 +2287,34 @@ def query_compat_trade_player_history(name):
     from src.trade_history import get_trade_player_history
 
     return get_trade_player_history(player_name=name, limit=10)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_trade_player_scores_current():
+    import pandas as pd
+    from src.trade_player_scores import get_current_trade_player_scores
+
+    rows = get_current_trade_player_scores(
+        scoring_profile_id="ppr",
+        league_type_id="redraft",
+        roster_format_id="one_qb",
+        limit=500,
+    )
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_trade_pick_scores_current():
+    import pandas as pd
+    from src.trade_pick_scores import get_current_trade_pick_scores
+
+    rows = get_current_trade_pick_scores(
+        scoring_profile_id="ppr",
+        league_type_id="redraft",
+        roster_format_id="one_qb",
+        limit=500,
+    )
+    return pd.DataFrame(rows)
 
 
 def get_compat_sleeper_viewer_team_context(console_context):
@@ -1163,7 +2468,7 @@ def render_fraud_watch_segment():
     cols[0].metric("Top Candidate", top["player_name"])
     cols[1].metric("Fraud Score", f'{top["fraud_score"]:.1f}')
     cols[2].metric("Label", top["fraud_label"])
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
 
 def render_sleeper_watch_segment():
@@ -1194,7 +2499,7 @@ def render_sleeper_watch_segment():
                 team,
                 opponent AS opponent_team,
                 rostered_rate AS roster_pct,
-                COALESCE(rolling_3_week_ppr, 0.0) AS rolling_3_week_ppr,
+                COALESCE(fantasy_points_last_3, 0.0) / 3.0 AS rolling_3_week_ppr,
                 COALESCE(snap_share_last_3, 0.0) AS snap_share,
                 COALESCE(targets_last_3, 0.0) / 3.0 AS targets_3w,
                 COALESCE(carries_last_3, 0.0) / 3.0 AS carries_3w,
@@ -1205,7 +2510,7 @@ def render_sleeper_watch_segment():
             FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.compat_sleeper_watch_candidates` c, latest_week lw
             WHERE c.season = lw.max_season AND c.week = lw.max_week
             """
-            df = execute_bq_cached(sql_query)
+            df = ensure_sleeper_watch_display_columns(execute_bq_cached(sql_query))
     except Exception as e:
         st.info(f"Sleeper Watch data is not materialized yet or the selected data path failed: {e}")
         return
@@ -1309,7 +2614,7 @@ def render_sleeper_watch_segment():
     # Render dataframe
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Opp Def Rank vs Pos": st.column_config.NumberColumn(
@@ -1467,12 +2772,11 @@ def fetch_player_profiles_data():
     latest_depth_charts AS (
         SELECT
             gsis_id,
-            ANY_VALUE(pos_abb) AS depth_position,
+            CAST(NULL AS STRING) AS depth_position,
             ANY_VALUE(pos_rank) AS depth_rank
         FROM (
             SELECT
                 gsis_id,
-                pos_abb,
                 pos_rank,
                 ROW_NUMBER() OVER(PARTITION BY gsis_id ORDER BY dt DESC) as rn
             FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.depth_charts`
@@ -1540,7 +2844,7 @@ def fetch_player_profiles_data():
         c.contract_apy,
         c.contract_guaranteed,
         c.contract_year_signed,
-        dc.depth_position,
+        COALESCE(dc.depth_position, rp.position) AS depth_position,
         dc.depth_rank,
         col.college_team,
         col.college_conf,
@@ -1571,63 +2875,57 @@ def fetch_player_profiles_data():
     """
     client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
     df = client.query(sql_query).result().to_dataframe()
-    return df
+    return ensure_player_profile_display_columns(df)
+
+
+PLAYER_PROFILE_SCORING_PROFILE_OPTIONS = profile_ranking_profiles.PLAYER_PROFILE_SCORING_PROFILE_OPTIONS
+PLAYER_PROFILE_SCORING_PROFILE_DEFAULT = profile_ranking_profiles.PLAYER_PROFILE_SCORING_PROFILE_DEFAULT
+PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE = profile_ranking_profiles.PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE
+
+
+def get_player_profile_scoring_profile_options():
+    return profile_ranking_profiles.get_player_profile_scoring_profile_options()
+
+
+def resolve_player_profile_scoring_profile(label_or_id):
+    return profile_ranking_profiles.resolve_player_profile_scoring_profile(label_or_id)
+
+
+def build_pigskin_rankings_query(scoring_profile_id):
+    return profile_ranking_profiles.build_pigskin_rankings_query(
+        BIGQUERY_PROJECT_ID,
+        "fantasy_football_brain",
+        scoring_profile_id,
+    )
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_pigskin_rankings_data():
+def fetch_pigskin_rankings_data(scoring_profile_id=PLAYER_PROFILE_SCORING_PROFILE_DEFAULT):
     import pandas as pd
     from google.cloud import bigquery
 
-    sql_query = f"""
-    SELECT
-        player_id,
-        position,
-        rank AS pigskin_rank,
-        tier AS pigskin_tier,
-        ranking_score AS pigskin_ranking_score,
-        confidence_score AS pigskin_confidence_score,
-        sleeper_team,
-        sleeper_status,
-        sleeper_depth_chart_position,
-        sleeper_depth_chart_order,
-        raw_ranking_score,
-        depth_chart_penalty,
-        avg_passing_epa,
-        season_passing_epa,
-        avg_rushing_epa,
-        season_rushing_epa,
-        avg_receiving_epa,
-        season_receiving_epa,
-        latest_season_wopr,
-        previous_season_wopr,
-        two_years_ago_wopr,
-        latest_season_target_share,
-        previous_season_target_share,
-        latest_season_carry_share,
-        previous_season_carry_share,
-        candidate_rank,
-        candidate_ranking_score,
-        rank_source,
-        adjudicated_at,
-        ranking_eligibility,
-        pigskin_verdict,
-        rank_rationale,
-        risk_flags,
-        what_would_change_mind,
-        ranking_version,
-        generated_at AS ranking_generated_at,
-        model_name AS ranking_model_name,
-        prompt_version AS ranking_prompt_version,
-        data_snapshot_label AS ranking_data_snapshot
-    FROM `{BIGQUERY_PROJECT_ID}.fantasy_football_brain.analytics_pigskin_rankings`
-    WHERE is_active = TRUE
-    """
+    sql_query, job_config = build_pigskin_rankings_query(scoring_profile_id)
     try:
         client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
-        return client.query(sql_query).result().to_dataframe()
+        return client.query(sql_query, job_config=job_config).result().to_dataframe()
     except Exception as ex:
         logging.getLogger("app.rankings").warning(f"Could not load canonical Pigskin rankings: {ex}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_unified_rankings_data(scoring_profile_id=PLAYER_PROFILE_SCORING_PROFILE_DEFAULT):
+    import pandas as pd
+    from google.cloud import bigquery
+
+    sql_query, job_config = profile_ranking_profiles.build_unified_rankings_query(
+        BIGQUERY_PROJECT_ID, "fantasy_football_brain", scoring_profile_id
+    )
+    try:
+        client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
+        return client.query(sql_query, job_config=job_config).result().to_dataframe()
+    except Exception as ex:
+        logging.getLogger("app.rankings").warning(f"Could not load unified draft rankings: {ex}")
         return pd.DataFrame()
 
 
@@ -1796,13 +3094,31 @@ def render_player_profiles_tab():
     if using_compat_profiles:
         render_compat_metadata(df, "Player Profiles")
 
-    rankings_df = fetch_pigskin_rankings_data()
+    scoring_options = get_player_profile_scoring_profile_options()
+    scoring_labels = [option["label"] for option in scoring_options]
+    default_option = resolve_player_profile_scoring_profile(
+        st.session_state.get("player_profiles_scoring_profile", PLAYER_PROFILE_SCORING_PROFILE_DEFAULT)
+    )
+    selected_scoring_label = st.selectbox(
+        "Scoring system",
+        scoring_labels,
+        index=scoring_labels.index(default_option["label"]),
+        key="player_profiles_scoring_profile_label",
+    )
+    selected_scoring_option = resolve_player_profile_scoring_profile(selected_scoring_label)
+    st.session_state["player_profiles_scoring_profile"] = selected_scoring_option["scoring_profile_id"]
+
+    rankings_df = fetch_pigskin_rankings_data(selected_scoring_option["scoring_profile_id"])
     if not rankings_df.empty:
         df = df.merge(rankings_df, on=["player_id", "position"], how="left")
+    unified_df = fetch_unified_rankings_data(selected_scoring_option["scoring_profile_id"])
+    if not unified_df.empty:
+        df = df.merge(unified_df, on=["player_id", "position"], how="left")
 
     ranking_defaults = {
         "pigskin_rank": pd.NA,
         "pigskin_tier": pd.NA,
+        "scoring_profile_id": selected_scoring_option["scoring_profile_id"],
         "pigskin_ranking_score": pd.NA,
         "pigskin_confidence_score": pd.NA,
         "pigskin_verdict": pd.NA,
@@ -1816,6 +3132,7 @@ def render_player_profiles_tab():
         "ranking_data_snapshot": pd.NA,
         "sleeper_team": pd.NA,
         "sleeper_status": pd.NA,
+        "sleeper_injury_status": pd.NA,
         "sleeper_depth_chart_position": pd.NA,
         "sleeper_depth_chart_order": pd.NA,
         "raw_ranking_score": pd.NA,
@@ -1836,8 +3153,18 @@ def render_player_profiles_tab():
         "candidate_rank": pd.NA,
         "candidate_ranking_score": pd.NA,
         "rank_source": pd.NA,
+        "llm_adjustment_code": pd.NA,
+        "llm_adjustment_detail": pd.NA,
+        "llm_adjustment_evidence": pd.NA,
+        "llm_estimated_games_missed": pd.NA,
+        "llm_rank_delta": pd.NA,
         "adjudicated_at": pd.NA,
         "ranking_eligibility": pd.NA,
+        "unified_overall_rank": pd.NA,
+        "unified_board_version": pd.NA,
+        "unified_replacement_rank": pd.NA,
+        "position_source_version": pd.NA,
+        "position_rank_source": pd.NA,
     }
     for col_name, default_value in ranking_defaults.items():
         if col_name not in df.columns:
@@ -1854,11 +3181,12 @@ def render_player_profiles_tab():
     if has_pigskin_rankings:
         version_values = df["ranking_version"].dropna().unique()
         version_label = str(version_values[0]) if len(version_values) else "unknown"
-        st.caption(f"Canonical Pigskin rankings loaded from `analytics_pigskin_rankings`, version `{version_label}`.")
-    else:
-        st.warning(
-            "Canonical Pigskin rankings are not materialized yet. Showing legacy analytical grade order until Data Ops publishes Pigskin rankings."
+        st.caption(
+            f"Canonical Pigskin {selected_scoring_option['label']} rankings loaded from "
+            f"`analytics_pigskin_rankings`, version `{version_label}`."
         )
+    else:
+        st.warning(PLAYER_PROFILE_RANKINGS_MISSING_MESSAGE)
 
     # Helpers for rendering
     def format_currency(val):
@@ -2043,7 +3371,7 @@ def render_player_profiles_tab():
             grade_val = player_row["display_score"] if not pd.isna(player_row["display_score"]) else 0.0
             rank_val = player_row["display_rank"] if not pd.isna(player_row["display_rank"]) else player_row["pos_rank"]
             rank_label = f"#{int(float(rank_val))} {player_row['position']}" if not pd.isna(rank_val) else "Unranked"
-            grade_title = "Pigskin Score" if has_player_pigskin_rank else "Overall Grade"
+            grade_title = f"Pigskin Score ({selected_scoring_option['label']})" if has_player_pigskin_rank else "Overall Grade"
             st.markdown(f"""
             <div class="grade-badge-container">
                 <div class="grade-badge-title">{grade_title}</div>
@@ -2081,13 +3409,14 @@ def render_player_profiles_tab():
             st.markdown('</div>', unsafe_allow_html=True)
 
         if not pd.isna(player_row.get("pigskin_rank")):
-            st.markdown("### 🏆 Canonical Pigskin Ranking")
+            st.markdown(f"### 🏆 Canonical Pigskin Ranking ({selected_scoring_option['label']})")
             confidence_val = player_row.get("pigskin_confidence_score")
             confidence_display = float(confidence_val) if not pd.isna(confidence_val) else 0.0
             depth_order = player_row.get("sleeper_depth_chart_order")
             depth_display = f"#{int(float(depth_order))}" if not pd.isna(depth_order) else "unknown"
             sleeper_team = player_row.get("sleeper_team") if not pd.isna(player_row.get("sleeper_team")) else "unknown"
             sleeper_status = player_row.get("sleeper_status") if not pd.isna(player_row.get("sleeper_status")) else "unknown"
+            sleeper_injury_status = player_row.get("sleeper_injury_status")
             penalty_val = player_row.get("depth_chart_penalty")
             penalty_display = float(penalty_val) if not pd.isna(penalty_val) else 0.0
             rank_source = player_row.get("rank_source") if not pd.isna(player_row.get("rank_source")) else "candidate fallback"
@@ -2099,14 +3428,42 @@ def render_player_profiles_tab():
                 f"Sleeper eligibility: {sleeper_team}, {sleeper_status}, "
                 f"depth {depth_display}, penalty {penalty_display:.1f}, source {rank_source}"
             )
+            if not pd.isna(sleeper_injury_status):
+                st.caption(f"Sleeper injury status: {str(sleeper_injury_status).title()}")
             if not pd.isna(player_row.get("pigskin_verdict")):
                 st.info(str(player_row["pigskin_verdict"]))
             if not pd.isna(player_row.get("rank_rationale")):
                 st.markdown(f"**Why Pigskin owns the rank:** {player_row['rank_rationale']}")
+            adjustment_code = player_row.get("llm_adjustment_code")
+            if not pd.isna(adjustment_code) and str(adjustment_code) != "NO_ADJUSTMENT":
+                adjustment_delta = player_row.get("llm_rank_delta")
+                movement_text = ""
+                if not pd.isna(adjustment_delta):
+                    movement = int(adjustment_delta)
+                    if movement > 0:
+                        movement_text = f" (moved up {movement} spots)"
+                    elif movement < 0:
+                        movement_text = f" (moved down {abs(movement)} spots)"
+                st.markdown(f"**Pigskin adjustment:** `{adjustment_code}`{movement_text}")
+                if not pd.isna(player_row.get("llm_adjustment_detail")):
+                    st.write(str(player_row["llm_adjustment_detail"]))
+                if not pd.isna(player_row.get("llm_adjustment_evidence")):
+                    st.caption(f"Evidence: {player_row['llm_adjustment_evidence']}")
+                games_missed = player_row.get("llm_estimated_games_missed")
+                if not pd.isna(games_missed):
+                    st.caption(f"Estimated regular-season games missed: {int(games_missed)}")
             if not pd.isna(player_row.get("risk_flags")):
                 st.markdown(f"**Risk flags:** {player_row['risk_flags']}")
             if not pd.isna(player_row.get("what_would_change_mind")):
                 st.markdown(f"**What would change the rank:** {player_row['what_would_change_mind']}")
+            with st.expander("Pigskin adjustment key"):
+                st.markdown(
+                    "`CURRENT_ROLE_UPGRADE` / `CURRENT_ROLE_DOWNGRADE`: bounded repair for verified current-role evidence.  "
+                    "`ROOKIE_CONTEXT`: bounded repair for information unavailable to the historical formula.  "
+                    "`INJURY_1_2`, `INJURY_3_5`, `INJURY_6_8`, `INJURY_9_PLUS`: a source-backed regular-season games-missed estimate.  "
+                    "`INJURY_UNCERTAIN`: injury information exists but does not justify a rank movement.  "
+                    "`ORDER_REBALANCE`: mechanical movement caused by another coded repair."
+                )
 
         # Pigskin's AI Scouting Report
         st.markdown("### 🧠 Pigskin's Scouting Report")
@@ -2188,7 +3545,7 @@ def render_player_profiles_tab():
                 height=220,
             )
             
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
 
         # 2. Season History
         if not history_df.empty:
@@ -2229,7 +3586,7 @@ def render_player_profiles_tab():
                 })
                 
             season_summary_df = pd.DataFrame(season_summary_data).sort_values(by="Season", ascending=False)
-            st.dataframe(season_summary_df, use_container_width=True, hide_index=True)
+            st.dataframe(season_summary_df, width="stretch", hide_index=True)
 
             # 3. Game Log dropdown
             st.markdown("#### 📋 Seasonal Game Logs")
@@ -2259,7 +3616,7 @@ def render_player_profiles_tab():
                             "total_epa": "EPA",
                         }
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True
                 )
 
@@ -2280,7 +3637,7 @@ def render_player_profiles_tab():
                         <div style="font-size: 11px; color: #0284c7;">Grade: {comp['avg_grade']:.1f}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    if st.button("🔍 View Profile", key=f"comp_jump_{comp['player_id']}", use_container_width=True):
+                    if st.button("🔍 View Profile", key=f"comp_jump_{comp['player_id']}", width="stretch"):
                         st.session_state.selected_player_id = comp["player_id"]
                         st.session_state.global_profile_search = comp["player_display_name"]
                         st.rerun()
@@ -2291,58 +3648,85 @@ def render_player_profiles_tab():
     else:
         # Segmented position controls
         if "selected_pos" not in st.session_state:
-            st.session_state.selected_pos = "QB"
+            st.session_state.selected_pos = "ALL"
 
         cols_pos = st.columns(5)
-        positions = ["All", "QB", "RB", "WR", "TE"]
+        positions = ["ALL", "QB", "RB", "WR", "TE"]
 
         for idx, pos in enumerate(positions):
-            label = f"🏈 {pos}" if pos != "All" else "🌍 All"
+            label = "🌍 ALL" if pos == "ALL" else f"🏈 {pos}"
             btn_type = "primary" if st.session_state.selected_pos == pos else "secondary"
-            if cols_pos[idx].button(label, type=btn_type, use_container_width=True, key=f"pos_btn_{pos}"):
+            if cols_pos[idx].button(label, type=btn_type, width="stretch", key=f"pos_btn_{pos}"):
                 st.session_state.selected_pos = pos
                 st.rerun()
 
         selected_pos = st.session_state.selected_pos
-        st.markdown(f"#### 🏆 {selected_pos} Position Rankings Directory")
+        directory_label = "ALL Draft Board" if selected_pos == "ALL" else f"{selected_pos} Position Rankings Directory"
+        st.markdown(f"#### 🏆 {directory_label}")
 
         # Filter and show
         df_pos = df.copy()
-        if selected_pos != "All":
+        if selected_pos != "ALL":
             df_pos = df_pos[df_pos["position"] == selected_pos]
         if has_pigskin_rankings:
             df_pos = df_pos[df_pos["pigskin_rank"].notna()]
 
-        df_pos["display_rank_sort"] = pd.to_numeric(df_pos["display_rank"], errors="coerce").fillna(9999)
-        df_pos["display_score_sort"] = pd.to_numeric(df_pos["display_score"], errors="coerce").fillna(0)
-        if selected_pos == "All":
-            df_pos = df_pos.sort_values(by=["position", "display_rank_sort", "display_score_sort"], ascending=[True, True, False])
-        else:
-            df_pos = df_pos.sort_values(by=["display_rank_sort", "display_score_sort"], ascending=[True, False])
+        df_pos = profile_ranking_profiles.sort_player_profile_board(df_pos, selected_pos)
 
         if df_pos.empty:
             st.info("No players found matching the selected position.")
             return
 
+        if selected_pos == "ALL":
+            board_versions = [str(value) for value in df_pos["unified_board_version"].dropna().unique()]
+            source_rows = (
+                df_pos[["position", "position_rank_source", "unified_replacement_rank"]]
+                .dropna(subset=["position_rank_source"])
+                .drop_duplicates()
+                .sort_values("position")
+            )
+            sources = "; ".join(
+                f"{row.position}: {row.position_rank_source} (replacement {int(row.unified_replacement_rank)})"
+                for row in source_rows.itertuples()
+            )
+            st.info(
+                f"**Current formula:** position-locked unified VORP interleaver. {sources}. "
+                f"Board version: `{board_versions[0] if board_versions else 'unknown'}`."
+            )
+        else:
+            sources = sorted({str(value) for value in df_pos["rank_source"].dropna().unique()})
+            st.info(f"**Current formula:** {', '.join(sources) if sources else 'Formula metadata unavailable'}.")
+
         # Format columns for rankings display
         display_ranks = df_pos.copy()
+        display_ranks["display_rank"] = display_ranks["board_rank"]
         display_ranks["display_rank"] = display_ranks["display_rank"].apply(lambda x: f"{int(float(x))}" if not pd.isna(x) else "N/A")
         display_ranks["display_score"] = display_ranks["display_score"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
         display_ranks["pigskin_tier"] = display_ranks["pigskin_tier"].fillna("legacy grade")
         display_ranks["pigskin_verdict"] = display_ranks["pigskin_verdict"].fillna("Pigskin ranking not materialized yet.")
+        display_ranks["llm_adjustment_code"] = display_ranks.apply(
+            lambda row: profile_ranking_profiles.format_adjustment_label(
+                row.get("llm_adjustment_code"), row.get("llm_rank_delta")
+            ), axis=1
+        )
+        display_ranks["sleeper_injury_status"] = display_ranks["sleeper_injury_status"].apply(
+            lambda value: str(value).title() if not pd.isna(value) and str(value).strip() else "No flag"
+        )
         display_ranks["avg_ppr"] = display_ranks["avg_ppr"].apply(lambda x: f"{x:.1f}" if not pd.isna(x) else "N/A")
         display_ranks["contract_apy"] = display_ranks["contract_apy"].apply(format_currency)
         display_ranks["height"] = display_ranks["height"].apply(format_height)
         display_ranks["weight"] = display_ranks["weight"].apply(lambda x: f"{int(float(x))} lbs" if (x and not pd.isna(x)) else "N/A")
 
         display_ranks = display_ranks.rename(columns={
-            "display_rank": "Rank",
+            "display_rank": "Board Rank" if selected_pos == "ALL" else "Rank",
             "player_display_name": "Player",
             "team": "Team",
             "college_name": "College",
             "display_score": "Pigskin Score",
             "pigskin_tier": "Tier",
             "pigskin_verdict": "Pigskin Verdict",
+            "llm_adjustment_code": "Rank Change",
+            "sleeper_injury_status": "Injury",
             "avg_ppr": "Avg PPR",
             "contract_apy": "Salary APY",
             "height": "Height",
@@ -2350,9 +3734,13 @@ def render_player_profiles_tab():
         })
 
         st.dataframe(
-            display_ranks[["Rank", "Player", "Team", "College", "Pigskin Score", "Tier", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
-            use_container_width=True,
+            display_ranks[[("Board Rank" if selected_pos == "ALL" else "Rank"), "Player", "Team", "College", "Injury", "Pigskin Score", "Tier", "Rank Change", "Pigskin Verdict", "Avg PPR", "Salary APY", "Height", "Weight"]],
+            width="stretch",
             hide_index=True
+        )
+        st.caption(
+            "Rank Change explains whether Pigskin kept the formula order or made a bounded current-context move. "
+            "Formula rank means no movement. Role, rookie, injury, and queue labels state why a player moved and show the signed rank change when applicable."
         )
 
         st.markdown("---")
@@ -2368,7 +3756,7 @@ def render_player_profiles_tab():
         with col_btn:
             st.write("") # Alignment spacers
             st.write("")
-            if st.button("View Full Profile 👤", type="primary", use_container_width=True):
+            if st.button("View Full Profile 👤", type="primary", width="stretch"):
                 if rank_selected:
                     st.session_state.selected_player_id = df_pos[df_pos["player_display_name"] == rank_selected].iloc[0]["player_id"]
                     st.rerun()
@@ -2803,7 +4191,7 @@ def render_reddit_topic_scout():
             "Best Board Rank": topic["top_weekly_rank"],
             "Top Link": topic["top_link"],
         } for index, topic in enumerate(topics)])
-        st.dataframe(topic_df, use_container_width=True, hide_index=True)
+        st.dataframe(topic_df, width="stretch", hide_index=True)
 
         for index, topic in enumerate(topics, start=1):
             with st.expander(f"{index}. {topic['topic']}"):
@@ -2863,6 +4251,8 @@ def render_ai_cohost():
     [sarcastic] Great, he scored twice. Very cute. Now look at the target share before your roster starts paying vibes tax.
     """ if script_mode else ""
 
+        live_formula_context = load_pigskin_live_formula_context()
+
         # Define Co-Host System Prompt
         system_prompt = f"""
     You are Pigskin, the analytical co-host for AI vs Vibes, a fantasy football show built around evidence beating narrative.
@@ -2892,11 +4282,16 @@ def render_ai_cohost():
     The active BigQuery project ID is '{active_project_id}' and the dataset is 'fantasy_football_brain'.
     Do not expose project internals to the user unless needed to explain a missing-data problem.
     {context_tool_protocol}
+    {PIGSKIN_HISTORICAL_PACKET_PROMPT_GUARDRAIL}
+    {live_formula_context}
     {render_pigskin_chat_schema()}
 
     ### The Analytical Filter Protocol ###
     You are mandated to use curated context tools before making player, ranking, trade, projection, roster, or causal claims.
     For any question about rankings, positional rank, projections, draft price, Player Profiles, "why did you rank", "defend your ranking", or rank disagreements, call `get_rankings_slice`, `get_player_context_packet`, or `search_players` first.
+    When the app supplies a `Live Ranking Board Context` block, use that block as the source of truth. Preserve its exact board order. Do not infer, synthesize, or reorder current ranks from formula weights, media consensus, BQML review output, or static formula policy.
+    If live-ranking rows are not loaded, say the live board was unavailable instead of guessing.
+    For factual rank-defense answers, do not use bracketed stage directions such as `[mocking]`, `[laughs]`, `[deadpan]`, or `[sarcastic]`.
     If active ranking context contains the player, acknowledge the rank directly. Never say "I did not rank him there" when the curated Pigskin ranking context says Pigskin did.
     For non-ranking player analysis, prefer `get_player_context_packet`, `compare_players`, and `get_trade_player_history`.
     For Fraud Watch analysis, use `get_fraud_watch_candidates` before making the take.
@@ -2954,8 +4349,31 @@ def render_ai_cohost():
 
             with st.chat_message("assistant"):
                 try:
+                    outbound_prompt = prompt
+                    ranking_context_request = build_live_ranking_context_request(prompt)
+                    if ranking_context_request:
+                        try:
+                            ranking_tool_payload = execute_pigskin_context_tool(
+                                "get_rankings_slice",
+                                ranking_context_request,
+                            )
+                            ranking_result = ranking_tool_payload.get("result", {})
+                            live_ranking_context = format_live_ranking_context_for_prompt(
+                                ranking_result.get("rankings", []),
+                                scoring_profile_id=ranking_result.get("scoring_profile_id") or ranking_context_request["scoring_profile_id"],
+                                board=ranking_result.get("board") or ranking_context_request["board"],
+                                requested_limit=ranking_result.get("limit") or ranking_context_request["limit"],
+                            )
+                        except Exception as ranking_ex:
+                            live_ranking_context = (
+                                "### Live Ranking Board Context ###\n"
+                                f"The live Current Pigskin ranking rows could not be loaded: {ranking_ex}\n"
+                                "Tell the user the live board was unavailable. Do not guess, infer, or synthesize current ranks."
+                            )
+                        outbound_prompt = f"{live_ranking_context}\n\nUser question:\n{prompt}"
+
                     # Initial request (might be a tool call)
-                    response = st.session_state.chat_session.send_message(prompt)
+                    response = st.session_state.chat_session.send_message(outbound_prompt)
 
                     def get_fc(resp):
                         if getattr(resp, "function_calls", None):
@@ -3235,52 +4653,82 @@ def render_value_analyzer():
 
     with col_sel_A:
         st.markdown("#### 🟥 Side A (Assets)")
-        assets_A = []
+        selected_labels_A = []
         for i in range(st.session_state.num_a):
             selected = st.selectbox(
                 f"Select Asset A {i+1}",
                 [empty_asset_label] + player_options,
                 key=f"sel_a_{i}"
             )
-            if selected != empty_asset_label:
-                assets_A.append(player_map[selected])
+            selected_labels_A.append(selected)
 
-        if len(assets_A) == st.session_state.num_a:
-            st.session_state.num_a += 1
-            st.rerun()
+        assets_A = collect_selected_trade_assets(selected_labels_A, player_map, empty_asset_label)
+        unresolved_assets_A = unresolved_trade_asset_labels(selected_labels_A, player_map, empty_asset_label)
+        next_num_a = trade_asset_selector_count_with_blank(st.session_state.num_a, len(assets_A))
+        if next_num_a > st.session_state.num_a:
+            for i in range(st.session_state.num_a, next_num_a):
+                selected = st.selectbox(
+                    f"Select Asset A {i+1}",
+                    [empty_asset_label] + player_options,
+                    key=f"sel_a_{i}"
+                )
+                selected_labels_A.append(selected)
+            st.session_state.num_a = next_num_a
+            assets_A = collect_selected_trade_assets(selected_labels_A, player_map, empty_asset_label)
+            unresolved_assets_A = unresolved_trade_asset_labels(selected_labels_A, player_map, empty_asset_label)
 
     with col_sel_B:
         st.markdown("#### 🟦 Side B (Assets)")
-        assets_B = []
+        selected_labels_B = []
         for i in range(st.session_state.num_b):
             selected = st.selectbox(
                 f"Select Asset B {i+1}",
                 [empty_asset_label] + player_options,
                 key=f"sel_b_{i}"
             )
-            if selected != empty_asset_label:
-                assets_B.append(player_map[selected])
+            selected_labels_B.append(selected)
 
-        if len(assets_B) == st.session_state.num_b:
-            st.session_state.num_b += 1
-            st.rerun()
+        assets_B = collect_selected_trade_assets(selected_labels_B, player_map, empty_asset_label)
+        unresolved_assets_B = unresolved_trade_asset_labels(selected_labels_B, player_map, empty_asset_label)
+        next_num_b = trade_asset_selector_count_with_blank(st.session_state.num_b, len(assets_B))
+        if next_num_b > st.session_state.num_b:
+            for i in range(st.session_state.num_b, next_num_b):
+                selected = st.selectbox(
+                    f"Select Asset B {i+1}",
+                    [empty_asset_label] + player_options,
+                    key=f"sel_b_{i}"
+                )
+                selected_labels_B.append(selected)
+            st.session_state.num_b = next_num_b
+            assets_B = collect_selected_trade_assets(selected_labels_B, player_map, empty_asset_label)
+            unresolved_assets_B = unresolved_trade_asset_labels(selected_labels_B, player_map, empty_asset_label)
+
+    if unresolved_assets_A:
+        st.warning(f"Side A selected asset could not be resolved: {', '.join(map(str, unresolved_assets_A))}")
+    if unresolved_assets_B:
+        st.warning(f"Side B selected asset could not be resolved: {', '.join(map(str, unresolved_assets_B))}")
 
     # Display Side-by-Side Cards
     st.markdown("#### ⚖️ Side-by-Side Comparison")
     col_card_A, col_card_B = st.columns(2)
 
-    total_val_A = sum(numeric_value(a['market_value']) for a in assets_A)
+    total_val_A = sum(numeric_value(a.get('market_value')) for a in assets_A)
     total_proj_A = sum(project_asset_value(a, projection_years) for a in assets_A)
 
-    total_val_B = sum(numeric_value(b['market_value']) for b in assets_B)
+    total_val_B = sum(numeric_value(b.get('market_value')) for b in assets_B)
     total_proj_B = sum(project_asset_value(b, projection_years) for b in assets_B)
 
     with col_card_A:
         asset_list_html = "".join([
-            f"<li><b>{safe_display(a['player_display_name'])}</b> ({safe_display(a['position'], 'Pick')})<br>"
-            f"Age: {safe_display(a['age'], 'N/A')} | "
-            f"Val: {numeric_value(a['market_value'])} &rarr; Projected: {project_asset_value(a, projection_years)}</li>"
+            f"<li><b>{safe_display(a.get('player_display_name'))}</b> "
+            f"({safe_display(a.get('position'), 'Pick')} - {safe_display(a.get('team'), 'N/A')})<br>"
+            f"Age: {safe_display(a.get('age'), 'N/A')} | "
+            f"Val: {numeric_value(a.get('market_value'))} &rarr; Projected: {project_asset_value(a, projection_years)}</li>"
             for a in assets_A
+        ])
+        unresolved_html = "".join([
+            f"<li>Selected asset could not be resolved: {html.escape(str(label))}</li>"
+            for label in unresolved_assets_A
         ])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #10B981; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
@@ -3290,17 +4738,22 @@ def render_value_analyzer():
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
             <h5 style="margin-bottom: 5px;">Selected Assets:</h5>
             <ul style="padding-left: 20px; margin-top: 0;">
-                {asset_list_html if assets_A else "<li>No assets selected</li>"}
+                {asset_list_html or unresolved_html or "<li>No assets selected</li>"}
             </ul>
         </div>
         """, unsafe_allow_html=True)
 
     with col_card_B:
         asset_list_html_B = "".join([
-            f"<li><b>{safe_display(b['player_display_name'])}</b> ({safe_display(b['position'], 'Pick')})<br>"
-            f"Age: {safe_display(b['age'], 'N/A')} | "
-            f"Val: {numeric_value(b['market_value'])} &rarr; Projected: {project_asset_value(b, projection_years)}</li>"
+            f"<li><b>{safe_display(b.get('player_display_name'))}</b> "
+            f"({safe_display(b.get('position'), 'Pick')} - {safe_display(b.get('team'), 'N/A')})<br>"
+            f"Age: {safe_display(b.get('age'), 'N/A')} | "
+            f"Val: {numeric_value(b.get('market_value'))} &rarr; Projected: {project_asset_value(b, projection_years)}</li>"
             for b in assets_B
+        ])
+        unresolved_html_B = "".join([
+            f"<li>Selected asset could not be resolved: {html.escape(str(label))}</li>"
+            for label in unresolved_assets_B
         ])
         st.markdown(f"""
         <div class="metric-card" style="border-left: 5px solid #3B82F6; background-color: #F9FAFB; padding: 20px; border-radius: 8px;">
@@ -3310,10 +4763,243 @@ def render_value_analyzer():
             <hr style="margin: 10px 0; border-color: #E5E7EB;"/>
             <h5 style="margin-bottom: 5px;">Selected Assets:</h5>
             <ul style="padding-left: 20px; margin-top: 0;">
-                {asset_list_html_B if assets_B else "<li>No assets selected</li>"}
+                {asset_list_html_B or unresolved_html_B or "<li>No assets selected</li>"}
             </ul>
         </div>
         """, unsafe_allow_html=True)
+
+    player_score_ui_enabled = use_trade_score_ui()
+    pick_score_ui_enabled = use_trade_pick_score_ui()
+    if player_score_ui_enabled or pick_score_ui_enabled:
+        st.markdown("#### 🧮 Pigskin Trade Score")
+        st.caption("Market-value totals remain separate from Player Trade Score totals and Pick Score totals.")
+        if trade_side_has_mixed_player_and_pick_assets(assets_A) or trade_side_has_mixed_player_and_pick_assets(assets_B):
+            st.warning("Mixed player and draft-pick assets selected. Market totals stay combined, score totals stay separate.")
+
+    if player_score_ui_enabled:
+        st.caption("Pigskin Trade Score source: compat_trade_player_scores_current")
+
+        score_rows = []
+        try:
+            score_df = load_trade_player_scores_current()
+            if score_df is not None and not score_df.empty:
+                score_rows = score_df.to_dict("records")
+            else:
+                st.warning("Pigskin Trade Score unavailable: compat_trade_player_scores_current returned no rows.")
+        except Exception as score_error:
+            st.warning(f"Pigskin Trade Score unavailable: {score_error}")
+
+        model_context = trade_score_model_context(score_rows)
+        if model_context:
+            st.caption(trade_score_model_context_label(model_context))
+
+        player_assets_A = [asset for asset in assets_A if not (pick_score_ui_enabled and is_trade_pick_asset(asset))]
+        player_assets_B = [asset for asset in assets_B if not (pick_score_ui_enabled and is_trade_pick_asset(asset))]
+        attached_scores_A = attach_trade_scores_to_assets(player_assets_A, score_rows)
+        attached_scores_B = attach_trade_scores_to_assets(player_assets_B, score_rows)
+        score_summary_A = summarize_trade_score_side(attached_scores_A)
+        score_summary_B = summarize_trade_score_side(attached_scores_B)
+        score_total_A = score_summary_A["total_trade_score"] if score_summary_A["scored_count"] else None
+        score_total_B = score_summary_B["total_trade_score"] if score_summary_B["scored_count"] else None
+
+        score_col_A, score_col_B, score_col_delta = st.columns(3)
+        with score_col_A:
+            st.metric("Side A Player Trade Score", score_total_A if score_total_A is not None else "N/A")
+            st.caption(f"Scored player assets: {score_summary_A['scored_count']} of {score_summary_A['asset_count']}")
+        with score_col_B:
+            st.metric("Side B Player Trade Score", score_total_B if score_total_B is not None else "N/A")
+            st.caption(f"Scored player assets: {score_summary_B['scored_count']} of {score_summary_B['asset_count']}")
+        with score_col_delta:
+            if score_total_A is not None and score_total_B is not None:
+                st.metric("Player Score Fairness Delta", round(abs(score_total_A - score_total_B), 2))
+            else:
+                st.metric("Player Score Fairness Delta", "N/A")
+            st.caption("Lower delta means the player score model sees the sides as closer.")
+
+        for side_label, attached_scores in (("Side A", attached_scores_A), ("Side B", attached_scores_B)):
+            missing_score_assets = []
+            for item in attached_scores:
+                if item.get("score") is not None:
+                    continue
+                asset = item["asset"]
+                asset_name = asset.get("player_display_name") if hasattr(asset, "get") else asset
+                reason = trade_score_unavailable_reason(asset)
+                missing_score_assets.append(f"{safe_display(asset_name)} ({reason})")
+            if missing_score_assets:
+                st.warning(f"Pigskin Trade Score unavailable for {side_label}: {', '.join(missing_score_assets)}")
+
+            with st.expander(f"{side_label} player score component breakdown", expanded=False):
+                if not attached_scores:
+                    st.caption("No player assets selected.")
+                    continue
+                for item in attached_scores:
+                    asset = item["asset"]
+                    score = item.get("score")
+                    asset_name = asset.get("player_display_name") if hasattr(asset, "get") else str(asset)
+                    if not score:
+                        reason = trade_score_unavailable_reason(asset)
+                        st.caption(f"{safe_display(asset_name)}: Pigskin Trade Score N/A. Reason: {reason}.")
+                        continue
+                    component_json = {}
+                    missing_flags = []
+                    try:
+                        component_json = json.loads(score.get("component_json") or "{}")
+                    except Exception:
+                        component_json = {}
+                    try:
+                        missing_flags = json.loads(score.get("missing_flags_json") or "[]")
+                    except Exception:
+                        missing_flags = []
+
+                    st.markdown(
+                        f"**{safe_display(asset_name)}**: "
+                        f"score `{safe_display(score.get('trade_score'))}`, "
+                        f"tier `{safe_display(score.get('score_tier'))}`, "
+                        f"confidence `{safe_display(score.get('confidence_score'))}`, "
+                        f"risk `{safe_display(score.get('normalized_risk_score'))}`, "
+                        f"Fraud Watch `{safe_display(score.get('fraud_score'))}`"
+                    )
+                    component_rows = [
+                        {"component": key, "score": component_json.get(key)}
+                        for key in (
+                            "market_score",
+                            "projection_score",
+                            "recent_production_score",
+                            "role_usage_score",
+                            "positional_scarcity_score",
+                            "efficiency_score",
+                        )
+                    ]
+                    st.dataframe(component_rows, hide_index=True, width="stretch")
+                    warning_rows = trade_score_warning_summary_rows(missing_flags)
+                    if warning_rows:
+                        warning_categories = ", ".join(
+                            f"{row['category']} ({row['count']})" for row in warning_rows
+                        )
+                        st.caption(f"Warning categories: {warning_categories}")
+                        with st.expander(f"{safe_display(asset_name)} warning details", expanded=False):
+                            st.dataframe(warning_rows, hide_index=True, width="stretch")
+
+                    freshness_rows = trade_score_source_freshness_rows(score)
+                    if freshness_rows:
+                        with st.expander(f"{safe_display(asset_name)} source freshness", expanded=False):
+                            st.dataframe(freshness_rows, hide_index=True, width="stretch")
+
+    if pick_score_ui_enabled:
+        st.caption("Pick Score source: compat_trade_pick_scores_current")
+        st.caption("Pick Score is shown separately from player Pigskin Trade Score.")
+
+        pick_score_rows = []
+        try:
+            pick_score_df = load_trade_pick_scores_current()
+            if pick_score_df is not None and not pick_score_df.empty:
+                pick_score_rows = pick_score_df.to_dict("records")
+            else:
+                st.warning("Pick Score unavailable: compat_trade_pick_scores_current returned no rows.")
+        except Exception as pick_score_error:
+            st.warning(f"Pick Score unavailable: {pick_score_error}")
+
+        attached_pick_scores_A = attach_trade_pick_scores_to_assets(assets_A, pick_score_rows)
+        attached_pick_scores_B = attach_trade_pick_scores_to_assets(assets_B, pick_score_rows)
+        pick_summary_A = summarize_trade_pick_score_side(attached_pick_scores_A)
+        pick_summary_B = summarize_trade_pick_score_side(attached_pick_scores_B)
+        pick_total_A = pick_summary_A["total_pick_score"] if pick_summary_A["scored_count"] else None
+        pick_total_B = pick_summary_B["total_pick_score"] if pick_summary_B["scored_count"] else None
+
+        pick_col_A, pick_col_B, pick_col_delta = st.columns(3)
+        with pick_col_A:
+            st.metric("Side A Pick Score", pick_total_A if pick_total_A is not None else "N/A")
+            st.caption(f"Scored picks: {pick_summary_A['scored_count']} of {pick_summary_A['asset_count']}")
+        with pick_col_B:
+            st.metric("Side B Pick Score", pick_total_B if pick_total_B is not None else "N/A")
+            st.caption(f"Scored picks: {pick_summary_B['scored_count']} of {pick_summary_B['asset_count']}")
+        with pick_col_delta:
+            if pick_total_A is not None and pick_total_B is not None:
+                st.metric("Pick Score Fairness Delta", round(abs(pick_total_A - pick_total_B), 2))
+            else:
+                st.metric("Pick Score Fairness Delta", "N/A")
+            st.caption("Pick Score is not added to the player score total.")
+
+        for side_label, attached_pick_scores in (("Side A", attached_pick_scores_A), ("Side B", attached_pick_scores_B)):
+            missing_pick_scores = []
+            for item in attached_pick_scores:
+                if item.get("score") is not None:
+                    continue
+                asset = item["asset"]
+                pick_name = asset.get("player_display_name") if hasattr(asset, "get") else asset
+                missing_pick_scores.append(
+                    f"{safe_display(pick_name)} (No compatible pick score row for this scoring context)"
+                )
+            if missing_pick_scores:
+                st.warning(f"Pick Score unavailable for {side_label}: {', '.join(missing_pick_scores)}")
+
+            with st.expander(f"{side_label} pick score component breakdown", expanded=False):
+                if not attached_pick_scores:
+                    st.caption("No pick assets selected.")
+                    continue
+                for item in attached_pick_scores:
+                    asset = item["asset"]
+                    score = item.get("score")
+                    pick_name = asset.get("player_display_name") if hasattr(asset, "get") else str(asset)
+                    if not score:
+                        st.caption(
+                            f"{safe_display(pick_name)}: Pick Score N/A. "
+                            "Reason: No compatible pick score row for this scoring context."
+                        )
+                        continue
+                    try:
+                        missing_flags = json.loads(score.get("missing_flags_json") or "[]")
+                    except Exception:
+                        missing_flags = []
+
+                    pick_slot_text = trade_pick_slot_display(score)
+                    st.markdown(
+                        f"**{safe_display(pick_name)}** Pick Score: "
+                        f"`{safe_display(score.get('pick_score'))}`, "
+                        f"tier `{safe_display(score.get('score_tier'))}`, "
+                        f"confidence `{safe_display(score.get('confidence_score'))}`, "
+                        f"model `{safe_display(score.get('model_version'))}`"
+                    )
+                    st.caption(
+                        f"Year `{safe_display(score.get('pick_year'))}`, "
+                        f"round `{safe_display(score.get('pick_round'))}`, "
+                        f"slot `{pick_slot_text}`, "
+                        f"class `{safe_display(score.get('pick_class'))}`, "
+                        f"bucket `{safe_display(score.get('pick_bucket'))}`"
+                    )
+                    st.caption(
+                        f"Market value `{safe_display(score.get('current_market_value'))}`, "
+                        f"risk-adjusted trade value `{safe_display(score.get('risk_adjusted_trade_value'))}`"
+                    )
+                    pick_component_rows = [
+                        {"component": key, "score": score.get(key)}
+                        for key in (
+                            "market_score",
+                            "slot_capital_score",
+                            "time_discount_score",
+                            "liquidity_certainty_score",
+                            "college_context_score",
+                            "uncertainty_risk_score",
+                        )
+                    ]
+                    st.caption("Components: market, slot capital, time discount, liquidity, college context, uncertainty.")
+                    st.dataframe(pick_component_rows, hide_index=True, width="stretch")
+                    warning_rows = trade_score_warning_summary_rows(missing_flags)
+                    if warning_rows:
+                        warning_label_text = trade_pick_warning_labels(missing_flags)
+                        if warning_label_text:
+                            st.caption(f"Warnings: {warning_label_text}")
+                        warning_categories = ", ".join(
+                            f"{row['category']} ({row['count']})" for row in warning_rows
+                        )
+                        st.caption(f"Pick warning categories: {warning_categories}")
+                        with st.expander(f"{safe_display(pick_name)} pick warning details", expanded=False):
+                            st.dataframe(warning_rows, hide_index=True, width="stretch")
+
+                    freshness_rows = trade_score_source_freshness_rows(score)
+                    if freshness_rows:
+                        with st.expander(f"{safe_display(pick_name)} pick source freshness", expanded=False):
+                            st.dataframe(freshness_rows, hide_index=True, width="stretch")
 
     # Difference & recommendation
     diff_current = abs(total_val_A - total_val_B)
@@ -3338,13 +5024,22 @@ def render_value_analyzer():
     # Deep AI Outlook using Gemini
     st.markdown(f"#### 🧠 AI {projection_years}-Year Outlook Analysis")
     st.markdown(f"Use Gemini to analyze their metrics and crawl recent team news for {projection_years}-year outlook projections.")
-    render_data_path_status("Trade Player History", use_compat_trade_player_history())
+    trade_history_uses_compat = use_compat_trade_player_history()
+    render_data_path_status("Trade Player History", trade_history_uses_compat)
+    if trade_history_uses_compat:
+        st.caption("Trade player history source: compat_trade_player_history")
 
+    trade_ai_controls_visible = use_data_ops_local_subprocess_controls()
+    trade_ai_controls_can_run = data_ops_local_subprocess_controls_enabled()
     active_gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if not active_gemini_key:
+    if not trade_ai_controls_visible:
+        st.info("AI outlook analysis is hidden unless local admin controls are explicitly enabled.")
+    elif not active_gemini_key:
         st.info("⚠️ Enter your **Gemini API Key** in the sidebar to activate the AI Analysis option.")
     else:
-        if st.button(f"🧠 Run AI {projection_years}-Year Outlook Analysis", type="primary"):
+        if not trade_ai_controls_can_run:
+            st.warning("AI outlook analysis is visible but disabled until the local subprocess trigger allow flag is set.")
+        if st.button(f"🧠 Run AI {projection_years}-Year Outlook Analysis", type="primary", disabled=not trade_ai_controls_can_run):
             if not assets_A and not assets_B:
                 st.error("Select assets on Side A or Side B first.")
                 return
@@ -3354,7 +5049,7 @@ def render_value_analyzer():
                     bq_client = bigquery.Client(project=BIGQUERY_PROJECT_ID)
 
                     def query_player_history(name):
-                        if use_compat_trade_player_history():
+                        if trade_history_uses_compat:
                             try:
                                 return query_compat_trade_player_history(name)
                             except Exception as compat_error:
@@ -3394,6 +5089,8 @@ def render_value_analyzer():
                     for a in assets_A:
                         name = a['player_display_name']
                         hist = query_player_history(name) if not pd.isna(a['position']) else pd.DataFrame()
+                        if trade_history_uses_compat:
+                            render_compat_metadata(hist, f"{name} trade history")
                         news = get_stored_news(name) if not pd.isna(a['position']) else ""
                         assets_a_details.append(
                             f"- **{name}** ({a['position'] if not pd.isna(a['position']) else 'Pick'})\n"
@@ -3407,6 +5104,8 @@ def render_value_analyzer():
                     for b in assets_B:
                         name = b['player_display_name']
                         hist = query_player_history(name) if not pd.isna(b['position']) else pd.DataFrame()
+                        if trade_history_uses_compat:
+                            render_compat_metadata(hist, f"{name} trade history")
                         news = get_stored_news(name) if not pd.isna(b['position']) else ""
                         assets_b_details.append(
                             f"- **{name}** ({b['position'] if not pd.isna(b['position']) else 'Pick'})\n"
@@ -3459,10 +5158,7 @@ if view_mode == "broadcast":
 # --- COLLAPSED SETTINGS DRAWER ---
 st.sidebar.title("Settings")
 
-# Low-profile Logout Button
-if st.sidebar.button("🔒 Logout", key="logout_btn", use_container_width=True):
-    st.session_state.clear()
-    st.rerun()
+render_logout_control(st, os.environ)
 
 st.sidebar.caption("Credential overrides for local development and emergency runtime changes.")
 
@@ -3530,8 +5226,13 @@ st.markdown(
 )
 st.markdown("<div class='subtitle'>Manage, ingest, and validate historical play-by-play & player metrics pipeline into Google BigQuery</div>", unsafe_allow_html=True)
 
+backtest_dashboard_enabled = use_backtest_dashboard()
+formula_comparison_dashboard_enabled = use_formula_comparison_dashboard()
+claim_ledger_ui_enabled = use_claim_ledger_ui()
+content_brief_review_enabled = use_content_brief_review_ui()
+
 # Workflow Tabs
-tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_lab, tab_trade_lab, tab_data_ops = st.tabs([
+tab_labels = [
     "💬 Pigskin Studio",
     "🎙️ Show Prep",
     "👤 Player Profiles",
@@ -3539,7 +5240,29 @@ tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_l
     "🏈 Viewer Team Lab",
     "📊 Trade Lab",
     "🛠️ Data Ops",
-])
+]
+if backtest_dashboard_enabled:
+    tab_labels.append("📈 Backtesting")
+if formula_comparison_dashboard_enabled:
+    tab_labels.append("📊 Formula Review")
+if claim_ledger_ui_enabled:
+    tab_labels.append("🧾 Claim Ledger")
+if content_brief_review_enabled:
+    tab_labels.append("📝 Content Briefs")
+
+tabs = st.tabs(tab_labels)
+tab_pigskin, tab_show_prep, tab_player_profiles, tab_versus_finder, tab_viewer_lab, tab_trade_lab, tab_data_ops = tabs[:7]
+next_extra_tab = 7
+tab_backtesting = tabs[next_extra_tab] if backtest_dashboard_enabled else None
+if backtest_dashboard_enabled:
+    next_extra_tab += 1
+tab_formula_review = tabs[next_extra_tab] if formula_comparison_dashboard_enabled else None
+if formula_comparison_dashboard_enabled:
+    next_extra_tab += 1
+tab_claim_ledger = tabs[next_extra_tab] if claim_ledger_ui_enabled else None
+if claim_ledger_ui_enabled:
+    next_extra_tab += 1
+tab_content_briefs = tabs[next_extra_tab] if content_brief_review_enabled else None
 
 # Subprocess Execution Logic with Live Streaming
 def run_subprocess_live(args, custom_env=None):
@@ -3963,7 +5686,9 @@ with tab_data_ops:
     render_tab_bookmarks([
         ("Runtime", "runtime-status"),
         ("Cloud Jobs", "cloud-run-jobs"),
+        ("Local Gates", "local-admin-controls"),
         ("Safe Checks", "safe-checks"),
+        ("Packet QA", "pigskin-packet-qa"),
         ("External API", "external-api"),
         ("Warehouse Writes", "warehouse-writes"),
     ])
@@ -3979,10 +5704,18 @@ with tab_data_ops:
     render_section_header(
         "Cloud Run Jobs",
         "cloud-run-jobs",
-        "Preview and optionally trigger Cloud Run Jobs while local subprocess controls remain available.",
+        "Preview and optionally trigger Cloud Run Jobs through separate Cloud Run gates.",
     )
     with st.container(border=True):
         render_cloud_run_jobs_data_ops_panel()
+
+    render_section_header(
+        "Local Admin Controls",
+        "local-admin-controls",
+        "Default-off gates for local subprocesses, ingestion, external refreshes, BigQuery writes, and LLM-backed actions.",
+    )
+    with st.container(border=True):
+        local_controls_visible, local_controls_can_run = render_data_ops_local_subprocess_gate()
 
     render_section_header(
         "Safe Checks",
@@ -3993,7 +5726,7 @@ with tab_data_ops:
         st.markdown("#### Range Partition Verification")
         st.caption("Inspect table metadata and partition health without running `SELECT *`.")
         render_last_success("validation_sweep")
-        if st.button("🔍 Run Validation Sweep", type="secondary"):
+        if st.button("🔍 Run Validation Sweep", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["validate.py"]
 
             exec_env = {}
@@ -4002,6 +5735,15 @@ with tab_data_ops:
 
             if run_subprocess_live(cmd_args, custom_env=exec_env) == 0:
                 mark_successful_run("validation_sweep")
+
+    if use_pigskin_packet_qa_ui():
+        render_section_header(
+            "Pigskin Packet QA",
+            "pigskin-packet-qa",
+            "Read-only historical packet plus current roster inspection for admin staging review.",
+        )
+        with st.container(border=True):
+            render_pigskin_packet_qa_panel()
 
     render_section_header(
         "External API Refreshes",
@@ -4012,7 +5754,7 @@ with tab_data_ops:
         st.markdown("#### Sleeper Player Status, News, and Trending")
         st.caption("Refresh the global Sleeper player map plus real-time add/drop vectors used by rankings and context.")
         render_last_success("realtime_news")
-        if st.button("🚀 Ingest Realtime Player News", type="secondary"):
+        if st.button("🚀 Ingest Realtime Player News", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.ingest_news"]
 
             exec_env = {}
@@ -4025,7 +5767,7 @@ with tab_data_ops:
         st.markdown("#### Context Event Ledger")
         st.caption("Load or refresh curated context events used by Pigskin before narrative claims.")
         render_last_success("context_event_ledger")
-        if st.button("🧠 Load Context Event Ledger", type="secondary"):
+        if st.button("🧠 Load Context Event Ledger", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.ingest_context_events"]
 
             exec_env = {}
@@ -4040,7 +5782,7 @@ with tab_data_ops:
         render_last_success("market_values")
         is_dynasty_ingest = st.checkbox("Dynasty Values", value=True, help="If checked, fetches dynasty values. Otherwise, fetches redraft values.")
 
-        if st.button("📊 Ingest FantasyCalc Market Values", type="secondary"):
+        if st.button("📊 Ingest FantasyCalc Market Values", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.fetch_market_values"]
             if not is_dynasty_ingest:
                 cmd_args.append("--redraft")
@@ -4069,7 +5811,7 @@ with tab_data_ops:
             placeholder='"Michael Pittman" "Daniel Jones" injury Colts'
         )
 
-        if st.button("🔎 Verify Player Context", type="secondary"):
+        if st.button("🔎 Verify Player Context", type="secondary", disabled=not local_controls_can_run):
             if not verify_player.strip():
                 st.error("Enter a player name before running outside verification.")
             else:
@@ -4099,7 +5841,7 @@ with tab_data_ops:
             default_cfbd_key = os.environ.get("CFBD_API_KEY", "")
             cfbd_key = st.text_input("CFBD API Key", type="password", value=default_cfbd_key, placeholder="e.g. mock or your_cfbd_key")
 
-        if st.button("🚀 Ingest CFBD College Stats", type="secondary"):
+        if st.button("🚀 Ingest CFBD College Stats", type="secondary", disabled=not local_controls_can_run):
             if not cfbd_key.strip():
                 st.error("A CFBD API Key (or 'mock') is required to run the ingestion.")
             else:
@@ -4140,7 +5882,7 @@ with tab_data_ops:
         if write_disp == "WRITE_TRUNCATE":
             st.warning("WRITE_TRUNCATE overwrites the target warehouse tables for the selected seasons.")
 
-        if st.button("🚀 Run Ingestion Pipeline", type="primary"):
+        if st.button("🚀 Run Ingestion Pipeline", type="primary", disabled=not local_controls_can_run):
             if not seasons_clean:
                 st.error("Please provide at least one target season.")
             else:
@@ -4156,7 +5898,7 @@ with tab_data_ops:
         st.markdown("#### Publish Pigskin Rankings")
         st.caption("Generate LLM-authored Pigskin rankings from curated BigQuery evidence, then append a rankings-history snapshot.")
         render_last_success("pigskin_rankings")
-        if st.button("🏆 Generate Pigskin Rankings", type="secondary"):
+        if st.button("🏆 Generate Pigskin Rankings", type="secondary", disabled=not local_controls_can_run):
             cmd_args = ["-m", "src.generate_pigskin_rankings", "--refresh-sleeper"]
 
             exec_env = {}
@@ -4171,7 +5913,15 @@ with tab_data_ops:
         st.markdown("#### Upload Rookie Scouting CSV")
         st.caption("Import advanced player profiling spreadsheets into BigQuery.")
         render_last_success("rookie_scouting_csv")
-        scouting_file = st.file_uploader("Choose a CSV file", type=["csv"], key="scouting_csv_uploader")
+        if local_controls_can_run:
+            scouting_file = st.file_uploader(
+                "Choose a CSV file",
+                type=["csv"],
+                key="scouting_csv_uploader",
+            )
+        else:
+            scouting_file = None
+            st.info("Scouting CSV upload is disabled until local subprocess controls and the local trigger allow flag are both enabled.")
 
         if scouting_file is not None:
             import pandas as pd
@@ -4206,7 +5956,7 @@ with tab_data_ops:
 
                 scout_source = st.text_input("Data Source Name", value="Reception Perception")
 
-                if st.button("📤 Upload and Import Scouting Metrics", type="primary"):
+                if st.button("📤 Upload and Import Scouting Metrics", type="primary", disabled=not local_controls_can_run):
                     if c_season == "None" or c_name == "None":
                         st.error("❌ 'Season / Draft Year' and 'Player Name' are required fields.")
                     else:
@@ -4256,6 +6006,22 @@ with tab_data_ops:
                                 st.error(f"❌ Failed to upload to BigQuery: {ex}")
             except Exception as ex:
                 st.error(f"❌ Failed to parse CSV: {ex}")
+
+if tab_backtesting is not None:
+    with tab_backtesting:
+        render_backtest_dashboard()
+
+if tab_formula_review is not None:
+    with tab_formula_review:
+        render_formula_comparison_dashboard()
+
+if tab_claim_ledger is not None:
+    with tab_claim_ledger:
+        render_claim_ledger_ui()
+
+if tab_content_briefs is not None:
+    with tab_content_briefs:
+        render_content_brief_review_ui()
 
 # --- SHOW PREP ---
 with tab_show_prep:
@@ -4340,7 +6106,7 @@ st.markdown(
     """
     <footer style="margin-top: 3rem; padding: 1.25rem 0 0.5rem; border-top: 1px solid rgba(148, 163, 184, 0.22); text-align: center; font-size: 0.85rem; color: rgba(226, 232, 240, 0.72);">
         <a href="http://sputnikfx.com/" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none;">
-            &copy; 2026 Sputnik Digital
+            &copy; 2026 SputnikFX
         </a>
     </footer>
     """,

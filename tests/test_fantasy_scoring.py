@@ -9,6 +9,7 @@ from src.fantasy_scoring import (
     calculate_fantasy_breakdown,
     calculate_fantasy_points,
     get_default_scoring_profile,
+    get_gng_keeper_scoring_profile,
     normalize_stat_row,
 )
 
@@ -85,6 +86,84 @@ class FantasyScoringTests(unittest.TestCase):
         self.assertEqual(profile["settings"]["interceptions"], -3.0)
         self.assertEqual(profile["settings"]["receptions"], 1.0)
         self.assertEqual(profile["unmapped_settings"], {"mystery_bonus": 2})
+
+    def test_gng_keeper_profile_preserves_te_premium_and_source_metadata(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        self.assertEqual(profile["scoring_profile_id"], "gng_keeper")
+        self.assertEqual(profile["display_name"], "GNG Keeper")
+        self.assertEqual(profile["settings"]["passing_yards"], 0.02)
+        self.assertEqual(profile["settings"]["passing_tds"], 5.0)
+        self.assertEqual(profile["settings"]["rushing_yards"], 0.04)
+        self.assertEqual(profile["settings"]["receiving_yards"], 0.04)
+        self.assertEqual(profile["settings"]["receptions"], 0.1)
+        self.assertEqual(profile["unmapped_settings"]["bonus_rec_te"], 0.2)
+        self.assertEqual(profile["unmapped_settings"]["bonus_rec_wr"], 0.1)
+        self.assertEqual(profile["sleeper_scoring_settings"]["fgm"], 3.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["sack"], 1.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["pts_allow_0"], 8.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["yds_allow_550p"], -7.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["fum"], 0.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["pass_td_40p"], 0.0)
+        self.assertEqual(profile["source_metadata"]["source_league_id"], "1369406895588143104")
+        self.assertEqual(profile["source_metadata"]["league_status_at_retrieval"], "pre_draft")
+
+    def test_gng_keeper_reception_bonus_applies_by_position(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        te = calculate_fantasy_breakdown({"position": "TE", "receptions": 1}, profile)
+        wr = calculate_fantasy_breakdown({"position": "WR", "receptions": 1}, profile)
+        rb = calculate_fantasy_breakdown({"position": "RB", "receptions": 1}, profile)
+
+        self.assertAlmostEqual(te["reception_points"], 0.3)
+        self.assertAlmostEqual(wr["reception_points"], 0.2)
+        self.assertAlmostEqual(rb["reception_points"], 0.1)
+
+    def test_gng_keeper_core_player_scoring_values(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        points = calculate_fantasy_points(
+            {
+                "position": "QB",
+                "passing_yards": 100,
+                "passing_tds": 1,
+                "rushing_yards": 10,
+                "receiving_yards": 10,
+                "fumbles_lost": 1,
+            },
+            profile,
+        )
+
+        self.assertAlmostEqual(points, 5.8)
+        self.assertEqual(profile["sleeper_scoring_settings"]["pass_td_40p"], 0.0)
+        self.assertEqual(profile["sleeper_scoring_settings"]["bonus_pass_yd_300"], 1.0)
+
+    def test_gng_keeper_available_weekly_bonuses_apply(self):
+        profile = get_gng_keeper_scoring_profile()
+
+        points = calculate_fantasy_points(
+            {
+                "position": "RB",
+                "rushing_yards": 101,
+                "rushing_tds": 1,
+                "rushing_attempts": 20,
+                "rushing_first_downs": 3,
+                "receptions": 2,
+                "receiving_yards": 100,
+                "receiving_tds": 1,
+                "receiving_first_downs": 2,
+                "sacks_taken": 1,
+            },
+            profile,
+        )
+
+        self.assertAlmostEqual(points, 23.74)
+
+    def test_default_scoring_profile_includes_gng_keeper(self):
+        profile = get_default_scoring_profile("gng_keeper")
+
+        self.assertEqual(profile["scoring_profile_id"], "gng_keeper")
+        self.assertIn("bonus_rec_te", profile["unmapped_settings"])
 
     def test_missing_stat_fields_default_to_zero(self):
         normalized = normalize_stat_row({"receptions": 3})

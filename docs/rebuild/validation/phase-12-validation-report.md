@@ -38,7 +38,7 @@ No hard NO-GO condition was observed:
 3. The current Streamlit legacy paths still contain direct raw/source table reads. The new compatibility helpers read compatibility/output objects, and all related flags default false, but the old paths remain until rollout.
 4. The Phase 12 market freshness warning was resolved by reclassifying `044_compat_trade_assets_current_recent_market_snapshot.sql` as a bounded review check. It now passes in offseason when the snapshot is inside the 14-day manual-refresh window.
 5. Live Cloud Run Job triggering currently depends on `gcloud` being available in the runtime. Dry-run previews work without live credentials, and triggering remains gated by flags and confirmation.
-6. `docs/rebuild/bigquery-validation-process.md` was referenced for activation, but that process document is not present in the repo.
+6. `docs/rebuild/bigquery-validation-process.md` has been created as the validation runner operating guide.
 
 ## Architecture Status
 
@@ -289,7 +289,7 @@ Remaining failures and warnings:
 | `044_compat_trade_assets_current_recent_market_snapshot.sql` | Passed | Resolved | Reclassified as an informational bounded freshness check. It returns zero rows for the current June snapshot because the board is inside the 14-day offseason review window. |
 | `113_market_identity_coverage.sql` | Informational warning | Expected empty-state | New market baseline tables have no materialized rows yet, so `identity_missing_rate` is `NULL`. |
 | `120_claims_player_identity_coverage.sql` | Informational warning | Expected empty-state | New claim player tables have no materialized rows yet, so `identity_missing_rate` is `NULL`. |
-| `docs/rebuild/bigquery-validation-process.md` | Missing process doc | Warning | Referenced by activation instructions but not present in the repo. No runtime impact. |
+| `docs/rebuild/bigquery-validation-process.md` | Created | Resolved | Added during Phase 13.1 as the validation runner operating guide. |
 
 Table-not-found status:
 
@@ -307,6 +307,52 @@ Operational constraints honored:
 - No LLM calls were made.
 
 Final warehouse activation decision: GO WITH WARNINGS.
+
+## Phase 13.1 Follow-up
+
+Status: GO WITH WARNINGS
+
+Commands used the repo venv explicitly:
+
+```powershell
+.\venv\Scripts\python.exe scripts\run_bigquery_migrations.py --dry-run
+.\venv\Scripts\python.exe scripts\run_bigquery_migrations.py --list-pending
+.\venv\Scripts\python.exe scripts\run_bigquery_validations.py --dry-run
+.\venv\Scripts\python.exe scripts\run_bigquery_validations.py --run --pattern backtest
+.\venv\Scripts\python.exe scripts\run_bigquery_validations.py --run --pattern market
+.\venv\Scripts\python.exe scripts\run_bigquery_validations.py --run --pattern claim
+.\venv\Scripts\python.exe scripts\run_bigquery_validations.py --run --pattern content_brief
+.\venv\Scripts\python.exe scripts\run_bigquery_validations.py --run --pattern cloud_run_job
+```
+
+Migration state:
+
+- `--dry-run` passed and listed local migration files. The dry-run mode does not consult the live `schema_migrations` ledger.
+- `--list-pending` checked the live ledger and returned `No pending migrations.`
+- No migrations were applied.
+
+Validation state:
+
+- Validation dry-run passed and discovered 138 validation files.
+- `backtest`: 8 passed, 0 failed.
+- `market`: 9 passed, 0 failed. `113_market_identity_coverage.sql` emitted an expected empty-state informational warning because `market_consensus_player_values` has no materialized rows yet.
+- `claim`: 13 passed, 0 failed. `120_claims_player_identity_coverage.sql` emitted an expected empty-state informational warning because `fantasy_claim_players` has no materialized rows yet.
+- `content_brief`: 7 passed, 0 failed.
+- `cloud_run_job`: 8 passed, 0 failed.
+
+Documentation state:
+
+- Created [BigQuery Validation Process](../bigquery-validation-process.md).
+- Preserved the standalone [Phase 13.1 Warehouse Activation Report](phase-13-1-warehouse-activation-report.md) so later validation prompts can reference the exact file path.
+- Updated the migration process, Cloud Run operating model, and Data Ops Cloud Run Jobs rollout docs to reference the validation process.
+
+Remaining warnings:
+
+- Phase 12 output tables remain mostly empty until Phase 13.2 materialization jobs seed backtest, market baseline, claim, claim grading, and content brief rows.
+- Legacy Streamlit raw/source reads remain until compatibility rollout flags are enabled and old paths are retired.
+- Bare `python` still points at `C:\Python314\python.exe`; validation commands should keep using `.\venv\Scripts\python.exe`.
+
+Final readiness for Phase 13.2 materialization: GO WITH WARNINGS.
 
 ## Static Safety Status
 
@@ -382,6 +428,5 @@ No LLM calls were made.
 Proceed with the next code phase, but do not declare Phase 12 warehouse outputs fully live until:
 
 1. Phase 12 output materialization jobs seed real rows for backtest, market baseline, claim, claim grading, and content brief tables.
-2. `docs/rebuild/bigquery-validation-process.md` is created or the docs are updated to point to the actual validation process file.
-3. The default shell `python` path is aligned with the repo venv or future validation commands explicitly use `.\venv\Scripts\python.exe`.
-4. Legacy Streamlit raw/source reads are retired behind compatibility objects.
+2. The default shell `python` path is aligned with the repo venv or future validation commands explicitly use `.\venv\Scripts\python.exe`.
+3. Legacy Streamlit raw/source reads are retired behind compatibility objects.

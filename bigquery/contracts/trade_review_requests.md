@@ -35,4 +35,4 @@ Unknown assets should fail cleanly before packet rows are written. Failed reques
 
 ## Runtime Status
 
-No Streamlit runtime behavior is wired to this table yet.
+No consumer reads this table yet.

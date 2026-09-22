@@ -11,11 +11,11 @@ Helper:
 
 ## Purpose
 
-Production compatibility layer for Trade Lab player history in `app.py:3147-3155`.
+Production compatibility layer for Trade Lab player history in `src/trade_history.py`.
 
 This object replaces raw `weekly_metrics` history with a curated player-week packet that combines scoring-profile-aware fantasy points, weekly role evidence, EPA splits, Pigskin ranking context, identity, and game environment.
 
-`app.py` is not wired to this object by default yet. Current Streamlit runtime behavior remains unchanged until a later feature-flagged migration.
+No consumer reads this object yet. `src/trade_history.py` is the backend helper any future consumer should call.
 
 ## Grain
 
@@ -180,6 +180,6 @@ Rules:
 
 ## Runtime Status
 
-Not wired into `app.py` by default.
+No consumer reads this object yet.
 
 The current Trade Lab still uses existing code until a future feature-flagged UI migration replaces its raw history query with this compatibility object.

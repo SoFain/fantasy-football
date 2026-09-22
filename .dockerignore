@@ -14,6 +14,9 @@ cache/
 *.parquet
 *.log
 pipeline_execution.log
+output/
+.codex-remote-attachments/
+.codex-tools/
 
 # Credentials and keys (Security block)
 *.json
@@ -26,5 +29,8 @@ dist/
 # IDE configs and git folders
 .git/
 .gitignore
+.gcloudignore
 .vscode/
 .idea/
+.env
+.env.*

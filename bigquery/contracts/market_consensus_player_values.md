@@ -25,12 +25,19 @@ One row per:
 Matching priority:
 
 1. `player_id_internal`
-2. exact source IDs from `player_identity_bridge`
-3. normalized name plus team plus position
-4. normalized name plus position when unique
-5. unmatched retained with `missing_player_id_internal`
+2. non-player market asset classification
+3. manual overrides by trusted source and player key
+4. exact source IDs from `player_identity_bridge`
+5. known aliases
+6. normalized name plus team plus position
+7. normalized name plus position when unique
+8. unmatched retained with `missing_player_id_internal`
 
 Name fallback matches must set `match_method` and include `identity_name_fallback_match` in `missing_data_flags`.
+
+Rows representing draft picks or other non-player market assets must not receive fabricated player IDs. They should keep `player_id_internal` null, set `match_method = non_player_asset`, and include both `non_player_market_asset` and `player_identity_not_applicable` in `missing_data_flags`.
+
+Unsafe fuzzy matching is not allowed. Ambiguous market rows stay unresolved until a deterministic alias or manual override is reviewed and added.
 
 ## No-Scraping Rule
 

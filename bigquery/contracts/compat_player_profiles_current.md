@@ -15,11 +15,11 @@ Helper:
 
 ## Purpose
 
-Production compatibility layer for `fetch_player_profiles_data`, `app.py:1090-1275`.
+Production compatibility layer for `fetch_player_profiles_data`.
 
-This object moves Player Profiles away from Streamlit-side raw source joins and into a curated profile mart. It consolidates identity, current context, scoring-profile fantasy output, weekly role evidence, efficiency, Pigskin ranking context, contract/depth/prospect summaries, freshness, and missing-data flags.
+This object moves Player Profiles away from UI-side raw source joins and into a curated profile mart. It consolidates identity, current context, scoring-profile fantasy output, weekly role evidence, efficiency, Pigskin ranking context, contract/depth/prospect summaries, freshness, and missing-data flags.
 
-`app.py` is not wired to this object by default yet. Current Streamlit behavior remains unchanged until a later default-off feature flag migration.
+No consumer reads this object yet. `src/player_profiles.py` and `src/trade_history.py` are the backend helpers any future consumer should call.
 
 ## Backing Object
 
@@ -158,7 +158,7 @@ Pigskin ranking context:
 Profile context:
 
 - `contract_summary_json`
-- `depth_chart_summary_json`
+- `depth_chart_summary_json` (historical, from nflreadpy `depth_charts`; current depth is Sleeper `depth_chart_position` / `depth_chart_order`)
 - `college_summary_json`
 - `rookie_scouting_summary_json`
 - `prospect_summary_json`
@@ -233,7 +233,7 @@ Rules:
 
 ## Runtime Status
 
-Not wired into `app.py` by default.
+No consumer reads this object yet.
 
 Future UI wiring should use a default-off flag such as `USE_COMPAT_PLAYER_PROFILES=false`, then replace `fetch_player_profiles_data` with a compat-backed path after validation.
 

@@ -10,7 +10,7 @@ Helper: [src/trade_assets.py](../../src/trade_assets.py)
 
 ## Purpose
 
-Compatibility layer for `render_value_analyzer.load_market_players`, `app.py:2761-2769`.
+Compatibility layer for `render_value_analyzer.load_market_players`.
 
 This object replaces future direct UI reads from `market_values` with a curated trade asset contract that combines market value, identity, scoring profile, Pigskin ranking context, recent usage, source freshness, and missing-data flags.
 
@@ -175,7 +175,7 @@ Expected flags include:
 - `market_player_id` is a normalized synthetic key until ingestion stores provider IDs.
 - Dynasty and redraft placeholder values are simple compatibility fields, not final projection model outputs.
 - `pigskin_rank_overall` is reserved and currently null until rankings publish an overall board.
-- This contract is not wired into Streamlit by default. Future wiring must use a default-off flag such as `USE_COMPAT_TRADE_ASSETS=false`.
+- No consumer reads this contract yet. Any future consumer must use a default-off flag such as `USE_COMPAT_TRADE_ASSETS=false`.
 
 ## Validation
 
