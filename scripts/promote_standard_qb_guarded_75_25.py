@@ -27,7 +27,7 @@ FORMULA_VERSION = "1.0-phase-35-11"
 
 def _sql_string(value: object) -> str:
     if value is None:
-        return "NULL"
+        return "CAST(NULL AS STRING)"
     return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
@@ -48,8 +48,8 @@ def validate_board(board: list[dict], *, acknowledged_reason: str | None = None)
     """
     summary = summarize(board)
     failures = []
-    if summary["player_count"] != 45:
-        failures.append("board must contain exactly 45 QBs")
+    if not 40 <= summary["player_count"] <= 45:
+        failures.append("board must contain 40-45 currently rostered QBs")
     if summary["duplicate_guarded_rank_count"]:
         failures.append("guarded ranks must be unique")
     if summary["guarded_weak_passing_riser_count"]:
@@ -77,13 +77,17 @@ def validate_board(board: list[dict], *, acknowledged_reason: str | None = None)
             failures.append("QB6 cutline must remain stable")
         if summary["guarded_qb24_crossing_count"]:
             failures.append("QB24 cutline must remain stable")
+    third_count = sum((r.get("sleeper_depth_chart_order") or 0) >= 3 for r in board)
+    second_count = sum(r.get("sleeper_depth_chart_order") == 2 for r in board)
+    second_end = len(board) - third_count
+    second_start = second_end - second_count + 1
     for record in board:
         depth_order = record.get("sleeper_depth_chart_order")
         rank = record["guarded_consensus_rank"]
-        if depth_order == 2 and not 33 <= rank <= 43:
-            failures.append(f"{record['player_name']} depth-2 rank {rank} is outside QB33-43")
-        if depth_order is not None and depth_order >= 3 and rank < 44:
-            failures.append(f"{record['player_name']} depth-{depth_order} rank {rank} is above QB44")
+        if depth_order == 2 and not second_start <= rank <= second_end:
+            failures.append(f"{record['player_name']} depth-2 rank {rank} is outside the current depth-2 slots")
+        if depth_order is not None and depth_order >= 3 and rank <= second_end:
+            failures.append(f"{record['player_name']} depth-{depth_order} rank {rank} is above the current depth-3 slots")
     if failures:
         raise RuntimeError("; ".join(failures))
     return summary
@@ -102,11 +106,17 @@ def build_promotion_sql(
     history = f"`{project}.{dataset}.analytics_pigskin_rankings_history`"
     candidates = f"`{project}.{dataset}.ranking_formula_candidates`"
     champions = f"`{project}.{dataset}.ranking_formula_champions`"
+    third_count = sum((r.get('sleeper_depth_chart_order') or 0) >= 3 for r in board)
+    second_count = sum(r.get('sleeper_depth_chart_order') == 2 for r in board)
+    second_start = len(board) - third_count - second_count + 1
+    third_start = len(board) - third_count + 1
     promoted_records = []
     for record in board:
         promoted_records.append(
             "STRUCT("
             f"{_sql_string(record['player_id'])} AS player_id, "
+            f"{_sql_string(record.get('current_team'))} AS current_team, "
+            f"{_sql_string(record.get('sleeper_injury_status'))} AS injury_status, "
             f"{record['guarded_consensus_rank']} AS guarded_rank, "
             f"{record['anchor_rank']} AS anchor_rank, "
             f"{record['consensus_75_25_rank']} AS raw_consensus_rank, "
@@ -129,7 +139,7 @@ def build_promotion_sql(
             "logistic_bust_weight": 0.125,
             "movement_cap": 4,
             "weak_passing_rule": "no rise over 1 and no upward QB6/QB12/QB24 crossing when EPA and CPOE are non-positive",
-            "role_buckets": {"starter_or_unknown": "QB1-32", "depth_2": "QB33-43", "depth_3_plus": "QB44-45"},
+            "role_buckets": {"starter_or_unknown": f"QB1-{second_start - 1}", "depth_2": f"QB{second_start}-{third_start - 1}", "depth_3_plus": f"QB{third_start}-{len(board)}"},
             "missing_history_rule": "deterministic anchor unless role bucket conflicts",
         },
         sort_keys=True,
@@ -201,6 +211,9 @@ SELECT prior_board.* REPLACE(
   CURRENT_TIMESTAMP() AS generated_at,
   CURRENT_TIMESTAMP() AS adjudicated_at,
   promoted.guarded_rank AS rank,
+  promoted.current_team AS current_team,
+  promoted.current_team AS sleeper_team,
+  promoted.injury_status AS sleeper_injury_status,
   CASE
     WHEN promoted.guarded_rank<=6 THEN 'elite'
     WHEN promoted.guarded_rank<=12 THEN 'front-line starter'
@@ -218,7 +231,7 @@ SELECT prior_board.* REPLACE(
     COALESCE(CAST(ROUND(promoted.passing_epa,3) AS STRING),'unavailable'),
     COALESCE(CAST(ROUND(promoted.passing_cpoe,2) AS STRING),'unavailable'),
     COALESCE(CAST(promoted.depth_order AS STRING),'unknown')
-  ) || COALESCE(promoted.adjustment_note, '') AS rank_rationale,
+  ) || COALESCE(promoted.adjustment_note, '') || ' Current roster eligibility rechecked; teamless candidates excluded; formula weights unchanged.' AS rank_rationale,
   FORMAT(
     'Deterministic guarded Standard formula ranks %s at QB%d. No LLM reordering was applied.',
     prior_board.player_name, promoted.guarded_rank
@@ -227,7 +240,7 @@ SELECT prior_board.* REPLACE(
   ARRAY_TO_STRING(ARRAY(
     SELECT flag FROM UNNEST([
       IF(promoted.depth_order>1, 'SLEEPER_DEPTH_ORDER_' || CAST(promoted.depth_order AS STRING), NULL),
-      IF(prior_board.sleeper_injury_status IS NOT NULL, 'SLEEPER_INJURY_' || UPPER(prior_board.sleeper_injury_status), NULL),
+      IF(promoted.injury_status IS NOT NULL, 'SLEEPER_INJURY_' || UPPER(promoted.injury_status), NULL),
       IF(promoted.review_lane!='returning_player_bqml_lane', UPPER(promoted.review_lane), NULL)
     ]) AS flag WHERE flag IS NOT NULL
   ), '; ') AS risk_flags,
@@ -247,28 +260,28 @@ SELECT prior_board.* REPLACE(
   CAST(NULL AS INT64) AS llm_estimated_games_missed,
   IF(promoted.adjustment_note IS NULL, 0, promoted.guarded_rank - promoted.anchor_rank) AS llm_rank_delta
 )
-FROM {live} AS prior_board
+FROM (SELECT * FROM {live} WHERE {scope}
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY generated_at DESC) = 1) AS prior_board
 JOIN promoted USING (player_id)
-WHERE prior_board.ranking_version='{prior_ranking_version}'
-  AND NOT prior_board.is_active
+WHERE NOT prior_board.is_active
   AND prior_board.{scope};
 
 ASSERT (
-  SELECT COUNT(*)=45 AND COUNT(DISTINCT rank)=45
+  SELECT COUNT(*) BETWEEN 40 AND 45 AND COUNT(DISTINCT rank)=COUNT(*) AND MAX(rank)=COUNT(*) AND MIN(rank)=1
   FROM {live}
   WHERE is_active AND {scope}
-) AS 'Active Standard QB board must contain 45 unique ranks';
+) AS 'Active Standard QB board must contain 40-45 contiguous unique ranks';
 
 ASSERT NOT EXISTS (
   SELECT 1 FROM {live}
   WHERE is_active AND {scope}
-    AND sleeper_depth_chart_order=2 AND rank<33
+    AND sleeper_depth_chart_order=2 AND rank<{second_start}
 ) AS 'Second-string QB appeared above QB33';
 
 ASSERT NOT EXISTS (
   SELECT 1 FROM {live}
   WHERE is_active AND {scope}
-    AND sleeper_depth_chart_order>=3 AND rank<44
+    AND sleeper_depth_chart_order>=3 AND rank<{third_start}
 ) AS 'Third-string QB appeared above QB44';
 
 COMMIT TRANSACTION;

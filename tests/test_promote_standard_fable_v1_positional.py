@@ -51,6 +51,13 @@ class StandardFablePositionalPromotionTest(unittest.TestCase):
         self.assertIn("COUNT(DISTINCT source.candidate_internal_player_id) = COUNT(*)", self.sql)
         self.assertNotIn("COUNT(*) = 85", self.sql)
 
+    def test_wr_stale_candidate_snapshot_blocks_before_live_writes(self):
+        gate = self.sql.index("Standard WR candidates must match the current safety snapshot")
+        self.assertLess(gate, self.sql.index("BEGIN TRANSACTION"))
+        self.assertIn("NOT context.current_board_rank_eligible", self.sql)
+        self.assertIn("context.team IS DISTINCT FROM candidate.current_team", self.sql)
+        self.assertIn("context.fetched_at IS DISTINCT FROM candidate.sleeper_fetched_at", self.sql)
+
 
 if __name__ == "__main__":
     unittest.main()

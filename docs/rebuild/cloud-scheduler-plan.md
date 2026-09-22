@@ -1,6 +1,6 @@
 ﻿# Cloud Scheduler Plan
 
-Status: the daily player watch is **deployed and live** as of 2026-07-24. Cloud Scheduler runs `ingest-sleeper-news-daily` at 07:00 America/New_York and `detect-player-changes-daily` at 07:15, triggering Cloud Run Jobs built from this branch (image tag `pigskin-jobs-*`). `generate-pigskin-rankings` is deliberately NOT scheduled: it truncates `analytics_pigskin_rankings`, which the public feed publisher reads for the fable positional boards. The 07:30 America/New_York leg (`PigskinDailyPublishImport`, this machine) now runs the full chain via `scripts/daily_pigskin_chain.ps1`: automated board refresh (`scripts/run_daily_board_refresh.py --apply`, the production runbook as a fail-closed chain re-running approved formulas on fresh data), then `publish_public_rankings.py --publish --gcloud-auth`, then the IONOS site import via `run_remote_php`. A pre-write guardrail trip (exit 1, e.g. the QB24 cutline) republishes the last-approved boards and surfaces an owner-review item in the log; a post-write failure (exit 3) skips publication per the runbook Recovery section. The publisher carries manifest `datasets` entries forward, so coaching staff stays listed without a `--dataset-entry` flag. See the main checkout's `docs/rankings-production-runbook.md`.
+Status: daily player ingestion runs at 07:00 America/New_York and player-change detection at 07:15. Both use `scheduler-invoker-sa` with `roles/run.invoker` scoped to their Cloud Run job. The local `PigskinDailyPublishImport` task runs at 07:30 and 12:30 ET, refreshes season stats and approved boards, then publishes and imports IONOS. Every failed refresh retains the prior public release and fails the task; two 30-minute retries handle transient errors. `generate-pigskin-rankings` remains unscheduled because it truncates the active positional ranking table. See `docs/rankings-production-runbook.md`.
 
 The weekly `archive-sleeper-player-snapshot` trigger (Tuesday 09:00 UTC) has been enabled since 2026-07-11. The remainder of this plan describes triggers not yet created.
 
@@ -46,7 +46,7 @@ gcloud scheduler jobs create http ingest-sleeper-news-daily `
   --time-zone "America/New_York" `
   --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/ingest-sleeper-news:run" `
   --http-method POST `
-  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
+  --oauth-service-account-email scheduler-invoker-sa@fantasy-football-498121.iam.gserviceaccount.com
 ```
 
 Create the change detection and news pass that follows it:
@@ -58,7 +58,7 @@ gcloud scheduler jobs create http detect-player-changes-daily `
   --time-zone "America/New_York" `
   --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/detect-player-changes:run" `
   --http-method POST `
-  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
+  --oauth-service-account-email scheduler-invoker-sa@fantasy-football-498121.iam.gserviceaccount.com
 ```
 
 The 15 minute gap is a deliberate buffer, not a dependency. Cloud Scheduler cannot express "run after that job succeeded", so if the snapshot is slow or fails, the detector simply finds no new snapshot to diff and exits without writing. It does not produce wrong results; it produces none.
@@ -82,7 +82,7 @@ gcloud scheduler jobs create http ingest-nflverse-weekly `
   --schedule "0 9 * * MON,TUE" `
   --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fantasy-football-498121/jobs/ingest-nflverse:run" `
   --http-method POST `
-  --oauth-service-account-email nfl-studio-sa@fantasy-football-498121.iam.gserviceaccount.com
+  --oauth-service-account-email scheduler-invoker-sa@fantasy-football-498121.iam.gserviceaccount.com
 ```
 
 Create a post-materialization validation trigger:

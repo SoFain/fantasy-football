@@ -44,6 +44,13 @@ class RankingPostFormulaSafetyTest(unittest.TestCase):
         self.assertIn("OWNER_APPROVED_ELITE_ORDER", sql)
         self.assertIn("WHERE final_rank <= 100", sql)
 
+    def test_rostered_injury_exception_preserves_freshness_and_zero_movement(self):
+        sql = render_sql("project", "metrics")
+        self.assertIn("active IS TRUE AND team IS NOT NULL", sql)
+        self.assertIn("status = 'Inactive' AND injury_status IS NOT NULL", sql)
+        self.assertIn("AND context_age_hours <= 72", sql)
+        self.assertIn("WHEN NOT roster_context_eligible OR years_exp = 0 THEN 0.0", sql)
+
     def test_elite_order_is_shared_and_teamless_is_structural(self):
         self.assertEqual(
             STANDARD_WR_ELITE_ORDER,

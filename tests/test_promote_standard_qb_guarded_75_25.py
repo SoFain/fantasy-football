@@ -31,8 +31,10 @@ class PromoteStandardQbGuardedTests(unittest.TestCase):
         )
         self.assertIn("deterministic-no-llm", sql)
         self.assertIn("NO_ADJUSTMENT", sql)
-        self.assertIn("sleeper_depth_chart_order=2 AND rank<33", sql)
-        self.assertIn("sleeper_depth_chart_order>=3 AND rank<44", sql)
+        self.assertIn("sleeper_depth_chart_order=2 AND rank<2", sql)
+        self.assertIn("sleeper_depth_chart_order>=3 AND rank<2", sql)
+        self.assertIn("40-45 contiguous unique ranks", sql)
+        self.assertIn("promoted.current_team AS current_team", sql)
 
     def test_validation_rejects_depth_two_above_qb33(self):
         board = [self._record() for _ in range(45)]

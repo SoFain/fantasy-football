@@ -91,13 +91,13 @@ live_board AS (
     rankings.candidate_rank,
     rankings.player_id,
     rankings.player_name,
-    rankings.current_team,
+    safety.team AS current_team,
     rankings.ranking_version,
     rankings.model_run_id,
     rankings.ranking_score AS live_ranking_score,
     rankings.candidate_ranking_score,
     rankings.sleeper_player_id,
-    rankings.sleeper_injury_status,
+    safety.injury_status AS sleeper_injury_status,
     rankings.sleeper_depth_chart_order,
     rankings.risk_flags,
     players.years_exp,
@@ -105,11 +105,15 @@ live_board AS (
   FROM `{project}.{dataset}.analytics_pigskin_rankings` AS rankings
   LEFT JOIN `{project}.{dataset}.sleeper_players_current` AS players
     USING (sleeper_player_id)
-  WHERE rankings.is_active = TRUE
+  JOIN `{project}.fantasy_football_advanced_metrics.v_ranking_post_formula_safety` safety
+    ON safety.position = 'QB' AND (safety.gsis_id = rankings.player_id OR CONCAT('sleeper:', safety.sleeper_player_id) = rankings.player_id)
+  WHERE (rankings.is_active = TRUE OR rankings.model_name = 'standard_qb_guarded_bqml_75_25')
+    AND safety.current_board_rank_eligible
     AND rankings.scoring_profile_id = 'standard'
     AND rankings.league_type_id = 'redraft'
     AND rankings.roster_format_id = 'one_qb'
     AND rankings.position = 'QB'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY rankings.player_id ORDER BY rankings.generated_at DESC) = 1
 ),
 matched_signals AS (
   SELECT live_board.*, feature_signals.* EXCEPT (player_id_internal)

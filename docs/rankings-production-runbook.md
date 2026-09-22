@@ -65,9 +65,9 @@ Current positional row contracts:
 
 | Profile | QB | RB | WR | TE |
 |---|---:|---:|---:|---:|
-| Standard | 45 | 80-100 | 100 | 35 |
-| PPR | 45 | 80 | 100 | 35 |
-| Half-PPR | 45 | 80 | 100 | 35 |
+| Standard | 40-45 | 80-100 | 100 | 35 |
+| PPR | 40-45 | 80 | 100 | 35 |
+| Half-PPR | 40-45 | 80 | 100 | 35 |
 | GNG Keeper | 45 | 80 | 100 | 35 |
 
 Standard RB uses a bounded `80-100` integrity contract because its formula-qualified pool changes when a player gains or loses a current team. Teamless players remain unranked. Do not manufacture fallback players to reach a round number.
@@ -246,17 +246,18 @@ The publisher uploads content-addressed board objects first, then an immutable v
 
 ## Daily automated board refresh, publish, and site import
 
-Since 2026-07-24 the scheduled task `PigskinDailyPublishImport` runs daily at 07:30 America/New_York as the final leg of the 7am chain (07:00 `ingest-sleeper-news` and 07:15 `detect-player-changes` run on Cloud Run). It executes this runbook automatically, fail-closed, via `scripts/run_daily_board_refresh.py` and the wrapper `scripts/daily_pigskin_chain.ps1` (both in this checkout since the 2026-07-26 branch reconciliation merged the platform worktree into the codex line):
+The existing Windows task `PigskinDailyPublishImport` runs `scripts/daily_pigskin_chain.ps1` at 07:30 and 12:30 America/New_York. It starts when a missed run becomes available, rejects overlapping executions, and retries failures twice at 30-minute intervals. Cloud Run still ingests Sleeper at 07:00 and detects player changes at 07:15.
 
-1. **Board refresh** — the release procedure above as a chain: safety context rebuilt from today's saved Sleeper snapshot (`build_sleeper_current_player_context.py --from-warehouse`, zero API calls), focused tests, the coverage gate, dry-run of every positional promoter, gated applies, positional invariants, unified builds and promotions, unified invariants, GNG context, and a local all-profile publish validation. Formula changes still require owner review: the chain re-runs approved formulas on fresh data and stops if any guardrail trips.
-2. **Publish** — `publish_public_rankings.py --publish --gcloud-auth`, all four profiles, `datasets` carried forward.
-3. **Site import** — `run_remote_php.py --file scripts/trigger_site_rankings_import.php`; unchanged profiles skip by sha256. The wrapper retries one transient import failure after 10 seconds.
+1. Refresh the current NFL season in `weekly_metrics` transactionally. Preserve historical seasons, reject lost source keys, and report games awaiting upstream stats. See `docs/current-season-stats-refresh.md`.
+2. Refresh roster safety context and rebuild the materialized Standard WR safety candidates. A candidate snapshot must match the current safety timestamp and team before promotion. Rostered inactive injuries remain review-only with zero absence adjustment; missing identity, teamless players, stale context, and other hard reviews still block.
+3. Run focused tests, coverage audit, positional dry runs and gated promotions, then recheck coverage. Rebuild unified boards and the existing situation adjustments. Every profile must pass the release invariants before publication.
+4. Build local public JSON for all profiles. Preserve preseason formula provenance and add a separate schema 1.4 `current_season` block with observed production and coverage caveats. Stats ingestion does not introduce an in-season formula.
+5. Reconstruct current GNG scoring and generate the separate experimental weekly and ROS dataset using the frozen calibration in `docs/inseason-shrinkage-v1-calibration.json`. Preserve the original draft formulas. See `docs/inseason-rankings-baseline.md` for validation limits and unavailable-player handling.
+6. Upload immutable objects, publish the manifest last, and import into IONOS. Failed dataset uploads require a successful matching SHA-256 readback before proceeding. Any missing or unsuccessful profile import fails the task. Verify the anonymous feed after import.
 
-After GNG context, the chain rebuilds the player situation layer from the freshly promoted boards, emits the `player_situation` public dataset artifacts (the wrapper uploads the immutable object and passes `--dataset-entry`), and writes the owner-review queue of flagged ranked players to `output\daily-publish\situation-review-<date>.md`. Boards publish at schema 1.3 with per-player `situation` and `metrics` blocks; situation facts never move ranks.
+The wrapper uses the project's Python runtime for Google Cloud CLI. Snapshot freshness is elapsed age, at most 26 hours, rather than UTC calendar equality. Evening Eastern runs must not reject that morning's source merely because UTC crossed midnight.
 
-Refresh exit policy: `0` publish the new boards; `1` a pre-write gate tripped (for example the QB24 cutline guardrail) — boards are untouched, the last-approved state is republished with a named manifest warning, and the gate output in `output\daily-publish\` is an owner-review item; `3` failure after writes began — publication is skipped per Recovery below. Dataset uploads invoke `gcloud.cmd` on Windows so the scheduled task does not fail with `%1 is not a valid Win32 application`.
-
-Remove with `schtasks /delete /tn "PigskinDailyPublishImport" /f`. The prior publish-only wrapper `scripts/daily_publish_and_import.ps1` remains as a fallback.
+Every nonzero refresh exit retains the previous public release and fails the task. Do not republish stale warehouse boards as a successful fallback. Logs live under `output/daily-publish`. The former publish-only wrapper is for supervised recovery, not the scheduled task.
 
 ### 11. Verify anonymously
 

@@ -15,7 +15,7 @@ This subtree owns warehouse shape and SQL verification. Keep changes additive an
 - Ranking overlay provenance must persist candidate rank, final rank delta, adjustment code, evidence, and any source-backed injury games-missed estimate.
 - Sleeper injury review queues must retain status transitions and review state, and must not imply an automatic ranking adjustment.
 - `v_ranking_post_formula_safety` is the canonical current-context layer for deterministic candidate boards. Historical formula and backtest views must not join it.
-- The shared layer may apply only the bounded role adjustments it exposes. Teamless players are structurally unranked. Injury, rookie, unknown-depth, and inactive states remain named review flags; selected hard-review rows block promotion until adjudicated.
+- The shared layer may apply only the bounded role adjustments it exposes. Teamless players are structurally unranked. Injury, rookie, unknown-depth, and inactive states remain named review flags. A rostered, active player whose Inactive status includes an injury tag and fresh context is review-only, with zero absence movement. Other selected hard-review rows block promotion until adjudicated.
 - Write gates must fail closed and be unset after use.
 - Validation files should match table grain, ranges, missing flags, provenance, and source exposure contracts.
 - SQL-native tournament evidence stays summary-first unless an official detail snapshot is explicitly requested.

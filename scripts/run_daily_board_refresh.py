@@ -38,9 +38,8 @@ Exit codes, consumed by scripts/daily_publish_and_import.ps1 in the main
 checkout:
 
     0  refresh complete; publish the new boards
-    1  a gate tripped BEFORE any write (tests, coverage, a dry-run guardrail
-       such as the QB24 cutline). Boards are untouched; publishing the
-       last-approved state is safe and keeps the manifest fresh.
+    1  a gate tripped BEFORE live ranking writes; the wrapper retains the
+       previous public release and reports failure.
     3  a failure AFTER writes began. Do not publish; see runbook Recovery.
 
 Usage:
@@ -55,7 +54,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 MAIN_ROOT = Path(os.environ.get("PIGSKIN_MAIN_ROOT", r"E:\Fantasy Football"))
@@ -74,9 +73,9 @@ METRICS = "fantasy_football_advanced_metrics"
 
 # Runbook "Current positional row contracts".
 ROW_CONTRACTS = {
-    "standard": {"QB": 45, "RB": (80, 100), "WR": 100, "TE": 35},
-    "ppr": {"QB": 45, "RB": 80, "WR": 100, "TE": 35},
-    "half_ppr": {"QB": 45, "RB": 80, "WR": 100, "TE": 35},
+    "standard": {"QB": (40, 45), "RB": (80, 100), "WR": 100, "TE": 35},
+    "ppr": {"QB": (40, 45), "RB": 80, "WR": 100, "TE": 35},
+    "half_ppr": {"QB": (40, 45), "RB": 80, "WR": 100, "TE": 35},
     "gng_keeper": {"QB": 45, "RB": 80, "WR": 100, "TE": 35},
 }
 
@@ -129,15 +128,16 @@ def bq_rows(sql: str) -> list[dict]:
 
 
 def assert_context_fresh() -> None:
-    """The safety layer must be built from today's snapshot before promotion."""
+    """Require a recent daily snapshot without a UTC-midnight cutoff."""
     rows = bq_rows(
         f"SELECT MAX(fetched_at) AS fetched_at FROM `{PROJECT}.{METRICS}.sleeper_current_player_context`"
     )
     fetched_at = rows[0]["fetched_at"]
-    if fetched_at is None or fetched_at.date() != datetime.now(timezone.utc).date():
+    age = datetime.now(timezone.utc) - fetched_at if fetched_at is not None else None
+    if age is None or not timedelta(minutes=-5) <= age <= timedelta(hours=26):
         raise RuntimeError(
             f"sleeper_current_player_context is stale (fetched_at={fetched_at}). "
-            "The 07:00 ingest-sleeper-news job must succeed before boards refresh."
+            "The 07:00 ET ingest-sleeper-news snapshot must be no more than 26 hours old."
         )
     print(f"--- safety context fresh: {fetched_at}", flush=True)
 
@@ -314,6 +314,12 @@ def main() -> int:
         ])
     assert_context_fresh()
 
+    # This is a materialized candidate table, not a view. Rebuild it from
+    # today's safety context before the coverage gate or any live promotion.
+    run("0.5 dry WR safety candidates", [PYTHON, script("build_standard_wr_fable_v1_safety_review.py")])
+    if args.apply:
+        run("0.5 refresh WR safety candidates", [PYTHON, script("build_standard_wr_fable_v1_safety_review.py"), "--apply"])
+
     # Stage 1: focused tests.
     run("1 focused tests", [PYTHON, "-m", "unittest", *TEST_MODULES])
 
@@ -362,6 +368,8 @@ def main() -> int:
 
     # Stage 5: runbook invariants on what was just promoted.
     validate_positional()
+
+    run("5 coverage gate after promotion", [PYTHON, script("audit_current_player_ranking_coverage.py"), "--fail-on-blocking"])
 
     # Stage 5.5: Situation v0 (Phase 3, owner-approved 2026-07-24). Rebuild the
     # situation layer from the just-promoted QB boards, then apply bounded
@@ -445,8 +453,8 @@ if __name__ == "__main__":
             )
             raise SystemExit(3)
         print(
-            "No writes were made: boards are unchanged. Publishing the "
-            "last-approved state remains safe.",
+            "No live ranking writes were made in this run. Retain the "
+            "previous public release; do not publish from a failed refresh.",
             file=sys.stderr,
             flush=True,
         )

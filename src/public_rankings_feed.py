@@ -9,9 +9,9 @@ from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
 
-# 1.3 adds optional per-player `situation` and `metrics` blocks (additive; the
-# site importer iterates profiles and ignores unknown player keys).
-SCHEMA_VERSION = "1.3"
+# 1.4 adds separate observed current_season stats without replacing the
+# preseason situation and metrics blocks introduced in 1.3.
+SCHEMA_VERSION = "1.4"
 SCORING_PROFILES = ("standard", "ppr", "half_ppr", "gng_keeper")
 POSITIONS = ("QB", "RB", "WR", "TE")
 OVERALL_BOARD_SIZE = 150
@@ -175,6 +175,9 @@ def _attach_player_context(
     if not player_context:
         return
     blocks = player_context.get(str(player_id))
+    current_season = (blocks or {}).get("current_season", player_context.get("__current_season_default__"))
+    if current_season is not None:
+        player["current_season"] = current_season
     if blocks:
         player["situation"] = blocks.get("situation")
         player["metrics"] = blocks.get("metrics")

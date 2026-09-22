@@ -47,6 +47,16 @@ ASSERT (
   FROM {wr}
 ) AS 'Standard WR repaired-board preflight failed';
 
+ASSERT NOT EXISTS (
+  SELECT 1 FROM {wr} candidate
+  LEFT JOIN {safety} context
+    ON context.gsis_id = candidate.player_id AND context.position = 'WR'
+  WHERE context.gsis_id IS NULL
+    OR NOT context.current_board_rank_eligible
+    OR context.team IS DISTINCT FROM candidate.current_team
+    OR context.fetched_at IS DISTINCT FROM candidate.sleeper_fetched_at
+) AS 'Standard WR candidates must match the current safety snapshot; rebuild the safety review';
+
 ASSERT (
   SELECT COUNT(*) >= 35 AND COUNTIF(context.team IS NULL) = 0
   FROM {te} source

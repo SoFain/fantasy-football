@@ -294,6 +294,56 @@ def fetch_player_context(
     return context
 
 
+def attach_current_season_stats(client, project_id, dataset_id, context, season=None):
+    """Attach observed current-season stats without replacing preseason inputs."""
+    import nflreadpy as nfl
+
+    if season is None:
+        today = datetime.now(timezone.utc)
+        season = today.year - (today.month < 9)
+
+    table = f"{project_id}.{dataset_id}.weekly_metrics"
+    rows = [dict(row) for row in client.query(f"""
+      SELECT player_id, MAX(week) through_week, COUNT(DISTINCT game_id) games,
+        SUM(passing_yards) passing_yards, SUM(passing_tds) passing_tds,
+        SUM(carries) carries, SUM(rushing_yards) rushing_yards, SUM(rushing_tds) rushing_tds,
+        SUM(targets) targets, SUM(receptions) receptions,
+        SUM(receiving_yards) receiving_yards, SUM(receiving_tds) receiving_tds,
+        ROUND(SUM(fantasy_points), 2) standard_points,
+        ROUND(SUM(fantasy_points_ppr), 2) ppr_points,
+        ROUND(AVG(fantasy_points), 2) standard_ppg,
+        ROUND(AVG(fantasy_points_ppr), 2) ppr_ppg
+      FROM `{table}` WHERE season = {int(season)} AND season_type = 'REG'
+        AND player_id IS NOT NULL GROUP BY player_id
+    """).result()]
+    if not rows:
+        raise ValueError(f"No current-season weekly stats for {season}")
+    loaded_games = {row.game_id for row in client.query(
+        f"SELECT DISTINCT game_id FROM `{table}` WHERE season={int(season)} AND season_type='REG'"
+    ).result()}
+    schedule = nfl.load_schedules([season]).to_pandas()
+    completed = schedule.loc[schedule.game_type.eq('REG') & schedule.home_score.notna() & schedule.away_score.notna()]
+    missing = sorted(set(completed.game_id) - loaded_games)
+    caveat = ("Completed games awaiting source stats: " + ", ".join(missing) + ". " if missing else "")
+    caveat += "Observed season-to-date stats; rank order retains the approved preseason formula baseline."
+    context = context or {}
+    default = dict(season=season, through_week=None, games=None, stats={}, source="nflverse weekly_metrics", coverage_caveat=caveat + " No observed player stat row in the loaded season.")
+    context['__current_season_default__'] = default
+    for row in rows:
+        player_id = str(row.pop('player_id'))
+        block = dict(season=season, through_week=row.pop('through_week'), games=row.pop('games'), stats=row, source="nflverse weekly_metrics", coverage_caveat=caveat)
+        context.setdefault(player_id, {})['current_season'] = block
+    # Existing situation aliases share the same context object. Add safety aliases
+    # for rookies or other players missing situation rows.
+    aliases = client.query(f"SELECT gsis_id, sleeper_player_id FROM `{project_id}.fantasy_football_advanced_metrics.v_ranking_post_formula_safety` WHERE gsis_id IS NOT NULL").result()
+    for row in aliases:
+        blocks = context.get(str(row.gsis_id))
+        if blocks and row.sleeper_player_id:
+            context.setdefault(f"sleeper:{row.sleeper_player_id}", {}).update({'current_season': blocks.get('current_season', default)})
+            context.setdefault(str(row.sleeper_player_id), {}).update({'current_season': blocks.get('current_season', default)})
+    return context
+
+
 def fetch_current_datasets(bucket: storage.Bucket | None, bucket_name: str) -> dict[str, dict[str, Any]]:
     """Carry forward the datasets listed in the current live manifest.
 
@@ -414,6 +464,7 @@ def main() -> int:
         raise RuntimeError(f"Publication bucket does not exist: gs://{args.bucket}")
 
     player_context = fetch_player_context(bigquery_client, args.project, args.dataset)
+    player_context = attach_current_season_stats(bigquery_client, args.project, args.dataset, player_context)
 
     profile_entries: dict[str, dict[str, Any]] = {}
     for profile in profiles:

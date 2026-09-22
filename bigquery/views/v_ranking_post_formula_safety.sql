@@ -100,7 +100,11 @@ SELECT
   context_age_hours,
   roster_context_eligible,
   team IS NOT NULL AS current_board_rank_eligible,
-  NOT roster_context_eligible
+  (NOT roster_context_eligible AND NOT (
+    active IS TRUE AND team IS NOT NULL
+    AND status = 'Inactive' AND injury_status IS NOT NULL
+    AND context_age_hours <= 72
+  ))
     OR (position = 'QB' AND depth_chart_order > 1) AS sleeper_hard_review,
   CASE
     WHEN NOT roster_context_eligible OR years_exp = 0 THEN 0.0

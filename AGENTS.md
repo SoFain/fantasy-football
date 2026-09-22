@@ -141,6 +141,11 @@ You own final judgment and integration.
 
 ## Public Rankings Publication
 
+- Daily ranking automation: `PigskinDailyPublishImport` runs at 07:30 and 12:30 ET with two 30-minute retries. Rebuild Standard WR safety candidates before promotion, compare their source snapshot against current safety context, and fail the task on every unsuccessful refresh or import. See `docs/rankings-production-runbook.md`.
+- Current-season weekly stats refresh uses `scripts/refresh_current_season_stats.py --season <year>` (dry-run) and `--apply` (transactional single-season replacement). See `docs/current-season-stats-refresh.md`. Report incomplete game coverage; never treat fresh stats ingestion as a ranking formula change.
+- Separate in-season candidate research lives in `scripts/inseason_rankings.py` and `docs/inseason-rankings-baseline.md`. Keep its per-appearance, availability, scoring-completeness, and held-out validation limits visible; it must not overwrite Fable ranking provenance.
+- Exact GNG in-season scoring reconstruction and ambiguity checks live in `scripts/inseason_gng_scoring.py` and `docs/inseason-gng-scoring-audit.md`. Null reviewed scores must not be silently replaced by partial reconstructions.
+
 - The canonical release procedure is `docs/rankings-production-runbook.md`. Follow its ordered dry-run, promotion, verification, and all-profile publication gates.
 - Public ranking feeds come from `unified_draft_rankings_current` plus active `analytics_pigskin_rankings` rows.
 - Use `scripts/publish_public_rankings.py`. Run without `--publish` first; external writes require the explicit flag.
