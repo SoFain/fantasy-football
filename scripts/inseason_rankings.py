@@ -214,7 +214,7 @@ def main():
                 if r['status'] and r['status']!='Active':flags.append('roster_status: '+str(r['status']))
                 if horizon=='weekly' and thisweek.empty:flags.append(f'bye_no_week{target_week}_game')
                 projected=rate*(remaining if horizon=='ros' else int(not thisweek.empty))
-                rows.append(dict(player_id=r['player_id'] or 'sleeper:'+str(r['sleeper_player_id']),player_name=r['player_name'],team=r['team'],position=r['position'],projected_points=round(projected,3),projected_ppg=round(rate,3),remaining_games=remaining,flags=flags,
+                rows.append(dict(player_id=r['player_id'] or 'sleeper:'+str(r['sleeper_player_id']),sleeper_player_id=str(r['sleeper_player_id'] or ''),player_name=r['player_name'],team=r['team'],position=r['position'],projected_points=round(projected,3),projected_ppg=round(rate,3),remaining_games=remaining,flags=flags,
                   rationale=f"Experimental {VERSION}: {r['observed_points']:.2f} points across {r['observed_games']} observed {args.season} games; prior rate {r['prior_rate']:.2f}, prior-equivalent games k={model['k']}, chosen on 2016-2024. No matchup or unconfirmed absence adjustment.",
                   observed_games=r['observed_games'],observed_points=r['observed_points'],prior_rate=r['prior_rate'],prior_equivalent_games=model['k']))
             rows.sort(key=lambda r:(-r['projected_points'],r['player_id']))

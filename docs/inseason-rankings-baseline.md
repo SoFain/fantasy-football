@@ -20,6 +20,8 @@ Historical evaluation includes players who have observed future appearances. Wee
 
 Cross-position raw points ordering is a projected-points leaderboard, not a roster-value or replacement-value draft ranking. Positional lists use those same point forecasts. Do not describe the results as a validated availability or matchup model.
 
+The public `/ranks` route and new Pigskin Studio conversations default to the separate VORP-interleaved overall board. Weekly and ROS remain opt-in point-projection views. Projection rows carry both GSIS and Sleeper player identifiers so Studio can attach current availability evidence to an exact Sleeper roster player without name guessing.
+
 The current universe consists of active, rostered QB/RB/WR/TE players from the saved Sleeper safety view, including rostered IR and inactive designations. Teamless players are excluded. Availability remains an explicit warning without an invented absence duration. Players with little evidence carry visible flags. Completed games missing from the weekly source are named in the artifact coverage warnings.
 
 ## Scoring
