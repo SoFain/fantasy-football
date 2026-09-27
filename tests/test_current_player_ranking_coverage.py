@@ -65,6 +65,37 @@ class CurrentPlayerRankingCoverageTest(unittest.TestCase):
         omission["qualification"]["qualification_volume"] = 11.0
         self.assertIsNone(coverage_gate_review_only_reason(omission))
 
+    def test_marshawn_lloyd_missing_2025_sample_is_review_only_within_bounds(self) -> None:
+        omission = {
+            "player_name": "MarShawn Lloyd",
+            "position": "RB",
+            "team": "GB",
+            "years_exp": 2,
+            "trace_code": "NO_2025_SITUATIONAL_SOURCE_ROW",
+            "qualification": None,
+        }
+        self.assertIn("no 2025 regular-season games", coverage_gate_review_only_reason(omission) or "")
+
+        for change in (
+            {"team": "PIT"},
+            {"years_exp": 3},
+            {"trace_code": "IDENTITY_BRIDGE_UNMAPPED"},
+            {"trace_code": "BELOW_2025_FABLE_QUALIFICATION_THRESHOLD",
+             "qualification": {"games_played": 2, "qualification_volume": 12.0}},
+        ):
+            self.assertIsNone(coverage_gate_review_only_reason({**omission, **change}), change)
+
+    def test_decision_without_trace_code_still_requires_a_qualification_row(self) -> None:
+        omission = {
+            "player_name": "Theo Wease",
+            "position": "WR",
+            "team": "MIA",
+            "years_exp": 1,
+            "trace_code": "NO_2025_SITUATIONAL_SOURCE_ROW",
+            "qualification": None,
+        }
+        self.assertIsNone(coverage_gate_review_only_reason(omission))
+
 
 if __name__ == "__main__":
     unittest.main()

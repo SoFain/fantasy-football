@@ -162,8 +162,11 @@ def coverage_gate_review_only_reason(row: dict[str, Any]) -> str | None:
     )
     if decision is None:
         return None
+    trace_code = decision.get("trace_code")
+    if trace_code is not None and row.get("trace_code") != trace_code:
+        return None
     qualification = row.get("qualification") or {}
-    if not qualification:
+    if not qualification and trace_code != "NO_2025_SITUATIONAL_SOURCE_ROW":
         return None
     if (
         row.get("team") != decision["team"]

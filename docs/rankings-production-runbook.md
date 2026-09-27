@@ -104,7 +104,7 @@ Run the current-player coverage gate before any positional promotion:
 .\venv\Scripts\python.exe scripts\audit_current_player_ranking_coverage.py --fail-on-blocking
 ```
 
-The command is read-only against BigQuery. It writes a local JSON audit and rebuild report, then exits `2` if an established depth-order-1 player has been lost before the candidate or positional board. Rookie-system gaps and players who have valid formula rows below a documented board cutoff remain visible in the report but do not trip this gate.
+The command is read-only against BigQuery. It writes a local JSON audit and rebuild report, then exits `2` if an established depth-order-1 player has been lost before the candidate or positional board. Rookie-system gaps and players who have valid formula rows below a documented board cutoff remain visible in the report but do not trip this gate. Exact, bounded owner decisions in `src/ranking_owner_decisions.py` move a source-verified correct omission (for example a temporarily promoted player with no 2025 regular-season games) to `review_only_omissions`; they expire when team, experience, trace code, games, or volume leave the recorded bounds.
 
 ### 3. Dry-run positional promotion
 
