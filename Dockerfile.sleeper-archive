@@ -1,0 +1,5 @@
+# Add the isolated Sleeper snapshot archiver to the reviewed application image.
+FROM us-central1-docker.pkg.dev/fantasy-football-498121/nfl-studio-repo/nfl-studio-app@sha256:11cdd1928773fc7eccc5a2e9dfabf9f47e41c0bc2f344a7398e962d719bc74b0
+
+COPY scripts/build_sleeper_current_player_context.py ./scripts/build_sleeper_current_player_context.py
+COPY bigquery/views/v_rb_fable_v1_current_context_review.sql ./bigquery/views/v_rb_fable_v1_current_context_review.sql

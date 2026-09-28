@@ -1,0 +1,69 @@
+-- RB Fable 01 scores for all loaded seasons. Descriptive use for 2025; no future outcomes.
+CREATE OR REPLACE VIEW `{{PROJECT_ID}}.{{DATASET_ID}}.v_rb_fable_01_scored_seasons` AS
+WITH metric_stats AS (
+  SELECT
+    inputs.*,
+    AVG(non_garbage_time_touches_per_game) OVER (PARTITION BY season) AS avg_ngt_tpg,
+    STDDEV_POP(non_garbage_time_touches_per_game) OVER (PARTITION BY season) AS sd_ngt_tpg,
+    AVG(red_zone_touches_per_game) OVER (PARTITION BY season) AS avg_rz_tpg,
+    STDDEV_POP(red_zone_touches_per_game) OVER (PARTITION BY season) AS sd_rz_tpg,
+    AVG(target_share) OVER (PARTITION BY season) AS avg_target_share,
+    STDDEV_POP(target_share) OVER (PARTITION BY season) AS sd_target_share,
+    AVG(yac_per_rush) OVER (PARTITION BY season) AS avg_yac_per_rush,
+    STDDEV_POP(yac_per_rush) OVER (PARTITION BY season) AS sd_yac_per_rush,
+    AVG(success_pct) OVER (PARTITION BY season) AS avg_success_pct,
+    STDDEV_POP(success_pct) OVER (PARTITION BY season) AS sd_success_pct,
+    AVG(epa_per_touch) OVER (PARTITION BY season) AS avg_epa_per_touch,
+    STDDEV_POP(epa_per_touch) OVER (PARTITION BY season) AS sd_epa_per_touch,
+    AVG(explosive_pct) OVER (PARTITION BY season) AS avg_explosive_pct,
+    STDDEV_POP(explosive_pct) OVER (PARTITION BY season) AS sd_explosive_pct,
+    AVG(box_adjusted_ypc) OVER (PARTITION BY season) AS avg_box_adjusted_ypc,
+    STDDEV_POP(box_adjusted_ypc) OVER (PARTITION BY season) AS sd_box_adjusted_ypc,
+    AVG(blended_td_per_game) OVER (PARTITION BY season) AS avg_blended_td,
+    STDDEV_POP(blended_td_per_game) OVER (PARTITION BY season) AS sd_blended_td,
+    AVG(age_penalty) OVER (PARTITION BY season) AS avg_age_penalty,
+    STDDEV_POP(age_penalty) OVER (PARTITION BY season) AS sd_age_penalty,
+    AVG(games_played_rate) OVER (PARTITION BY season) AS avg_games_rate,
+    STDDEV_POP(games_played_rate) OVER (PARTITION BY season) AS sd_games_rate
+  FROM `{{PROJECT_ID}}.{{DATASET_ID}}.v_rb_fable_01_metric_inputs` AS inputs
+  WHERE season BETWEEN 2022 AND 2025
+),
+z_scores AS (
+  SELECT
+    metric_stats.*,
+    SAFE_DIVIDE(non_garbage_time_touches_per_game - avg_ngt_tpg, sd_ngt_tpg) AS z_ngt_tpg,
+    SAFE_DIVIDE(red_zone_touches_per_game - avg_rz_tpg, sd_rz_tpg) AS z_rz_tpg,
+    SAFE_DIVIDE(target_share - avg_target_share, sd_target_share) AS z_target_share,
+    SAFE_DIVIDE(yac_per_rush - avg_yac_per_rush, sd_yac_per_rush) AS z_yac_per_rush,
+    SAFE_DIVIDE(success_pct - avg_success_pct, sd_success_pct) AS z_success_pct,
+    SAFE_DIVIDE(epa_per_touch - avg_epa_per_touch, sd_epa_per_touch) AS z_epa_per_touch,
+    SAFE_DIVIDE(explosive_pct - avg_explosive_pct, sd_explosive_pct) AS z_explosive_pct,
+    SAFE_DIVIDE(box_adjusted_ypc - avg_box_adjusted_ypc, sd_box_adjusted_ypc) AS z_box_adjusted_ypc,
+    SAFE_DIVIDE(blended_td_per_game - avg_blended_td, sd_blended_td) AS z_blended_td,
+    SAFE_DIVIDE(age_penalty - avg_age_penalty, sd_age_penalty) AS z_age_penalty,
+    SAFE_DIVIDE(games_played_rate - avg_games_rate, sd_games_rate) AS z_games_rate
+  FROM metric_stats
+),
+components AS (
+  SELECT
+    z_scores.*,
+    0.30 * z_ngt_tpg + 0.13 * z_rz_tpg + 0.12 * z_target_share AS opportunity_component,
+    0.08 * z_yac_per_rush * rushing_efficiency_shrink
+      + 0.06 * z_success_pct * rushing_efficiency_shrink
+      + 0.05 * z_epa_per_touch * touch_efficiency_shrink
+      + 0.04 * z_explosive_pct * rushing_efficiency_shrink
+      + 0.04 * z_box_adjusted_ypc * SAFE_DIVIDE(box_adjusted_ypc_sample_size, box_adjusted_ypc_sample_size + 125)
+      AS efficiency_component,
+    0.10 * z_blended_td AS scoring_component,
+    -- Phase 34.4 elite-volume protection: forgive up to 60% of the age penalty as prior-season
+    -- non-garbage-time volume rises from z=0.75 to z=1.5. Workhorse veterans (Henry) keep most of
+    -- their score while moderate-volume veterans (Mostert) stay fully penalized.
+    0.05 * z_age_penalty * (1 - 0.6 * LEAST(GREATEST((z_ngt_tpg - 0.75) / 0.75, 0), 1))
+      + 0.03 * z_games_rate AS age_availability_component
+  FROM z_scores
+)
+SELECT
+  components.*,
+  opportunity_component + efficiency_component + scoring_component + age_availability_component AS rb_fable_01_score
+FROM components;
+

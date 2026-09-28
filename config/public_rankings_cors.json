@@ -1,0 +1,18 @@
+[
+  {
+    "origin": [
+      "https://www.thegng.us",
+      "https://thegng.us"
+    ],
+    "method": [
+      "GET",
+      "HEAD"
+    ],
+    "responseHeader": [
+      "Cache-Control",
+      "Content-Type",
+      "ETag"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

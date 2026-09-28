@@ -33,7 +33,7 @@ The tool layer enforces:
 - Hard result limits per tool.
 - `maximum_bytes_billed` from `PIGSKIN_CONTEXT_MAX_BYTES_BILLED`, defaulting to `1 GB`.
 - Tool-call logging with tool name, sanitized arguments, and row counts.
-- JSON-safe output for Streamlit and Gemini function responses.
+- JSON-safe output for Gemini function responses.
 
 ## Failure Contract
 
@@ -47,8 +47,7 @@ Current wiring:
 
 - Tool declarations: `src/pigskin_context_tools.py::get_pigskin_context_tool_declarations`
 - Dispatcher: `src/pigskin_context_tools.py::execute_pigskin_context_tool`
-- Chat registration: `app.py::create_gemini_model`
-- Manual tool loop: `app.py::render_ai_cohost`
+- No consumer is registered. The declarations are ready for a future surface.
 
 The old SQL guardrail module still exists for server-side compatibility and admin paths, but it is no longer the Pigskin model-facing tool surface.
 
@@ -63,5 +62,5 @@ Recommended scoped checks:
 
 ```powershell
 .\venv\Scripts\python.exe -m unittest tests.test_pigskin_context_tools tests.test_pigskin_chat_schema
-.\venv\Scripts\python.exe -m py_compile app.py src\pigskin_context_tools.py src\llm_context_packets.py src\trade_history.py
+.\venv\Scripts\python.exe -m py_compile src\pigskin_context_tools.py src\llm_context_packets.py src\trade_history.py
 ```

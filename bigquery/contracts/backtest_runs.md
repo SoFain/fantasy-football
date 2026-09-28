@@ -35,5 +35,5 @@ One row per `backtest_run_id`.
 ## Consumer Rules
 
 - Result tables must reference `backtest_run_id`.
-- The Streamlit UI should read summaries from result tables, not raw projections or raw actuals.
+- Consumers should read summaries from result tables, not raw projections or raw actuals.
 - Pigskin should consume future evidence packets, not this run ledger directly.

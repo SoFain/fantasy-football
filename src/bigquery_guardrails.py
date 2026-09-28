@@ -1,4 +1,4 @@
-"""BigQuery query guardrails for Streamlit and Pigskin chat."""
+"""BigQuery query guardrails for warehouse and Pigskin context queries."""
 
 from __future__ import annotations
 

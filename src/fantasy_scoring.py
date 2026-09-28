@@ -37,6 +37,104 @@ DEFAULT_PROFILE_RECEPTION_POINTS = {
     "ppr": 1.0,
 }
 
+GNG_KEEPER_SOURCE_METADATA = {
+    "source": "owner-supplied Sleeper league report",
+    "source_league_id": "1369406895588143104",
+    "season": 2026,
+    "league_status_at_retrieval": "pre_draft",
+}
+
+GNG_KEEPER_SLEEPER_SCORING_SETTINGS = {
+    "pass_yd": 0.02,
+    "pass_td": 5.0,
+    "pass_td_40p": 0.0,
+    "pass_td_50p": 0.5,
+    "pass_2pt": 2.0,
+    "pass_int": -2.0,
+    "pass_int_td": -4.0,
+    "pass_sack": -1.0,
+    "pass_cmp_40p": 0.5,
+    "bonus_pass_cmp_25": 1.0,
+    "bonus_pass_yd_300": 1.0,
+    "bonus_pass_yd_400": 2.0,
+    "rush_yd": 0.04,
+    "rush_td": 6.0,
+    "rush_td_40p": 0.0,
+    "rush_td_50p": 1.0,
+    "rush_40p": 1.0,
+    "rush_fd": 0.1,
+    "rush_2pt": 2.0,
+    "bonus_rush_att_20": 1.0,
+    "bonus_rush_yd_100": 1.0,
+    "bonus_rush_yd_200": 2.0,
+    "bonus_rush_rec_yd_200": 1.0,
+    "rec": 0.1,
+    "bonus_rec_wr": 0.1,
+    "bonus_rec_te": 0.2,
+    "rec_yd": 0.04,
+    "rec_td": 6.0,
+    "rec_td_40p": 0.0,
+    "rec_td_50p": 0.5,
+    "rec_40p": 0.5,
+    "rec_fd": 0.1,
+    "rec_2pt": 2.0,
+    "bonus_rec_yd_100": 1.0,
+    "bonus_rec_yd_200": 2.0,
+    "fgm": 3.0,
+    "fgm_0_19": 0.0,
+    "fgm_20_29": 0.0,
+    "fgm_30_39": 0.0,
+    "fgm_40_49": 0.0,
+    "fgm_50_59": 1.0,
+    "fgm_60p": 2.0,
+    "fgmiss": -1.0,
+    "fgmiss_0_19": -4.0,
+    "fgmiss_20_29": -3.0,
+    "fgmiss_30_39": -2.0,
+    "fgmiss_40_49": -1.0,
+    "fgmiss_50_59": 0.0,
+    "fgmiss_50p": 0.0,
+    "fgmiss_60p": 0.0,
+    "xpm": 1.0,
+    "xpmiss": -2.0,
+    "sack": 1.0,
+    "int": 2.0,
+    "fum_rec": 2.0,
+    "ff": 0.0,
+    "safe": 4.0,
+    "blk_kick": 1.0,
+    "def_td": 6.0,
+    "def_st_td": 6.0,
+    "def_st_ff": 1.0,
+    "def_st_fum_rec": 1.0,
+    "def_3_and_out": 0.5,
+    "def_4_and_stop": 1.0,
+    "tkl_loss": 0.0,
+    "pts_allow_0": 8.0,
+    "pts_allow_1_6": 6.0,
+    "pts_allow_7_13": 4.0,
+    "pts_allow_14_20": 2.0,
+    "pts_allow_21_27": 0.0,
+    "pts_allow_28_34": -3.0,
+    "pts_allow_35p": -6.0,
+    "yds_allow_0_100": 2.0,
+    "yds_allow_100_199": 1.0,
+    "yds_allow_300_349": -1.0,
+    "yds_allow_350_399": -2.0,
+    "yds_allow_400_449": -4.0,
+    "yds_allow_450_499": -5.0,
+    "yds_allow_500_549": -6.0,
+    "yds_allow_550p": -7.0,
+    "st_td": 6.0,
+    "st_ff": 1.0,
+    "st_fum_rec": 1.0,
+    "kr_yd": 0.05,
+    "pr_yd": 0.1,
+    "fum": 0.0,
+    "fum_lost": -2.0,
+    "fum_rec_td": 6.0,
+}
+
 PROFILE_SETTING_ALIASES = {
     "reception": "receptions",
     "passing_td": "passing_tds",
@@ -67,6 +165,15 @@ STAT_ALIASES = {
     "receiving_2pt_conversions": ("receiving_2pt_conversions", "receiving_2pt", "rec_2pt"),
     "fumbles_lost": ("fumbles_lost", "lost_fumbles", "fum_lost"),
     "return_tds": ("return_tds", "return_touchdowns", "st_td"),
+}
+
+SUPPLEMENTAL_STAT_ALIASES = {
+    "passing_completions": ("passing_completions", "completions"),
+    "passing_attempts": ("passing_attempts", "attempts", "pass_attempts"),
+    "sacks_taken": ("sacks_taken", "sacks_suffered", "pass_sack"),
+    "rushing_attempts": ("rushing_attempts", "carries", "rush_att"),
+    "rushing_first_downs": ("rushing_first_downs", "rush_fd"),
+    "receiving_first_downs": ("receiving_first_downs", "rec_fd"),
 }
 
 SLEEPER_SCORING_KEY_MAP = {
@@ -118,9 +225,28 @@ def _settings_from_profile(scoring_profile: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _sleeper_setting(scoring_profile: dict[str, Any], key: str) -> float:
+    for source_key in ("sleeper_scoring_settings", "unmapped_settings"):
+        source = scoring_profile.get(source_key) or {}
+        if key in source:
+            return _as_float(source.get(key))
+    return 0.0
+
+
+def _position_reception_bonus(stat_row: dict[str, Any], scoring_profile: dict[str, Any]) -> float:
+    position = str(stat_row.get("position") or stat_row.get("pos") or "").upper()
+    if position == "WR":
+        return _sleeper_setting(scoring_profile, "bonus_rec_wr")
+    if position == "TE":
+        return _sleeper_setting(scoring_profile, "bonus_rec_te")
+    return 0.0
+
+
 def get_default_scoring_profile(profile_id: str) -> dict[str, Any]:
     """Return the local copy of the BigQuery seed scoring profile for offline use."""
 
+    if profile_id == "gng_keeper":
+        return get_gng_keeper_scoring_profile()
     if profile_id not in DEFAULT_PROFILE_RECEPTION_POINTS:
         raise ValueError(f"Unknown default scoring profile: {profile_id}")
     settings = copy.deepcopy(DEFAULT_SCORING_SETTINGS)
@@ -135,6 +261,17 @@ def get_default_scoring_profile(profile_id: str) -> dict[str, Any]:
         "settings": settings,
         "unmapped_settings": {},
     }
+
+
+def get_gng_keeper_scoring_profile() -> dict[str, Any]:
+    """Return the owner-approved GNG Keeper Sleeper scoring profile."""
+
+    profile = build_scoring_profile_from_sleeper_settings(GNG_KEEPER_SLEEPER_SCORING_SETTINGS)
+    profile["scoring_profile_id"] = "gng_keeper"
+    profile["display_name"] = "GNG Keeper"
+    profile["source_metadata"] = dict(GNG_KEEPER_SOURCE_METADATA)
+    profile["sleeper_scoring_settings"] = dict(GNG_KEEPER_SLEEPER_SCORING_SETTINGS)
+    return profile
 
 
 def _parse_profile_json(value: Any) -> dict[str, Any]:
@@ -231,6 +368,17 @@ def normalize_stat_row(stat_row: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _optional_stat(stat_row: dict[str, Any], canonical_field: str) -> float:
+    for alias in SUPPLEMENTAL_STAT_ALIASES[canonical_field]:
+        if alias in stat_row and not _is_missing(stat_row.get(alias)):
+            return _as_float(stat_row.get(alias))
+    return 0.0
+
+
+def _threshold_bonus(value: float, threshold: float, points: float) -> float:
+    return points if points and value >= threshold else 0.0
+
+
 def calculate_fantasy_breakdown(
     stat_row: dict[str, Any],
     scoring_profile: dict[str, Any],
@@ -253,12 +401,37 @@ def calculate_fantasy_breakdown(
         + normalized_stats["receiving_tds"] * settings["receiving_tds"]
         + normalized_stats["receiving_2pt_conversions"] * settings["receiving_2pt_conversions"]
     )
-    reception_points = normalized_stats["receptions"] * settings["receptions"]
+    reception_points = normalized_stats["receptions"] * (
+        settings["receptions"] + _position_reception_bonus(stat_row, scoring_profile)
+    )
     turnover_points = (
         normalized_stats["interceptions"] * settings["interceptions"]
         + normalized_stats["fumbles_lost"] * settings["fumbles_lost"]
     )
-    bonus_points = normalized_stats["return_tds"] * settings["return_tds"]
+    passing_completions = _optional_stat(stat_row, "passing_completions")
+    sacks_taken = _optional_stat(stat_row, "sacks_taken")
+    rushing_attempts = _optional_stat(stat_row, "rushing_attempts")
+    rushing_first_downs = _optional_stat(stat_row, "rushing_first_downs")
+    receiving_first_downs = _optional_stat(stat_row, "receiving_first_downs")
+    bonus_points = (
+        normalized_stats["return_tds"] * settings["return_tds"]
+        + sacks_taken * _sleeper_setting(scoring_profile, "pass_sack")
+        + rushing_first_downs * _sleeper_setting(scoring_profile, "rush_fd")
+        + receiving_first_downs * _sleeper_setting(scoring_profile, "rec_fd")
+        + _threshold_bonus(passing_completions, 25, _sleeper_setting(scoring_profile, "bonus_pass_cmp_25"))
+        + _threshold_bonus(normalized_stats["passing_yards"], 300, _sleeper_setting(scoring_profile, "bonus_pass_yd_300"))
+        + _threshold_bonus(normalized_stats["passing_yards"], 400, _sleeper_setting(scoring_profile, "bonus_pass_yd_400"))
+        + _threshold_bonus(rushing_attempts, 20, _sleeper_setting(scoring_profile, "bonus_rush_att_20"))
+        + _threshold_bonus(normalized_stats["rushing_yards"], 100, _sleeper_setting(scoring_profile, "bonus_rush_yd_100"))
+        + _threshold_bonus(normalized_stats["rushing_yards"], 200, _sleeper_setting(scoring_profile, "bonus_rush_yd_200"))
+        + _threshold_bonus(normalized_stats["receiving_yards"], 100, _sleeper_setting(scoring_profile, "bonus_rec_yd_100"))
+        + _threshold_bonus(normalized_stats["receiving_yards"], 200, _sleeper_setting(scoring_profile, "bonus_rec_yd_200"))
+        + _threshold_bonus(
+            normalized_stats["rushing_yards"] + normalized_stats["receiving_yards"],
+            200,
+            _sleeper_setting(scoring_profile, "bonus_rush_rec_yd_200"),
+        )
+    )
     kicker_points = 0.0
     dst_points = 0.0
     total = (
@@ -281,7 +454,14 @@ def calculate_fantasy_breakdown(
         "kicker_points": kicker_points,
         "dst_points": dst_points,
         "total_fantasy_points": total,
-        "source_stats": {key: normalized_stats[key] for key in STAT_ALIASES},
+        "source_stats": {
+            **{key: normalized_stats[key] for key in STAT_ALIASES},
+            "passing_completions": passing_completions,
+            "sacks_taken": sacks_taken,
+            "rushing_attempts": rushing_attempts,
+            "rushing_first_downs": rushing_first_downs,
+            "receiving_first_downs": receiving_first_downs,
+        },
         "missing_data_flags": list(normalized_stats["missing_data_flags"]),
     }
 

@@ -73,31 +73,70 @@ def create_backtest_run(
     _validate_backtest_window(season_start, season_end, week_start, week_end, allow_large_backtest)
     backtest_run_id = backtest_run_id or _generate_backtest_run_id(projection_horizon, season_start, season_end)
 
-    row = {
-        "backtest_run_id": backtest_run_id,
-        "model_run_id": model_run_id,
-        "backtest_name": backtest_name or f"{projection_horizon}_{season_start}_{season_end}",
-        "backtest_version": backtest_version,
-        "projection_horizon": projection_horizon,
-        "season_start": int(season_start),
-        "season_end": int(season_end),
-        "week_start": week_start,
-        "week_end": week_end,
-        "scoring_profile_id": scoring_profile_id,
-        "league_type_id": league_type_id,
-        "roster_format_id": roster_format_id,
-        "feature_config_version_id": feature_config_version_id,
-        "source_freshness_snapshot_id": source_freshness_snapshot_id,
-        "status": "running",
-        "created_by": created_by,
-        "created_at": _utc_timestamp(),
-        "completed_at": None,
-        "error_message": None,
-        "notes": notes,
-    }
-    errors = client.insert_rows_json(_table_id(client.project, dataset_id, BACKTEST_RUNS_TABLE), [row])
-    if errors:
-        raise RuntimeError(f"Failed to insert backtest run {backtest_run_id}: {errors}")
+    sql = f"""
+    INSERT INTO `{_table_id(client.project, dataset_id, BACKTEST_RUNS_TABLE)}` (
+        backtest_run_id,
+        model_run_id,
+        backtest_name,
+        backtest_version,
+        projection_horizon,
+        season_start,
+        season_end,
+        week_start,
+        week_end,
+        scoring_profile_id,
+        league_type_id,
+        roster_format_id,
+        feature_config_version_id,
+        source_freshness_snapshot_id,
+        status,
+        created_by,
+        created_at,
+        completed_at,
+        error_message,
+        notes
+    )
+    VALUES (
+        @backtest_run_id,
+        @model_run_id,
+        @backtest_name,
+        @backtest_version,
+        @projection_horizon,
+        @season_start,
+        @season_end,
+        @week_start,
+        @week_end,
+        @scoring_profile_id,
+        @league_type_id,
+        @roster_format_id,
+        @feature_config_version_id,
+        @source_freshness_snapshot_id,
+        'running',
+        @created_by,
+        CURRENT_TIMESTAMP(),
+        NULL,
+        NULL,
+        @notes
+    )
+    """
+    client.query(sql, job_config=_job_config([
+        ("backtest_run_id", "STRING", backtest_run_id),
+        ("model_run_id", "STRING", model_run_id),
+        ("backtest_name", "STRING", backtest_name or f"{projection_horizon}_{season_start}_{season_end}"),
+        ("backtest_version", "STRING", backtest_version),
+        ("projection_horizon", "STRING", projection_horizon),
+        ("season_start", "INT64", int(season_start)),
+        ("season_end", "INT64", int(season_end)),
+        ("week_start", "INT64", week_start),
+        ("week_end", "INT64", week_end),
+        ("scoring_profile_id", "STRING", scoring_profile_id),
+        ("league_type_id", "STRING", league_type_id),
+        ("roster_format_id", "STRING", roster_format_id),
+        ("feature_config_version_id", "STRING", feature_config_version_id),
+        ("source_freshness_snapshot_id", "STRING", source_freshness_snapshot_id),
+        ("created_by", "STRING", created_by),
+        ("notes", "STRING", notes),
+    ])).result()
     return backtest_run_id
 
 

@@ -13,16 +13,16 @@ Helper: [src/viewer_team_context.py](../../src/viewer_team_context.py)
 
 ## Purpose
 
-Compatibility layer for `get_sleeper_viewer_team_context`, `app.py:3390-3570`.
+Compatibility layer for `get_sleeper_viewer_team_context`.
 
-This object replaces raw Sleeper joins and fragile player matching in Viewer Team Lab with a precomputed packet. Streamlit is not wired to it yet. Future wiring must be behind `USE_COMPAT_VIEWER_TEAM_CONTEXT=false` until live validation passes.
+This object replaces raw Sleeper joins and fragile player matching in Viewer Team Lab with a precomputed packet. No consumer reads it yet. Any future consumer must be gated behind `USE_COMPAT_VIEWER_TEAM_CONTEXT=false` until live validation passes.
 
 ## Backing Object
 
 - `mart_viewer_team_context`
 - `compat_viewer_team_context` is a view over the mart.
 
-The view filters to rows where `packet_json IS NOT NULL` so legacy mart rows are not exposed to Streamlit or Pigskin consumers.
+The view filters to rows where `packet_json IS NOT NULL` so legacy mart rows are not exposed to Pigskin consumers.
 
 ## Grain
 
@@ -140,7 +140,7 @@ Validation files:
 
 ## Future Wiring
 
-Future Streamlit wiring should:
+Any future consumer should:
 
 1. Add `USE_COMPAT_VIEWER_TEAM_CONTEXT=false`.
 2. Use [src/viewer_team_context.py](../../src/viewer_team_context.py).

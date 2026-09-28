@@ -76,7 +76,7 @@ def load_context_events(csv_path, dataset_name="fantasy_football_brain"):
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    parser = argparse.ArgumentParser(description="Load curated AI vs Vibes context events into BigQuery.")
+    parser = argparse.ArgumentParser(description="Load curated Pigskin context events into BigQuery.")
     parser.add_argument(
         "--csv",
         default=str(Path(__file__).resolve().parents[1] / "data" / "context_events.csv"),

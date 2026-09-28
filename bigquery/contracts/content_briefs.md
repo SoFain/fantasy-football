@@ -6,7 +6,7 @@ Helper: [src/content_briefs.py](../../src/content_briefs.py)
 
 ## Purpose
 
-Compact show-ready brief rows for recurring AI vs. Meatbags segment types.
+Compact show-ready brief rows for recurring Pigskin segment types.
 
 ## Grain
 

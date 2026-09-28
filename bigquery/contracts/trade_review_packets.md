@@ -72,4 +72,4 @@ The helper must not read raw market, weekly, play, or Sleeper source tables.
 
 ## Runtime Status
 
-No Streamlit runtime behavior is wired to this table yet.
+No consumer reads this table yet.
