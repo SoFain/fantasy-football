@@ -141,5 +141,17 @@ if ($verifyExit -ne 0) {
     Write-Log 'PUBLIC VERIFICATION FAILED.'
     exit 1
 }
+# AI decision layer pilot (docs/ai-decision-layer.md): log-only availability
+# decisions. Runs after publication and verification, so it can never delay or
+# block a release, and any failure is logged without failing the chain.
+try {
+    $availabilityExit = Invoke-Logged 'availability-decisions' "$root\venv\Scripts\python.exe" `
+        ('"{0}\scripts\run_availability_decisions.py" --live' -f $root) $root
+    if ($availabilityExit -ne 0) {
+        Write-Log "AVAILABILITY DECISIONS FAILED (exit=$availabilityExit); non-fatal, rankings already published."
+    }
+} catch {
+    Write-Log ("AVAILABILITY DECISIONS ERROR: {0}; non-fatal, rankings already published." -f $_.Exception.Message)
+}
 Write-Log 'done: chain succeeded'
 exit 0

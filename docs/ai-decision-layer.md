@@ -1,6 +1,6 @@
 # AI Decision Layer (Jev)
 
-Status: Pilot 1 (availability) built on branch `availability-pilot`, 2026-09-27. Log-only and context-only: nothing here changes ranks, boards, the public feed, or the daily chain.
+Status: Pilot 1 (availability) merged 2026-09-28 and running daily as a non-fatal step after publication in `scripts/daily_pigskin_chain.ps1`. Log-only and context-only: nothing here changes ranks, boards, or the public feed, and a failure never fails the chain.
 
 ## Idea
 
@@ -141,7 +141,7 @@ Remove-Item Env:ALLOW_NFLVERSE_HISTORICAL_BACKFILL
 
 The TypeSafe key comes from `TYPESAFE_API_KEY`, else `E:\cbs-league-history\.secrets\typesafe-ai-api.txt`. It is never printed or logged.
 
-### Proposed chain step (for owner review; not installed)
+### Chain step (installed 2026-09-28 by owner approval, non-fatal, wrapped in try/catch)
 
 Insert in `scripts/daily_pigskin_chain.ps1` after `verify-public-rankings` succeeds and before `done: chain succeeded`, non-fatal:
 
