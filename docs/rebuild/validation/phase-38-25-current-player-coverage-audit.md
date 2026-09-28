@@ -23,8 +23,8 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | half_ppr | WR | 100 | 100 | PASS |
 | half_ppr | TE | 35 | 35 | PASS |
 
-- Live Sleeper fetch: `2026-09-28T00:21:06.334046+00:00`.
-- BigQuery Sleeper snapshot: `2026-09-27 11:01:42.686084+00:00` (13 hours old).
+- Live Sleeper fetch: `2026-09-28T03:37:44.418926+00:00`.
+- BigQuery Sleeper snapshot: `2026-09-27 11:01:42.686084+00:00` (16 hours old).
 - BigQuery 72-hour safety status: `CURRENT`.
 - PPR versus Half-PPR presence mismatches: `0`.
 - Depth-order-1 current players missing at least one redraft board: `16`.
@@ -62,8 +62,8 @@ None. The two reception-profile positional boards contain the same players.
 | Identity | The GNG point pool starts from canonical internal player IDs and then joins Sleeper context. | Fable situational data uses a name-based identity bridge. Same-name collisions can block an otherwise complete source row. |
 | Current Sleeper layer | Formula score is calculated first. A bounded depth-order adjustment is added; teamless players move to the watchlist. | The same post-formula safety view is joined after scoring. It cannot restore a player who never reached a Fable candidate table. |
 | Rookie handling | Explicit market-ranked rookie overlay with depth-chart penalties. | No equivalent rookie overlay in the current shared redraft promotion path. |
-| WR continuity | Existing live GNG top-six and top-12 WRs receive bounded merge-priority protection. | Standard has the approved A.J. Brown elite-order guardrail, but no general current-star coverage floor. |
-| Unified board | Position-locked interleaving plus the approved Jeremiyah Love and QB4 floors. | Position-locked interleaving preserves only players already present on active positional boards. |
+| Player-specific rules | None. Owner rules were removed 2026-09-27. | None. Owner rules were removed 2026-09-27. |
+| Unified board | Position-locked VORP interleaving. | Position-locked interleaving preserves only players already present on active positional boards. |
 
 ## Malik Nabers Trace
 
