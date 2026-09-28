@@ -198,6 +198,12 @@ Gate behavior:
 - Standard WR preseason formula comparisons use a fixed eligible Week 1 roster universe and next-season Standard total points as the primary objective. Keep six-game PPG results only as continuity evidence.
 - Unknown advanced inputs use input-season neutral imputation with named missing counts. Structural source absence uses a source-backed fallback when available; encode zero only when its meaning is verified, and retain an explicit flag and method.
 
+## AI Decision Layer
+
+- Owner rulings and the as-built availability pilot live in `docs/ai-decision-layer.md`. Decisions are context only until backtested: they never move a rank, board, candidate, unified, or safety row, and they are not in the daily chain until the owner installs the proposed non-fatal step.
+- The availability pilot (`src/availability_*.py`, `scripts/*availability*.py`) writes only `availability_*` tables in `fantasy_football_brain`; `src/availability_bq.py` enforces the prefix. Below a question's confidence threshold the field stays NULL and the miss is logged in `availability_decision_misses`; never guess, and never hand-write player rules.
+- Jev (TypeSafe) gets only code-built facts: code does every date, schedule, count, and probability and writes them into the state as plain text. The base-rate prior comes from the versioned artifact `docs/availability-base-rates-v1.json`; refitting it is a new version. Read the key from `TYPESAFE_API_KEY` or `E:\cbs-league-history\.secrets\typesafe-ai-api.txt`; never print, log, or commit it.
+
 ## Communication
 
 Before editing, state the approach only for non-trivial tasks.
