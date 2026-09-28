@@ -1,0 +1,897 @@
+{
+ "model_version": "availability_next_buckets_v1",
+ "created_at": "2026-09-28T05:06:21+00:00",
+ "source_tables": [
+  "fantasy_football_brain.availability_labels_hist",
+  "fantasy_football_brain.raw_nflverse_rosters_weekly (not on the report, status not ACT)"
+ ],
+ "target": "missed bucket counted from the team's next regular-season game (byes are not games)",
+ "fit_seasons": [
+  2016,
+  2023
+ ],
+ "holdout_seasons": [
+  2024,
+  2025
+ ],
+ "estimator": "cell = (counts + k * parent) / (n + k); global level uses a uniform (1 each) prior; k from each population's artifact",
+ "chains": {
+  "bucket_next_game": [
+   [],
+   [
+    "report_status"
+   ],
+   [
+    "report_status",
+    "practice_status"
+   ],
+   [
+    "report_status",
+    "practice_status",
+    "played_this_game"
+   ]
+  ],
+  "roster_bucket_next_game": [
+   [],
+   [
+    "roster_status"
+   ]
+  ]
+ },
+ "buckets": [
+  "0",
+  "1",
+  "2_4",
+  "5_plus_or_season"
+ ],
+ "populations": {
+  "skill": {
+   "base_artifact": "availability_base_rates_v1",
+   "k": 50.0,
+   "fit_rows": {
+    "bucket_next_game": 10626,
+    "roster_bucket_next_game": 41360
+   },
+   "metrics": {
+    "bucket_next_game": {
+     "model": {
+      "n": 2807,
+      "log_loss": 0.7347,
+      "brier": 0.3647
+     },
+     "status_only": {
+      "n": 2807,
+      "log_loss": 0.7842,
+      "brier": 0.3908
+     }
+    },
+    "roster_bucket_next_game": {
+     "model": {
+      "n": 9697,
+      "log_loss": 0.7051,
+      "brier": 0.3481
+     },
+     "global_only": {
+      "n": 9697,
+      "log_loss": 0.7621,
+      "brier": 0.3736
+     }
+    }
+   },
+   "tables": {
+    "bucket_next_game": {
+     "ALL": {
+      "ALL": [
+       7640,
+       954,
+       847,
+       1185
+      ]
+     },
+     "report_status": {
+      "Questionable": [
+       2500,
+       254,
+       186,
+       236
+      ],
+      "NONE": [
+       4346,
+       174,
+       138,
+       320
+      ],
+      "Doubtful": [
+       170,
+       84,
+       56,
+       54
+      ],
+      "Out": [
+       624,
+       442,
+       467,
+       575
+      ]
+     },
+     "report_status/practice_status": {
+      "Questionable|LP": [
+       1653,
+       167,
+       114,
+       148
+      ],
+      "Questionable|FP": [
+       534,
+       33,
+       32,
+       31
+      ],
+      "NONE|FP": [
+       3720,
+       153,
+       111,
+       201
+      ],
+      "Questionable|DNP": [
+       289,
+       54,
+       39,
+       53
+      ],
+      "NONE|LP": [
+       573,
+       15,
+       15,
+       29
+      ],
+      "Doubtful|DNP": [
+       118,
+       57,
+       45,
+       45
+      ],
+      "Out|DNP": [
+       548,
+       410,
+       445,
+       535
+      ],
+      "Doubtful|LP": [
+       48,
+       25,
+       9,
+       8
+      ],
+      "Doubtful|FP": [
+       4,
+       2,
+       1,
+       0
+      ],
+      "Out|FP": [
+       11,
+       1,
+       2,
+       6
+      ],
+      "Out|LP": [
+       64,
+       27,
+       18,
+       34
+      ],
+      "NONE|DNP": [
+       53,
+       6,
+       12,
+       90
+      ],
+      "Questionable|NONE": [
+       24,
+       0,
+       1,
+       4
+      ],
+      "Out|NONE": [
+       1,
+       4,
+       2,
+       0
+      ],
+      "Doubtful|NONE": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "report_status/practice_status/played_this_game": {
+      "Questionable|LP|True": [
+       1276,
+       71,
+       43,
+       76
+      ],
+      "Questionable|FP|True": [
+       466,
+       13,
+       26,
+       11
+      ],
+      "NONE|FP|True": [
+       3632,
+       118,
+       72,
+       139
+      ],
+      "Questionable|DNP|True": [
+       165,
+       7,
+       5,
+       10
+      ],
+      "NONE|LP|True": [
+       565,
+       13,
+       11,
+       15
+      ],
+      "Doubtful|DNP|True": [
+       2,
+       1,
+       1,
+       0
+      ],
+      "Out|DNP|True": [
+       1,
+       0,
+       0,
+       0
+      ],
+      "Out|DNP|False": [
+       547,
+       410,
+       445,
+       535
+      ],
+      "NONE|FP|False": [
+       88,
+       35,
+       39,
+       62
+      ],
+      "Questionable|LP|False": [
+       377,
+       96,
+       71,
+       72
+      ],
+      "Doubtful|LP|False": [
+       46,
+       25,
+       9,
+       8
+      ],
+      "Doubtful|FP|False": [
+       4,
+       2,
+       1,
+       0
+      ],
+      "Doubtful|DNP|False": [
+       116,
+       56,
+       44,
+       45
+      ],
+      "Questionable|FP|False": [
+       68,
+       20,
+       6,
+       20
+      ],
+      "Out|FP|False": [
+       11,
+       1,
+       2,
+       6
+      ],
+      "Out|LP|False": [
+       64,
+       27,
+       18,
+       34
+      ],
+      "NONE|LP|False": [
+       8,
+       2,
+       4,
+       14
+      ],
+      "Questionable|DNP|False": [
+       124,
+       47,
+       34,
+       43
+      ],
+      "NONE|DNP|False": [
+       5,
+       3,
+       12,
+       89
+      ],
+      "NONE|DNP|True": [
+       48,
+       3,
+       0,
+       1
+      ],
+      "Questionable|NONE|True": [
+       23,
+       0,
+       1,
+       2
+      ],
+      "Out|NONE|False": [
+       1,
+       4,
+       2,
+       0
+      ],
+      "Doubtful|LP|True": [
+       2,
+       0,
+       0,
+       0
+      ],
+      "Questionable|NONE|False": [
+       1,
+       0,
+       0,
+       2
+      ],
+      "Doubtful|NONE|False": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "roster_bucket_next_game": {
+     "ALL": {
+      "ALL": [
+       2067,
+       1514,
+       2975,
+       34804
+      ]
+     },
+     "roster_status": {
+      "CUT": [
+       57,
+       46,
+       133,
+       11943
+      ],
+      "DEV": [
+       932,
+       774,
+       1625,
+       12178
+      ],
+      "RES": [
+       368,
+       294,
+       619,
+       8173
+      ],
+      "PUP": [
+       8,
+       9,
+       35,
+       249
+      ],
+      "NWT": [
+       0,
+       1,
+       2,
+       260
+      ],
+      "SUS": [
+       25,
+       17,
+       41,
+       145
+      ],
+      "RSN": [
+       2,
+       2,
+       6,
+       123
+      ],
+      "INA": [
+       652,
+       364,
+       503,
+       1281
+      ],
+      "RET": [
+       0,
+       0,
+       0,
+       321
+      ],
+      "EXE": [
+       5,
+       1,
+       5,
+       15
+      ],
+      "TRD": [
+       0,
+       0,
+       2,
+       6
+      ],
+      "UFA": [
+       0,
+       0,
+       0,
+       52
+      ],
+      "TRC": [
+       2,
+       0,
+       0,
+       22
+      ],
+      "RSR": [
+       16,
+       6,
+       3,
+       19
+      ],
+      "E01": [
+       0,
+       0,
+       0,
+       1
+      ],
+      "RFA": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "E14": [
+       0,
+       0,
+       0,
+       15
+      ]
+     }
+    }
+   }
+  },
+  "other": {
+   "base_artifact": "availability_base_rates_other_v1",
+   "k": 50.0,
+   "fit_rows": {
+    "bucket_next_game": 23453,
+    "roster_bucket_next_game": 78832
+   },
+   "metrics": {
+    "bucket_next_game": {
+     "model": {
+      "n": 6474,
+      "log_loss": 0.6933,
+      "brier": 0.3426
+     },
+     "status_only": {
+      "n": 6474,
+      "log_loss": 0.7423,
+      "brier": 0.3668
+     }
+    },
+    "roster_bucket_next_game": {
+     "model": {
+      "n": 19615,
+      "log_loss": 0.7333,
+      "brier": 0.3642
+     },
+     "global_only": {
+      "n": 19615,
+      "log_loss": 0.829,
+      "brier": 0.4125
+     }
+    }
+   },
+   "tables": {
+    "bucket_next_game": {
+     "ALL": {
+      "ALL": [
+       17240,
+       2156,
+       1769,
+       2288
+      ]
+     },
+     "report_status": {
+      "Questionable": [
+       5925,
+       548,
+       366,
+       473
+      ],
+      "NONE": [
+       9524,
+       401,
+       351,
+       560
+      ],
+      "Doubtful": [
+       402,
+       188,
+       106,
+       97
+      ],
+      "Out": [
+       1389,
+       1019,
+       946,
+       1158
+      ]
+     },
+     "report_status/practice_status": {
+      "Questionable|LP": [
+       3817,
+       346,
+       223,
+       266
+      ],
+      "Questionable|FP": [
+       1255,
+       64,
+       58,
+       99
+      ],
+      "NONE|FP": [
+       8226,
+       343,
+       258,
+       326
+      ],
+      "NONE|LP": [
+       1096,
+       42,
+       42,
+       58
+      ],
+      "Questionable|DNP": [
+       792,
+       133,
+       84,
+       104
+      ],
+      "NONE|DNP": [
+       202,
+       16,
+       51,
+       176
+      ],
+      "Doubtful|DNP": [
+       292,
+       141,
+       90,
+       76
+      ],
+      "Out|DNP": [
+       1245,
+       946,
+       915,
+       1117
+      ],
+      "Out|FP": [
+       13,
+       5,
+       3,
+       5
+      ],
+      "Doubtful|LP": [
+       105,
+       47,
+       15,
+       16
+      ],
+      "Out|LP": [
+       120,
+       66,
+       26,
+       33
+      ],
+      "Doubtful|FP": [
+       5,
+       0,
+       1,
+       5
+      ],
+      "Out|NONE": [
+       11,
+       2,
+       2,
+       3
+      ],
+      "Questionable|NONE": [
+       61,
+       5,
+       1,
+       4
+      ]
+     },
+     "report_status/practice_status/played_this_game": {
+      "Questionable|LP|True": [
+       2891,
+       139,
+       92,
+       136
+      ],
+      "Questionable|FP|True": [
+       1120,
+       36,
+       33,
+       57
+      ],
+      "NONE|FP|True": [
+       8059,
+       268,
+       204,
+       247
+      ],
+      "NONE|LP|True": [
+       1069,
+       39,
+       35,
+       34
+      ],
+      "Questionable|DNP|True": [
+       426,
+       18,
+       12,
+       24
+      ],
+      "NONE|DNP|True": [
+       186,
+       4,
+       7,
+       6
+      ],
+      "Doubtful|DNP|True": [
+       5,
+       1,
+       1,
+       1
+      ],
+      "Out|DNP|False": [
+       1245,
+       946,
+       915,
+       1117
+      ],
+      "NONE|FP|False": [
+       167,
+       75,
+       54,
+       79
+      ],
+      "Questionable|FP|False": [
+       135,
+       28,
+       25,
+       42
+      ],
+      "Questionable|LP|False": [
+       926,
+       207,
+       131,
+       130
+      ],
+      "Doubtful|DNP|False": [
+       287,
+       140,
+       89,
+       75
+      ],
+      "Out|FP|False": [
+       13,
+       5,
+       3,
+       5
+      ],
+      "Questionable|DNP|False": [
+       366,
+       115,
+       72,
+       80
+      ],
+      "Doubtful|LP|False": [
+       105,
+       47,
+       15,
+       16
+      ],
+      "Out|LP|False": [
+       120,
+       66,
+       26,
+       33
+      ],
+      "NONE|LP|False": [
+       27,
+       3,
+       7,
+       24
+      ],
+      "Doubtful|FP|False": [
+       5,
+       0,
+       1,
+       5
+      ],
+      "NONE|DNP|False": [
+       16,
+       12,
+       44,
+       170
+      ],
+      "Out|NONE|False": [
+       11,
+       2,
+       2,
+       3
+      ],
+      "Questionable|NONE|True": [
+       48,
+       2,
+       0,
+       2
+      ],
+      "Questionable|NONE|False": [
+       13,
+       3,
+       1,
+       2
+      ]
+     }
+    },
+    "roster_bucket_next_game": {
+     "ALL": {
+      "ALL": [
+       4274,
+       2982,
+       5691,
+       65885
+      ]
+     },
+     "roster_status": {
+      "RES": [
+       831,
+       638,
+       1268,
+       17931
+      ],
+      "CUT": [
+       110,
+       92,
+       254,
+       23299
+      ],
+      "DEV": [
+       1669,
+       1369,
+       2975,
+       20119
+      ],
+      "PUP": [
+       20,
+       21,
+       68,
+       500
+      ],
+      "NWT": [
+       0,
+       0,
+       0,
+       504
+      ],
+      "RSN": [
+       12,
+       13,
+       44,
+       507
+      ],
+      "SUS": [
+       53,
+       42,
+       77,
+       184
+      ],
+      "INA": [
+       1525,
+       786,
+       988,
+       1780
+      ],
+      "RET": [
+       0,
+       0,
+       0,
+       795
+      ],
+      "EXE": [
+       24,
+       9,
+       6,
+       39
+      ],
+      "E14": [
+       0,
+       0,
+       0,
+       11
+      ],
+      "TRC": [
+       0,
+       1,
+       0,
+       29
+      ],
+      "RSR": [
+       26,
+       11,
+       8,
+       19
+      ],
+      "UFA": [
+       1,
+       0,
+       2,
+       125
+      ],
+      "TRD": [
+       1,
+       0,
+       0,
+       29
+      ],
+      "TRT": [
+       1,
+       0,
+       0,
+       10
+      ],
+      "RFA": [
+       1,
+       0,
+       0,
+       3
+      ],
+      "E01": [
+       0,
+       0,
+       0,
+       1
+      ],
+      "UDF": [
+       0,
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  }
+ }
+}

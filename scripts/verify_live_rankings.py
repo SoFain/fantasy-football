@@ -3,7 +3,14 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
+from pathlib import Path
+import sys
 from urllib.request import urlopen
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.availability_feed import validate_dataset as validate_availability  # noqa: E402
+
+PUBLIC_PREFIX = 'https://storage.googleapis.com/fantasy-football-498121-public-rankings/'
 
 
 def verify_inseason(raw, entry):
@@ -69,6 +76,25 @@ def verify_inseason(raw, entry):
     return dict(model_version=data['model_version'],target_week=data['target_week'],sha256_verified=True,counts=counts,coverage_warnings=warnings)
 
 
+def verify_availability(raw, entry):
+    """Integrity and schema only. A carried-forward object is legitimately older than today,
+    so age is reported, never failed; an absent dataset is not a failure either."""
+    if not str(entry.get('url', '')).startswith(PUBLIC_PREFIX + 'v1/datasets/availability/'):
+        raise ValueError('Availability dataset url is outside the public bucket prefix')
+    if hashlib.sha256(raw).hexdigest() != entry['sha256']:
+        raise ValueError('Availability public SHA-256 mismatch')
+    if len(raw) != entry['bytes']:
+        raise ValueError('Availability byte count mismatch')
+    data = json.loads(raw)
+    validate_availability(data)
+    if data['generated_at'] != entry.get('source_generated_at'):
+        raise ValueError('Availability manifest timestamp disagrees with artifact')
+    generated = datetime.fromisoformat(data['generated_at'].replace('Z', '+00:00'))
+    age_hours = round((datetime.now(timezone.utc) - generated).total_seconds() / 3600, 1)
+    return dict(decision_date=data['decision_date'], week=data['week'], players=len(data['players']),
+                age_hours=age_hours, sha256_verified=True)
+
+
 def main():
     stamp = int(datetime.now(timezone.utc).timestamp())
     url = f'https://storage.googleapis.com/fantasy-football-498121-public-rankings/v1/manifest.json?verify={stamp}'
@@ -99,6 +125,11 @@ def main():
     if entry:=manifest.get('datasets',{}).get('inseason_rankings'):
         with urlopen(entry['url'],timeout=30) as response:
             summary['inseason_rankings']=verify_inseason(response.read(),entry)
+    if entry := manifest.get('datasets', {}).get('availability'):
+        with urlopen(entry['url'], timeout=30) as response:
+            summary['availability'] = verify_availability(response.read(), entry)
+    else:
+        summary['availability'] = 'absent: not published yet (once published, the publisher carries it forward); not a failure'
     print(json.dumps(summary, indent=2))
 
 

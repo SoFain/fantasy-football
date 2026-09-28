@@ -6,8 +6,9 @@
 #   07:15 detect-player-changes (Cloud Run)
 #   07:30 this task:
 #     1. run_daily_board_refresh.py --apply   (the runbook, fail-closed)
-#     2. publish_public_rankings.py --publish (carry-forward datasets)
-#     3. IONOS site import via run_remote_php
+#     2. availability decisions + feed dataset (non-fatal, context only)
+#     3. publish_public_rankings.py --publish (carry-forward datasets)
+#     4. IONOS site import via run_remote_php
 #
 # Refresh failures always retain the previous public release and fail the task.
 # Scheduled retries handle transient failures; never relabel old boards as fresh.
@@ -37,17 +38,34 @@ function Write-Log([string]$message) {
     ("{0} {1}" -f (Get-Date -Format 'o'), $message) | Add-Content -Path $log -Encoding utf8
 }
 
-function Invoke-Logged([string]$label, [string]$exe, [string]$argumentString, [string]$workDir) {
+function Invoke-Logged([string]$label, [string]$exe, [string]$argumentString, [string]$workDir, [int]$timeoutSeconds = 0) {
     Write-Log "start: $label"
     $out = [IO.Path]::GetTempFileName()
     $err = [IO.Path]::GetTempFileName()
-    $proc = Start-Process -FilePath $exe -ArgumentList $argumentString -WorkingDirectory $workDir `
-        -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+    if ($timeoutSeconds -gt 0) {
+        # Bounded step: a hung process is killed and reported as exit 124.
+        $proc = Start-Process -FilePath $exe -ArgumentList $argumentString -WorkingDirectory $workDir `
+            -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        $null = $proc.Handle  # keeps ExitCode readable after exit
+        if ($proc.WaitForExit($timeoutSeconds * 1000)) {
+            $exitCode = $proc.ExitCode
+        } else {
+            # The venv python.exe is a launcher with a child interpreter: kill the whole tree.
+            & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
+            $proc.WaitForExit(30000) | Out-Null
+            Write-Log ("timeout: {0} killed after {1}s" -f $label, $timeoutSeconds)
+            $exitCode = 124
+        }
+    } else {
+        $proc = Start-Process -FilePath $exe -ArgumentList $argumentString -WorkingDirectory $workDir `
+            -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        $exitCode = $proc.ExitCode
+    }
     Get-Content $out -ErrorAction SilentlyContinue | Add-Content -Path $log -Encoding utf8
     Get-Content $err -ErrorAction SilentlyContinue | Add-Content -Path $log -Encoding utf8
-    Remove-Item $out, $err -Force -Confirm:$false
-    Write-Log ("end: {0} exit={1}" -f $label, $proc.ExitCode)
-    return $proc.ExitCode
+    Remove-Item $out, $err -Force -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Log ("end: {0} exit={1}" -f $label, $exitCode)
+    return $exitCode
 }
 
 $season = (Get-Date).Year
@@ -77,13 +95,35 @@ if ($seasonComplete) {
     Write-Log 'Regular season complete; retaining the last in-season dataset while continuing core publication.'
 } elseif ($inseasonExit -ne 0) { Write-Log 'IN-SEASON VALIDATION FAILED; retaining previous release.'; exit 1 }
 
+# AI decision layer (docs/ai-decision-layer.md): availability decisions for every
+# currently injured player, then the `availability` feed dataset. Context only,
+# never a rank change, and never fatal: yesterday's artifacts are removed first,
+# the script writes both artifacts only after schema validation (entry last), and
+# when they are absent the upload loop skips the dataset and the publisher
+# carries the previous availability object forward. Bounded at 15 minutes.
+$availabilityArtifacts = @(
+    (Join-Path $branchRoot 'build\feeds\availability.json'),
+    (Join-Path $branchRoot 'build\feeds\availability.manifest-entry.json')
+)
+try {
+    Remove-Item -LiteralPath $availabilityArtifacts -Force -ErrorAction SilentlyContinue
+    $availabilityExit = Invoke-Logged 'availability-decisions' "$root\venv\Scripts\python.exe" `
+        ('"{0}\scripts\run_availability_decisions.py" --live' -f $root) $root 900
+    if ($availabilityExit -ne 0) {
+        Write-Log "AVAILABILITY DECISIONS EXIT $availabilityExit; non-fatal. The dataset is attached only if its validated artifacts exist."
+    }
+} catch {
+    Write-Log ("AVAILABILITY DECISIONS ERROR: {0}; non-fatal, the publisher carries the previous availability dataset forward." -f $_.Exception.Message)
+    Remove-Item -LiteralPath $availabilityArtifacts -Force -ErrorAction SilentlyContinue
+}
+
 # Stage 1b: the refresh emits fresh dataset artifacts (player situation, market
 # context). Upload each immutable object (content-addressed: a re-upload of
 # identical bytes fails the precondition harmlessly), then hand the manifest
 # entries to the publisher. Any artifact missing (gate-tripped day, Sleeper API
 # hiccup) is skipped and the publisher carries that dataset forward unchanged.
 $publisherArgs = ('"{0}\scripts\publish_public_rankings.py" --publish --gcloud-auth' -f $root)
-foreach ($datasetId in @('player_situation', 'market_context', 'inseason_rankings')) {
+foreach ($datasetId in @('player_situation', 'market_context', 'inseason_rankings', 'availability')) {
     if ($seasonComplete -and $datasetId -eq 'inseason_rankings') {
         Write-Log 'Skipping stale local in-season artifacts after season completion; public manifest carries the last dataset forward.'
         continue
@@ -109,6 +149,10 @@ foreach ($datasetId in @('player_situation', 'market_context', 'inseason_ranking
             Write-Log ('{0} dataset entry attached: {1}' -f $datasetId, $entry.object)
         } catch {
             Write-Log ('{0} dataset upload failed: {1}' -f $datasetId, $_.Exception.Message)
+            if ($datasetId -eq 'availability') {
+                Write-Log 'availability upload failure is non-fatal; the publisher carries the previous availability dataset forward.'
+                continue
+            }
             exit 1
         }
     } else {
@@ -140,18 +184,6 @@ $verifyExit = Invoke-Logged 'verify-public-rankings' "$root\venv\Scripts\python.
 if ($verifyExit -ne 0) {
     Write-Log 'PUBLIC VERIFICATION FAILED.'
     exit 1
-}
-# AI decision layer pilot (docs/ai-decision-layer.md): log-only availability
-# decisions. Runs after publication and verification, so it can never delay or
-# block a release, and any failure is logged without failing the chain.
-try {
-    $availabilityExit = Invoke-Logged 'availability-decisions' "$root\venv\Scripts\python.exe" `
-        ('"{0}\scripts\run_availability_decisions.py" --live' -f $root) $root
-    if ($availabilityExit -ne 0) {
-        Write-Log "AVAILABILITY DECISIONS FAILED (exit=$availabilityExit); non-fatal, rankings already published."
-    }
-} catch {
-    Write-Log ("AVAILABILITY DECISIONS ERROR: {0}; non-fatal, rankings already published." -f $_.Exception.Message)
 }
 Write-Log 'done: chain succeeded'
 exit 0

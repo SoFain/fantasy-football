@@ -24,6 +24,26 @@ from src.availability_labels import MISSED_BUCKETS
 
 MODEL_VERSION = "availability_base_rates_v1"
 ARTIFACT_PATH = Path(__file__).resolve().parents[1] / "docs" / "availability-base-rates-v1.json"
+# Every position that is not QB/RB/WR/TE (K, P, LS, offensive line, defense): same
+# estimator, chains, fit and holdout seasons, and history table as the skill artifact.
+OTHER_MODEL_VERSION = "availability_base_rates_other_v1"
+OTHER_ARTIFACT_PATH = Path(__file__).resolve().parents[1] / "docs" / "availability-base-rates-other-v1.json"
+# Games-missed distributions counted from the NEXT team game, for the lanes whose
+# target game has no official report yet (feed context only; not in the Jev state).
+NEXT_BUCKETS_VERSION = "availability_next_buckets_v1"
+NEXT_BUCKETS_PATH = Path(__file__).resolve().parents[1] / "docs" / "availability-next-buckets-v1.json"
+POPULATIONS: dict[str, dict[str, Any]] = {
+    "skill": {
+        "model_version": MODEL_VERSION,
+        "path": ARTIFACT_PATH,
+        "population": "QB/RB/WR/TE, REG, official report entry, excluded_from_fit = FALSE",
+    },
+    "other": {
+        "model_version": OTHER_MODEL_VERSION,
+        "path": OTHER_ARTIFACT_PATH,
+        "population": "every position except QB/RB/WR/TE, REG, official report entry, excluded_from_fit = FALSE",
+    },
+}
 
 PLAY_CHAIN: tuple[tuple[str, ...], ...] = (
     (),
@@ -137,14 +157,36 @@ def load_artifact(path: Path = ARTIFACT_PATH) -> dict[str, Any]:
 class BaseRateModel:
     """Read-only predictor over a saved artifact."""
 
-    def __init__(self, artifact: dict[str, Any]):
+    def __init__(self, artifact: dict[str, Any], next_buckets: dict[str, Any] | None = None):
         self.artifact = artifact
         self.version = artifact["model_version"]
         self.k = float(artifact["k"])
+        self.next_buckets = next_buckets
 
     @classmethod
     def load(cls, path: Path = ARTIFACT_PATH) -> "BaseRateModel":
         return cls(load_artifact(path))
+
+    @classmethod
+    def load_population(cls, population: str) -> "BaseRateModel":
+        """Population artifact plus its next-game bucket lanes."""
+        spec = POPULATIONS[population]
+        next_artifact = load_artifact(NEXT_BUCKETS_PATH)
+        lanes = next_artifact["populations"][population]
+        if lanes["base_artifact"] != spec["model_version"]:
+            raise ValueError(f"{NEXT_BUCKETS_PATH.name} was fit against {lanes['base_artifact']}, not {spec['model_version']}")
+        return cls(load_artifact(spec["path"]), {"version": next_artifact["model_version"], "k": float(lanes["k"]), **lanes["tables"]})
+
+    def buckets_next_game(self, features: dict) -> dict[str, float]:
+        """Missed-bucket distribution from the next game, given this week's report and whether he played."""
+        nb = self.next_buckets
+        depth = None if features.get("played_this_game") is not None else len(NEXT_CHAIN) - 2
+        return dict(zip(MISSED_BUCKETS, predict_buckets(nb["bucket_next_game"], NEXT_CHAIN, nb["k"], features, depth)))
+
+    def roster_buckets_next_game(self, roster_status: str) -> dict[str, float]:
+        nb = self.next_buckets
+        dist = predict_buckets(nb["roster_bucket_next_game"], ROSTER_CHAIN, nb["k"], {"roster_status": roster_status})
+        return dict(zip(MISSED_BUCKETS, dist))
 
     def play_this_game(self, features: dict) -> float:
         return predict_binary(self.artifact["tables"]["play_this_game"], PLAY_CHAIN, self.k, features)

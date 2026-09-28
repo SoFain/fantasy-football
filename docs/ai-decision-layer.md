@@ -1,6 +1,6 @@
 # AI Decision Layer (Jev)
 
-Status: Pilot 1 (availability) merged 2026-09-28 and running daily as a non-fatal step after publication in `scripts/daily_pigskin_chain.ps1`. Log-only and context-only: nothing here changes ranks, boards, or the public feed, and a failure never fails the chain.
+Status: Pilot 1 (availability) runs daily in `scripts/daily_pigskin_chain.ps1` for every currently injured player at every position, and publishes the context-only `availability` feed dataset (owner direction 2026-09-28). It runs before the dataset upload and publish steps, non-fatal and bounded: nothing here changes ranks, boards, or the four ranking profiles, and a failure never fails the chain (the publisher carries the previous availability object forward).
 
 ## Idea
 
@@ -48,6 +48,20 @@ Labels: `played_this_game`, `played_next_game`, `games_missed_until_return` (tea
 
 Hierarchically smoothed empirical rates: each cell is `(hits + k * parent) / (n + k)` down the chain global, status, status x practice, status x practice x previous state, then x body-part group. The bucket distribution uses the same chain with Dirichlet smoothing. `k = 50`, chosen by validation log loss (fit 2016 to 2021, validate 2022 to 2023), then refit on 2016 to 2023 (11,636 rows, QB/RB/WR/TE, not excluded). The artifact stores raw counts, so every prior can be recomputed by hand. Extra lanes: `play_next_game` (this week's report plus whether he played this game) and `roster_next_game` (weekly roster status, not on the report).
 
+**Other positions** (`docs/availability-base-rates-other-v1.json`, `availability_base_rates_other_v1`): every position except QB/RB/WR/TE (K, P, LS, offensive line, defense), fit by the same code (`scripts/fit_availability_base_rates.py --population other`) on the same history table, chains, seasons, and k grid; k = 50 again won on validation. 25,600 fit rows. The skill artifact is unchanged. Holdout 2024 to 2025 (7,099 rows):
+
+| Target | Rows | Model Brier | Model log loss | Status-only Brier | Status-only log loss |
+|---|---:|---:|---:|---:|---:|
+| Played this game | 7,099 | 0.0748 | 0.2414 | 0.0837 | 0.2739 |
+| Played, designated O/D/Q only | 3,711 | 0.1079 | 0.3154 | 0.1114 | 0.3247 |
+| Played, Questionable only | 1,861 | 0.2146 | 0.6246 | 0.2214 | 0.6348 |
+| Missed bucket (4 classes) | 6,904 | 0.3192 | 0.5960 | 0.3411 | 0.6421 |
+| Played next game | 6,656 | 0.1359 | 0.4307 | 0.1525 | 0.4774 |
+
+Calibration, played this game (predicted vs observed): 0.001 vs 0.001 (n 1,850); 0.19 vs 0.21 (24); 0.33 vs 0.25 (126); 0.53 vs 0.58 (490); 0.71 vs 0.68 (838); 0.89 vs 0.88 (1,423); 0.98 vs 0.98 (2,348).
+
+**Next-game missed buckets** (`docs/availability-next-buckets-v1.json`, `availability_next_buckets_v1`, `scripts/fit_availability_next_buckets.py`): the feed needs a games-missed distribution for every player, but the v1 bucket lane exists only when the target game has an official report. Two lanes counted from the team's next game fill the gap for both populations, with the same estimator, seasons, exclusions, and each population's k: `bucket_next_game` (this week's report plus whether he played, NEXT_CHAIN) and `roster_bucket_next_game` (weekly roster status while not on the report, status not ACT). The outcome is `game_outcome` over later team games. They feed only the public `base_rate.missed_bucket`; they are not in the Jev state. Holdout log loss, model vs status-only (or global): skill 0.7347 vs 0.7842 (report lane, 2,807 rows) and 0.7051 vs 0.7621 (roster lane, 9,697); other 0.6933 vs 0.7423 (6,474) and 0.7333 vs 0.8290 (19,615).
+
 Holdout 2024 to 2025 (3,104 rows) against the status-only baseline (same estimator, status level only):
 
 | Target | Rows | Model Brier | Model log loss | Status-only Brier | Status-only log loss |
@@ -89,6 +103,16 @@ Each row also stores the prior lane, prior play probability and bucket distribut
 
 `combined_play_prob` is a fixed a priori rule used only to measure what the text adds: when the availability answer is blank or no item was judged relevant, the prior stands; otherwise will_play and will_miss mass is taken as stated and game_time_decision mass is handed back to the prior. It was not fitted.
 
+### Population (widened 2026-09-28)
+
+Live: every Sleeper-injured player with a team in the stored Sleeper snapshot (all positions it holds: QB, RB, WR, TE, K, DEF; `src/ingest_news.py` stores only those, and DEF never carries an injury and has no GSIS id), plus, for positions the snapshot does not store (offensive line, defense, P, LS), players on their team's official report for its last or next game as Out, Doubtful, or Questionable, or on the latest weekly roster's injury reserve lists (`status_description_abbr` R01 and R48 IR, R04 PUP, R05 NFI), provided that roster week is not older than the team's last game and he is still on that team. A reserve list wins as the shown designation; an official entry without a game designation and no reserve list means the designation cleared and the player is skipped. Those players carry `designation_source` `official_report` or `team_roster`, their state says Sleeper data is not collected for the position, and their prior comes from the other-positions artifact (lane descriptions say so). Skill-player states are byte-identical to before. Retro uses official Out/Doubtful/Questionable entries at every position. Sleeper GSIS ids with stray whitespace are now stripped before any join (six WRs had been missing their report and snap history).
+
+These official sources refresh only when the weekly nflverse backfill (injuries, rosters) runs; between loads the other-position population shrinks to what the last loaded week still supports.
+
+### Live run, 2026-09-28 01:00 ET (widened)
+
+377 cases (121 Sleeper, 189 team roster, 67 official report): WR 52, LB 60, DB 48, OL 42, DL 36, TE 30, RB 27, S 18, CB 14, QB 12, DT 11, DE 9, G 8, T 6, P 2, C 1, LS 1. 103 had candidate text (39 skill, 64 other). The 257 new other-position decisions cost 312,418 input tokens ($0.0131); unchanged skill states were skipped. Other positions blank: availability 63 of 257, absence 97, trend 203. 88 other-position players have no Sleeper id in the weekly roster; they are decided and logged but left out of the feed.
+
 ### Live run, 2026-09-27 23:30 ET
 
 120 Sleeper-injured QB/RB/WR/TE with a team (lanes: roster_status 80, report_last_game 35, report_this_game 3 for the Monday night teams, sleeper_designation_only 2). 39 had candidate text, 30 at least one relevant item. Blank: availability 75, absence 14, trend 90. One player skipped (Sleeper `NA`, no roster status).
@@ -129,31 +153,32 @@ Remove-Item Env:ALLOW_NFLVERSE_HISTORICAL_BACKFILL
 .\venv\Scripts\python.exe scripts\evaluate_availability_decisions.py --run-mode live
 .\venv\Scripts\python.exe scripts\evaluate_availability_decisions.py --run-mode retro
 
-# Rebuild the base-rate artifact (read-only on BigQuery; bump the version for any change)
+# Rebuild the base-rate artifacts (read-only on BigQuery; bump the version for any change)
 .\venv\Scripts\python.exe scripts\fit_availability_base_rates.py
+.\venv\Scripts\python.exe scripts\fit_availability_base_rates.py --population other
+.\venv\Scripts\python.exe scripts\fit_availability_next_buckets.py
 
 # Retro reconstruction
 .\venv\Scripts\python.exe scripts\run_availability_decisions.py --retro-season 2026 --weeks 1-3
 
 # Tests
-.\venv\Scripts\python.exe -m unittest tests.test_availability_pilot
+.\venv\Scripts\python.exe -m unittest tests.test_availability_pilot tests.test_availability_feed
 ```
 
 The TypeSafe key comes from `TYPESAFE_API_KEY`, else `E:\cbs-league-history\.secrets\typesafe-ai-api.txt`. It is never printed or logged.
 
-### Chain step (installed 2026-09-28 by owner approval, non-fatal, wrapped in try/catch)
+### Chain step (moved 2026-09-28 before the dataset upload and publish; non-fatal, try/catch, 15-minute bound)
 
-Insert in `scripts/daily_pigskin_chain.ps1` after `verify-public-rankings` succeeds and before `done: chain succeeded`, non-fatal:
+Order in `scripts/daily_pigskin_chain.ps1`: current-season-stats, daily-board-refresh, current-gng-scoring, inseason-ranking-horizons, **availability-decisions**, dataset uploads (`player_situation`, `market_context`, `inseason_rankings`, `availability`), publish-public-rankings, ionos-site-import, verify-public-rankings.
 
-```powershell
-$availabilityExit = Invoke-Logged 'availability-decisions' "$root\venv\Scripts\python.exe" `
-    ('"{0}\scripts\run_availability_decisions.py" --live' -f $root) $root
-if ($availabilityExit -ne 0) {
-    Write-Log "AVAILABILITY DECISIONS FAILED (exit=$availabilityExit); non-fatal, rankings already published."
-}
-```
+- Before the step the chain deletes `build\feeds\availability.json` and its manifest entry, so a failed run can never upload yesterday's object.
+- The step runs through `Invoke-Logged` with a 900-second bound; a hung run has its whole process tree killed and reports exit 124. Any exit code or exception is logged and the chain continues.
+- The script writes the two artifacts only after the dataset passes `validate_dataset` (object first, entry last, each by atomic rename). The upload loop attaches the dataset when both exist. If they are absent, or the upload and its SHA-256 readback fail, availability alone is skipped (the other datasets still fail closed) and the publisher carries the previous `datasets.availability` entry forward from the live manifest. The four ranking profiles and every other dataset proceed exactly as before.
+- A run with a few failed Jev calls still writes the dataset: those players carry blank text and a caveat, the exit code is 1 for the log, and the 12:30 leg retries them. Unchanged states cost nothing; changed ones replace the morning row.
 
-It runs after publication and import, so it cannot delay or block a release, and it never exits the chain nonzero. The 12:30 leg re-runs it; unchanged states cost nothing and changed ones replace the morning row.
+### Feed dataset `availability` (`src/availability_feed.py`, schema `availability-1.0`)
+
+Built at the end of every full `--live` run (never with `--limit` or `--dry-run`) from today's stored live rows for the current population; a stored row is used only when its input hash equals today's state. Written to `build/feeds/availability.json` plus `availability.manifest-entry.json`; the object is content-addressed at `v1/datasets/availability/sha256-<digest>.json`. The schema is fixed (the site importer validates strictly and rejects the whole object on any violation); `docs/public-rankings-json-feed.md` documents it. One field was added: `designation_source`. Rules enforced in code and tests: every player has a Sleeper id string and a full `base_rate` object (four-key `missed_bucket`, from the lane's own bucket prior or the next-game bucket lanes); `text` always has all eight keys and its judgments and confidences are null when Jev was below threshold or no item was judged relevant; probabilities have 3 decimals; at most 3 relevant sources, newest first; players sorted by Sleeper team code then name; `week` is the week of the league's next kickoff (a game in its first four hours still counts). Players without a Sleeper id are omitted and counted in the entry warning. 2026-09-28 local build: 289 players, 266,924 bytes.
 
 ### Limitations and open items
 
@@ -163,7 +188,9 @@ It runs after publication and import, so it cannot delay or block a release, and
 - Name matching can attach one player's items to a namesake (two players named Marquise Brown in week 3); the relevance noul rejected both.
 - The live prior for a player whose last game has no snap counts yet drops one feature level.
 - `sleeper_designation_only` and the roster mappings approximate the official-report lanes.
-- Nothing is published in the feed yet; schema placement waits for backtested value.
+- The feed dataset is context only. Its text fields have no backtested value yet; consumers must present them as Jev's reading of the news, never as a rank input.
+- Defensive and offensive-line players come from official sources, not Sleeper: `src/ingest_news.py` keeps only fantasy positions, so true Sleeper IDP designations need that Cloud Run ingest to store every position (a separate change). 88 of 257 such players had no Sleeper id on 2026-09-28.
+- Widening gave about 3.1 times the skill-only population (377 vs 120), not five: the official sources lag the week, and many reserve-list players are long-term IR with no text.
 
 ## Prerequisites
 

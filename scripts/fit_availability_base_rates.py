@@ -1,18 +1,22 @@
 """Fit and evaluate the availability base-rate model (code only, no language model).
 
-Reads availability_labels_hist (QB/RB/WR/TE, REG, rows not excluded for team
-change, release, or non-injury reasons). Chooses the smoothing strength k on a
-2022-2023 validation split of a 2016-2021 fit, refits on 2016-2023, and
-evaluates on the 2024-2025 holdout against a status-only baseline.
+Reads availability_labels_hist (REG, rows not excluded for team change,
+release, or non-injury reasons) for one population: QB/RB/WR/TE ("skill", the
+v1 artifact) or every other position ("other": K, P, LS, offensive line, and
+defense). Chooses the smoothing strength k on a 2022-2023 validation split of a
+2016-2021 fit, refits on 2016-2023, and evaluates on the 2024-2025 holdout
+against a status-only baseline. Both populations use the same code and history.
 
-Writes the versioned artifact docs/availability-base-rates-v1.json (counts,
-k, and holdout metrics). Read-only on BigQuery.
+Writes the versioned artifact for that population (counts, k, and holdout
+metrics). Read-only on BigQuery. Refitting either population is a new version.
 
-  python scripts/fit_availability_base_rates.py
+  python scripts/fit_availability_base_rates.py                      # skill, docs/availability-base-rates-v1.json
+  python scripts/fit_availability_base_rates.py --population other   # docs/availability-base-rates-other-v1.json
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from datetime import datetime, timezone
@@ -22,8 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.availability_base_rates import (  # noqa: E402
-    ARTIFACT_PATH,
-    MODEL_VERSION,
+    POPULATIONS,
     NEXT_CHAIN,
     PLAY_CHAIN,
     ROSTER_CHAIN,
@@ -38,7 +41,7 @@ from src.availability_base_rates import (  # noqa: E402
     predict_buckets,
 )
 from src.availability_bq import client, query, table_id  # noqa: E402
-from src.availability_labels import MISSED_BUCKETS  # noqa: E402
+from src.availability_labels import MISSED_BUCKETS, SKILL_POSITIONS  # noqa: E402
 
 K_GRID = (1, 2, 5, 10, 20, 50, 100, 200)
 FIT_SEASONS = (2016, 2023)
@@ -69,7 +72,9 @@ def bucket_eval(tables: dict, chain, k: float, rows: list[dict], depth: int | No
     return {"n": len(scored), **multiclass_scores(dists, labels)}
 
 
-def roster_counts(bq, bounds: tuple[int, int]) -> dict:
+def roster_counts(bq, bounds: tuple[int, int], population: str) -> dict:
+    skill_list = ",".join(f"'{p}'" for p in SKILL_POSITIONS)
+    position_filter = f"position IN ({skill_list})" if population == "skill" else f"position NOT IN ({skill_list})"
     rows = query(
         bq,
         f"""
@@ -80,7 +85,7 @@ WITH tg AS (
 r AS (
   SELECT DISTINCT gsis_id, season, week, team, status
   FROM `{table_id('raw_nflverse_rosters_weekly')}`
-  WHERE season BETWEEN {bounds[0]} AND {bounds[1]} AND position IN ('QB','RB','WR','TE') AND gsis_id IS NOT NULL
+  WHERE season BETWEEN {bounds[0]} AND {bounds[1]} AND {position_filter} AND gsis_id IS NOT NULL
 ),
 reported AS (
   SELECT DISTINCT gsis_id, season, week FROM `{table_id('raw_nflverse_injuries')}` WHERE gsis_id IS NOT NULL
@@ -105,7 +110,11 @@ GROUP BY 1
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--population", choices=sorted(POPULATIONS), default="skill")
+    population = parser.parse_args(argv).population
+    spec = POPULATIONS[population]
     bq = client()
     rows = query(
         bq,
@@ -113,7 +122,7 @@ def main() -> int:
 SELECT season, week, report_status, practice_status, prev_week_state, body_part_group, position_group,
   played_this_game, played_next_game, missed_bucket
 FROM `{table_id('availability_labels_hist')}`
-WHERE position_group != 'OTHER' AND NOT excluded_from_fit AND season BETWEEN 2016 AND 2025
+WHERE position_group {"!=" if population == "skill" else "="} 'OTHER' AND NOT excluded_from_fit AND season BETWEEN 2016 AND 2025
 """,
     )
     for r in rows:
@@ -135,7 +144,7 @@ WHERE position_group != 'OTHER' AND NOT excluded_from_fit AND season BETWEEN 201
         "play_this_game": count_binary(fit_rows, PLAY_CHAIN, "played_this_game"),
         "bucket_this_game": count_buckets(fit_rows, PLAY_CHAIN),
         "play_next_game": count_binary(fit_rows, NEXT_CHAIN, "played_next_game"),
-        "roster_next_game": roster_counts(bq, FIT_SEASONS),
+        "roster_next_game": roster_counts(bq, FIT_SEASONS, population),
     }
 
     # 3. Holdout evaluation against the status-only baseline.
@@ -170,10 +179,10 @@ WHERE position_group != 'OTHER' AND NOT excluded_from_fit AND season BETWEEN 201
                 side.pop("calibration", None)
 
     artifact = {
-        "model_version": MODEL_VERSION,
+        "model_version": spec["model_version"],
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source_table": "fantasy_football_brain.availability_labels_hist",
-        "population": "QB/RB/WR/TE, REG, official report entry, excluded_from_fit = FALSE",
+        "population": spec["population"],
         "fit_seasons": list(FIT_SEASONS),
         "k_selected_on": {"fit": [FIT_SEASONS[0], VALIDATION_SEASONS[0] - 1], "validation": list(VALIDATION_SEASONS)},
         "holdout_seasons": list(HOLDOUT_SEASONS),
@@ -191,7 +200,7 @@ WHERE position_group != 'OTHER' AND NOT excluded_from_fit AND season BETWEEN 201
         "metrics": metrics,
         "tables": tables,
     }
-    ARTIFACT_PATH.write_text(json.dumps(artifact, indent=1, sort_keys=False) + "\n", encoding="utf-8")
+    spec["path"].write_text(json.dumps(artifact, indent=1, sort_keys=False) + "\n", encoding="utf-8")
     print(json.dumps({key: artifact[key] for key in artifact if key != "tables"}, indent=1))
     return 0
 

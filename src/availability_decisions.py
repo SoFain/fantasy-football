@@ -123,6 +123,14 @@ class Case:
     designation: str
     practice_status: str
     body_part: str | None
+    # Feed and provenance fields; none of them enters the Jev state for a skill player.
+    opponent: str = ""
+    sleeper_collected: bool = True  # False for positions the Sleeper snapshot does not store
+    designation_source: str = "sleeper"  # sleeper, official_report, or team_roster
+    base_rate_version: str = ""
+    # Missed-bucket distribution from the next game for the public feed. Equals prior_buckets
+    # when that lane has one; otherwise it comes from the next-game bucket lanes. Never in the state.
+    feed_buckets: dict[str, float] | None = None
 
 
 def build_state(case: Case) -> dict[str, Any]:
@@ -133,7 +141,9 @@ def build_state(case: Case) -> dict[str, Any]:
         "note": case.sleeper_note or "none",
         "practice_participation": case.sleeper_practice or "not listed",
     }
-    if case.sleeper_listed_since is not None:
+    if not case.sleeper_collected:
+        sleeper = {"availability": "Sleeper data is not collected for this position."}
+    elif case.sleeper_listed_since is not None:
         since_days = days_between(case.sleeper_listed_since, case.as_of)
         sleeper["listed_with_this_designation_since"] = (
             f"{long_date(case.sleeper_listed_since)} ({since_days} days before today)"
