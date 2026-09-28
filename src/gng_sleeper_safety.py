@@ -1,7 +1,8 @@
 """Deterministic Sleeper context layer for current GNG candidate boards only."""
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Mapping
 
 
 ACTIVE_STATUSES = {"Active", "ACT"}
@@ -14,6 +15,27 @@ def is_rostered_injury_review_only(row: dict[str, Any]) -> bool:
         and bool(row.get("sleeper_team"))
         and row.get("sleeper_status") == "Inactive"
         and bool(row.get("sleeper_injury_status"))
+    )
+
+
+def is_owner_approved_injured_starter(row: dict[str, Any], decisions: Mapping[tuple[str, str], dict[str, Any]]) -> bool:
+    """Return whether a hard review is only an injured starter's temporary depth-chart drop."""
+    decision = decisions.get((row.get("position"), row.get("player_name")))
+    if decision is None:
+        return False
+    try:
+        flags = json.loads(row.get("sleeper_review_flags_json") or "[]")
+    except (TypeError, ValueError):
+        return False
+    depth_order = row.get("sleeper_depth_chart_order")
+    return (
+        row.get("sleeper_active") is True
+        and row.get("sleeper_status") in ACTIVE_STATUSES
+        and row.get("sleeper_team") == decision["team"]
+        and row.get("sleeper_injury_status") in decision["injury_statuses"]
+        and isinstance(depth_order, int)
+        and 1 < depth_order <= decision["max_depth_chart_order"]
+        and sorted(flags) == sorted(decision["review_flags"])
     )
 
 

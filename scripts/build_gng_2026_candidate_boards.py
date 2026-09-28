@@ -13,8 +13,8 @@ from google.cloud import bigquery
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.run_gng_advanced_hypotheses import weighted_average
 from scripts.run_gng_position_candidate_expansion import percent_ranks
-from src.ranking_owner_decisions import GNG_WATCHLIST_NAMES
-from src.gng_sleeper_safety import is_rostered_injury_review_only
+from src.ranking_owner_decisions import GNG_INJURED_STARTER_HARD_REVIEW_DECISIONS, GNG_WATCHLIST_NAMES
+from src.gng_sleeper_safety import is_owner_approved_injured_starter, is_rostered_injury_review_only
 
 
 FORMULAS = {
@@ -138,6 +138,7 @@ WHERE is_active AND scoring_profile_id='gng_keeper' AND position IN ('QB','RB','
             row["sleeper_hard_review"]=(
                 row.get("sleeper_hard_review") is not False
                 and not is_rostered_injury_review_only(row)
+                and not is_owner_approved_injured_starter(row, GNG_INJURED_STARTER_HARD_REVIEW_DECISIONS)
             )
             row["sleeper_review_flags_json"]=row.get("sleeper_review_flags_json") or '["SLEEPER_CONTEXT_MISSING"]'
             scored.append(row)

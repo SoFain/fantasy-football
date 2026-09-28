@@ -54,3 +54,23 @@ COVERAGE_GATE_REVIEW_ONLY_DECISIONS = {
         "evidence_checked_at": "2026-09-27",
     },
 }
+
+# Sleeper can move an injured starting QB down the depth chart while he is out,
+# which the shared safety view reports as a backup-role hard review. Each GNG
+# exception covers only that combination and expires when the injury tag
+# clears (a healthy QB2 or QB3 is a real backup), he moves to IR or another
+# team, his depth falls further, or any other review flag appears.
+GNG_INJURED_STARTER_HARD_REVIEW_DECISIONS = {
+    ("QB", "Caleb Williams"): {
+        "team": "CHI",
+        "injury_statuses": ("Out", "Doubtful", "Questionable"),
+        "max_depth_chart_order": 3,
+        "review_flags": ("QB_BACKUP_ROLE_REVIEW", "INJURY_UNCERTAIN"),
+        "reason": (
+            "Caleb Williams is Chicago's starting quarterback. Sleeper lists him Active with an Out "
+            "injury tag and moved him to CHI QB depth order 3 while he is out. The GNG board keeps "
+            "him ranked and discounts him through the availability multiplier."
+        ),
+        "evidence_checked_at": "2026-09-27",
+    },
+}

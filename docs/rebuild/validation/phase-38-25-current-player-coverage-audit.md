@@ -11,7 +11,7 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | Profile | Position | Rows | Expected | Result |
 |---|---|---|---|---|
 | standard | QB | 44 | 45 | FAIL |
-| standard | RB | 84 | 85 | FAIL |
+| standard | RB | 85 | 85 | PASS |
 | standard | WR | 100 | 100 | PASS |
 | standard | TE | 35 | 35 | PASS |
 | ppr | QB | 44 | 45 | FAIL |
@@ -23,8 +23,8 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | half_ppr | WR | 100 | 100 | PASS |
 | half_ppr | TE | 35 | 35 | PASS |
 
-- Live Sleeper fetch: `2026-09-27T23:27:11.972634+00:00`.
-- BigQuery Sleeper snapshot: `2026-09-27 11:01:42.686084+00:00` (12 hours old).
+- Live Sleeper fetch: `2026-09-28T00:21:06.334046+00:00`.
+- BigQuery Sleeper snapshot: `2026-09-27 11:01:42.686084+00:00` (13 hours old).
 - BigQuery 72-hour safety status: `CURRENT`.
 - PPR versus Half-PPR presence mismatches: `0`.
 - Depth-order-1 current players missing at least one redraft board: `16`.
@@ -43,11 +43,11 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | Player | Pos | Team | Exp | Standard | PPR | Half | GNG | Market Pos | PPR Candidate | Trace |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Jeremiyah Love | RB | ARI | 0 | missing | missing | missing | 5 | 4 | n/a | ROOKIE_SYSTEM_REQUIRED |
-| Kenyon Sadiq | TE | NYJ | 0 | missing | missing | missing | 9 | 9 | n/a | ROOKIE_SYSTEM_REQUIRED |
+| Kenyon Sadiq | TE | NYJ | 0 | missing | missing | missing | 10 | 9 | n/a | ROOKIE_SYSTEM_REQUIRED |
 | Carnell Tate | WR | TEN | 0 | missing | missing | missing | 14 | 13 | n/a | ROOKIE_SYSTEM_REQUIRED |
 | Jadarian Price | RB | SEA | 0 | missing | missing | missing | 19 | 17 | n/a | ROOKIE_SYSTEM_REQUIRED |
-| Isaiah Likely | TE | NYG | 4 | missing | missing | missing | 34 | 11 | 39 | POSITIONAL_PROMOTION_OR_BOARD_CUTOFF |
-| Denzel Boston | WR | CLE | 0 | missing | missing | missing | 49 | 35 | n/a | ROOKIE_SYSTEM_REQUIRED |
+| Isaiah Likely | TE | NYG | 4 | missing | missing | missing | 35 | 11 | 39 | POSITIONAL_PROMOTION_OR_BOARD_CUTOFF |
+| Denzel Boston | WR | CLE | 0 | missing | missing | missing | 39 | 35 | n/a | ROOKIE_SYSTEM_REQUIRED |
 
 ## PPR And Half-PPR Presence Differences
 
