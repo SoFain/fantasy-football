@@ -1,0 +1,4407 @@
+{
+ "model_version": "availability_base_rates_v1",
+ "created_at": "2026-09-28T03:34:00+00:00",
+ "source_table": "fantasy_football_brain.availability_labels_hist",
+ "population": "QB/RB/WR/TE, REG, official report entry, excluded_from_fit = FALSE",
+ "fit_seasons": [
+  2016,
+  2023
+ ],
+ "k_selected_on": {
+  "fit": [
+   2016,
+   2021
+  ],
+  "validation": [
+   2022,
+   2023
+  ]
+ },
+ "holdout_seasons": [
+  2024,
+  2025
+ ],
+ "k": 50,
+ "estimator": "cell = (hits + k * parent) / (n + k); global level uses a (1, 1) prior",
+ "chains": {
+  "play_this_game": [
+   [],
+   [
+    "report_status"
+   ],
+   [
+    "report_status",
+    "practice_status"
+   ],
+   [
+    "report_status",
+    "practice_status",
+    "prev_week_state"
+   ],
+   [
+    "report_status",
+    "practice_status",
+    "prev_week_state",
+    "body_part_group"
+   ]
+  ],
+  "bucket_this_game": [
+   [],
+   [
+    "report_status"
+   ],
+   [
+    "report_status",
+    "practice_status"
+   ],
+   [
+    "report_status",
+    "practice_status",
+    "prev_week_state"
+   ],
+   [
+    "report_status",
+    "practice_status",
+    "prev_week_state",
+    "body_part_group"
+   ]
+  ],
+  "play_next_game": [
+   [],
+   [
+    "report_status"
+   ],
+   [
+    "report_status",
+    "practice_status"
+   ],
+   [
+    "report_status",
+    "practice_status",
+    "played_this_game"
+   ]
+  ],
+  "roster_next_game": [
+   [],
+   [
+    "roster_status"
+   ]
+  ]
+ },
+ "buckets": [
+  "0",
+  "1",
+  "2_4",
+  "5_plus_or_season"
+ ],
+ "fit_rows": 11636,
+ "holdout_rows": 3104,
+ "metrics": {
+  "k_validation_log_loss": {
+   "1": 0.30453,
+   "2": 0.30109,
+   "5": 0.29746,
+   "10": 0.29539,
+   "20": 0.29393,
+   "50": 0.2931,
+   "100": 0.29389,
+   "200": 0.29742
+  },
+  "play_this_game": {
+   "model": {
+    "n": 3104,
+    "brier": 0.08027,
+    "log_loss": 0.25581,
+    "calibration": [
+     {
+      "bin": "0.00-0.05",
+      "n": 777,
+      "mean_predicted": 0.0028,
+      "observed_rate": 0.0
+     },
+     {
+      "bin": "0.05-0.20",
+      "n": 6,
+      "mean_predicted": 0.0646,
+      "observed_rate": 0.0
+     },
+     {
+      "bin": "0.20-0.40",
+      "n": 85,
+      "mean_predicted": 0.3223,
+      "observed_rate": 0.3176
+     },
+     {
+      "bin": "0.40-0.60",
+      "n": 211,
+      "mean_predicted": 0.5573,
+      "observed_rate": 0.4929
+     },
+     {
+      "bin": "0.60-0.80",
+      "n": 339,
+      "mean_predicted": 0.7192,
+      "observed_rate": 0.6726
+     },
+     {
+      "bin": "0.80-0.95",
+      "n": 599,
+      "mean_predicted": 0.8706,
+      "observed_rate": 0.8581
+     },
+     {
+      "bin": "0.95-1.00",
+      "n": 1087,
+      "mean_predicted": 0.9744,
+      "observed_rate": 0.9696
+     }
+    ]
+   },
+   "status_only": {
+    "n": 3104,
+    "brier": 0.09178,
+    "log_loss": 0.29943,
+    "calibration": [
+     {
+      "bin": "0.00-0.05",
+      "n": 697,
+      "mean_predicted": 0.0135,
+      "observed_rate": 0.0
+     },
+     {
+      "bin": "0.05-0.20",
+      "n": 86,
+      "mean_predicted": 0.0818,
+      "observed_rate": 0.0
+     },
+     {
+      "bin": "0.60-0.80",
+      "n": 749,
+      "mean_predicted": 0.6784,
+      "observed_rate": 0.6288
+     },
+     {
+      "bin": "0.80-0.95",
+      "n": 1572,
+      "mean_predicted": 0.9194,
+      "observed_rate": 0.9262
+     }
+    ]
+   }
+  },
+  "play_this_game_questionable_only": {
+   "model": {
+    "n": 749,
+    "brier": 0.22315,
+    "log_loss": 0.64008
+   },
+   "status_only": {
+    "n": 749,
+    "brier": 0.23586,
+    "log_loss": 0.66507
+   }
+  },
+  "play_this_game_with_designation": {
+   "model": {
+    "n": 1532,
+    "brier": 0.10914,
+    "log_loss": 0.31462
+   },
+   "status_only": {
+    "n": 1532,
+    "brier": 0.11577,
+    "log_loss": 0.33612
+   }
+  },
+  "bucket_this_game": {
+   "model": {
+    "n": 3004,
+    "log_loss": 0.6307,
+    "brier": 0.3331
+   },
+   "status_only": {
+    "n": 3004,
+    "log_loss": 0.675,
+    "brier": 0.3531
+   }
+  },
+  "play_next_game": {
+   "model": {
+    "n": 2892,
+    "brier": 0.14515,
+    "log_loss": 0.45458
+   },
+   "status_only": {
+    "n": 2892,
+    "brier": 0.16431,
+    "log_loss": 0.50531
+   }
+  }
+ },
+ "tables": {
+  "play_this_game": {
+   "ALL": {
+    "ALL": [
+     11636,
+     7337
+    ]
+   },
+   "report_status": {
+    "Questionable": [
+     3478,
+     2362
+    ],
+    "NONE": [
+     5388,
+     4968
+    ],
+    "Doubtful": [
+     409,
+     6
+    ],
+    "Out": [
+     2361,
+     1
+    ]
+   },
+   "report_status/practice_status": {
+    "Questionable|LP": [
+     2270,
+     1573
+    ],
+    "Questionable|FP": [
+     678,
+     555
+    ],
+    "NONE|FP": [
+     4490,
+     4242
+    ],
+    "Questionable|DNP": [
+     498,
+     207
+    ],
+    "NONE|LP": [
+     702,
+     667
+    ],
+    "Doubtful|DNP": [
+     302,
+     4
+    ],
+    "Out|DNP": [
+     2179,
+     1
+    ],
+    "Doubtful|LP": [
+     96,
+     2
+    ],
+    "Doubtful|FP": [
+     9,
+     0
+    ],
+    "Out|FP": [
+     22,
+     0
+    ],
+    "Out|LP": [
+     153,
+     0
+    ],
+    "NONE|DNP": [
+     196,
+     59
+    ],
+    "Questionable|NONE": [
+     32,
+     27
+    ],
+    "Out|NONE": [
+     7,
+     0
+    ],
+    "Doubtful|NONE": [
+     2,
+     0
+    ]
+   },
+   "report_status/practice_status/prev_week_state": {
+    "Questionable|LP|LISTED_MISSED": [
+     670,
+     379
+    ],
+    "Questionable|FP|LISTED_MISSED": [
+     260,
+     187
+    ],
+    "NONE|FP|LISTED_MISSED": [
+     813,
+     685
+    ],
+    "Questionable|DNP|LISTED_MISSED": [
+     62,
+     10
+    ],
+    "NONE|LP|LISTED_MISSED": [
+     49,
+     40
+    ],
+    "Doubtful|DNP|LISTED_MISSED": [
+     109,
+     2
+    ],
+    "Out|DNP|LISTED_MISSED": [
+     998,
+     1
+    ],
+    "Doubtful|LP|LISTED_MISSED": [
+     57,
+     0
+    ],
+    "Doubtful|FP|LISTED_MISSED": [
+     6,
+     0
+    ],
+    "Out|FP|LISTED_MISSED": [
+     8,
+     0
+    ],
+    "Out|LP|LISTED_MISSED": [
+     113,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED": [
+     33,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED": [
+     1683,
+     1664
+    ],
+    "Questionable|FP|LISTED_PLAYED": [
+     105,
+     98
+    ],
+    "Questionable|LP|LISTED_PLAYED": [
+     592,
+     491
+    ],
+    "Questionable|DNP|LISTED_PLAYED": [
+     111,
+     63
+    ],
+    "NONE|LP|LISTED_PLAYED": [
+     390,
+     384
+    ],
+    "NONE|DNP|LISTED_PLAYED": [
+     51,
+     30
+    ],
+    "Questionable|NONE|LISTED_PLAYED": [
+     2,
+     2
+    ],
+    "Out|DNP|LISTED_PLAYED": [
+     277,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED": [
+     55,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED": [
+     8,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED": [
+     6,
+     0
+    ],
+    "Out|FP|LISTED_PLAYED": [
+     1,
+     0
+    ],
+    "Out|NONE|LISTED_PLAYED": [
+     2,
+     0
+    ],
+    "NONE|FP|NOT_LISTED": [
+     1994,
+     1893
+    ],
+    "Questionable|FP|NOT_LISTED": [
+     313,
+     270
+    ],
+    "Questionable|LP|NOT_LISTED": [
+     1008,
+     703
+    ],
+    "NONE|LP|NOT_LISTED": [
+     263,
+     243
+    ],
+    "NONE|DNP|NOT_LISTED": [
+     112,
+     29
+    ],
+    "Questionable|DNP|NOT_LISTED": [
+     325,
+     134
+    ],
+    "Doubtful|DNP|NOT_LISTED": [
+     138,
+     2
+    ],
+    "Questionable|NONE|NOT_LISTED": [
+     30,
+     25
+    ],
+    "Doubtful|LP|NOT_LISTED": [
+     33,
+     2
+    ],
+    "Out|DNP|NOT_LISTED": [
+     904,
+     0
+    ],
+    "Out|LP|NOT_LISTED": [
+     32,
+     0
+    ],
+    "Out|FP|NOT_LISTED": [
+     13,
+     0
+    ],
+    "Doubtful|FP|NOT_LISTED": [
+     3,
+     0
+    ],
+    "Out|NONE|NOT_LISTED": [
+     5,
+     0
+    ],
+    "Doubtful|NONE|NOT_LISTED": [
+     2,
+     0
+    ]
+   },
+   "report_status/practice_status/prev_week_state/body_part_group": {
+    "Questionable|LP|LISTED_MISSED|knee": [
+     116,
+     73
+    ],
+    "Questionable|FP|LISTED_MISSED|upper_body": [
+     46,
+     36
+    ],
+    "Questionable|LP|LISTED_MISSED|hamstring": [
+     156,
+     89
+    ],
+    "NONE|FP|LISTED_MISSED|leg_muscle": [
+     52,
+     44
+    ],
+    "NONE|FP|LISTED_MISSED|upper_body": [
+     156,
+     130
+    ],
+    "Questionable|LP|LISTED_MISSED|upper_body": [
+     101,
+     54
+    ],
+    "NONE|FP|LISTED_MISSED|ankle": [
+     96,
+     82
+    ],
+    "NONE|FP|LISTED_MISSED|knee": [
+     104,
+     81
+    ],
+    "Questionable|LP|LISTED_MISSED|foot": [
+     49,
+     28
+    ],
+    "NONE|FP|LISTED_MISSED|hamstring": [
+     125,
+     116
+    ],
+    "Questionable|FP|LISTED_MISSED|knee": [
+     46,
+     32
+    ],
+    "Questionable|FP|LISTED_MISSED|hamstring": [
+     37,
+     24
+    ],
+    "NONE|FP|LISTED_MISSED|concussion": [
+     127,
+     110
+    ],
+    "Questionable|FP|LISTED_MISSED|concussion": [
+     14,
+     11
+    ],
+    "Questionable|LP|LISTED_MISSED|ankle": [
+     117,
+     63
+    ],
+    "Questionable|LP|LISTED_MISSED|hand_wrist": [
+     20,
+     10
+    ],
+    "NONE|FP|LISTED_MISSED|foot": [
+     34,
+     29
+    ],
+    "NONE|FP|LISTED_MISSED|groin_hip": [
+     63,
+     57
+    ],
+    "Questionable|FP|LISTED_MISSED|leg_muscle": [
+     21,
+     12
+    ],
+    "Questionable|FP|LISTED_MISSED|groin_hip": [
+     24,
+     20
+    ],
+    "Questionable|DNP|LISTED_MISSED|knee": [
+     10,
+     2
+    ],
+    "NONE|FP|LISTED_MISSED|hand_wrist": [
+     30,
+     18
+    ],
+    "Questionable|FP|LISTED_MISSED|ankle": [
+     38,
+     29
+    ],
+    "Questionable|LP|LISTED_MISSED|concussion": [
+     21,
+     11
+    ],
+    "NONE|LP|LISTED_MISSED|illness": [
+     3,
+     2
+    ],
+    "Questionable|DNP|LISTED_MISSED|ankle": [
+     14,
+     4
+    ],
+    "NONE|LP|LISTED_MISSED|ankle": [
+     6,
+     6
+    ],
+    "NONE|FP|LISTED_MISSED|illness": [
+     26,
+     18
+    ],
+    "Questionable|LP|LISTED_MISSED|leg_muscle": [
+     44,
+     25
+    ],
+    "Questionable|FP|LISTED_MISSED|foot": [
+     17,
+     12
+    ],
+    "NONE|LP|LISTED_MISSED|hamstring": [
+     11,
+     9
+    ],
+    "Questionable|FP|LISTED_MISSED|hand_wrist": [
+     13,
+     7
+    ],
+    "Questionable|FP|LISTED_MISSED|illness": [
+     4,
+     4
+    ],
+    "NONE|LP|LISTED_MISSED|foot": [
+     5,
+     5
+    ],
+    "Questionable|DNP|LISTED_MISSED|illness": [
+     4,
+     1
+    ],
+    "Doubtful|DNP|LISTED_MISSED|groin_hip": [
+     12,
+     1
+    ],
+    "Questionable|LP|LISTED_MISSED|groin_hip": [
+     42,
+     24
+    ],
+    "Questionable|DNP|LISTED_MISSED|foot": [
+     9,
+     1
+    ],
+    "NONE|LP|LISTED_MISSED|upper_body": [
+     6,
+     3
+    ],
+    "NONE|LP|LISTED_MISSED|knee": [
+     7,
+     6
+    ],
+    "Questionable|DNP|LISTED_MISSED|leg_muscle": [
+     4,
+     1
+    ],
+    "Doubtful|DNP|LISTED_MISSED|ankle": [
+     17,
+     1
+    ],
+    "NONE|LP|LISTED_MISSED|groin_hip": [
+     2,
+     2
+    ],
+    "NONE|LP|LISTED_MISSED|concussion": [
+     5,
+     5
+    ],
+    "Questionable|DNP|LISTED_MISSED|hamstring": [
+     12,
+     1
+    ],
+    "Out|DNP|LISTED_MISSED|concussion": [
+     91,
+     1
+    ],
+    "Questionable|LP|LISTED_MISSED|other": [
+     2,
+     2
+    ],
+    "NONE|LP|LISTED_MISSED|leg_muscle": [
+     3,
+     2
+    ],
+    "Out|DNP|LISTED_MISSED|upper_body": [
+     141,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|knee": [
+     7,
+     0
+    ],
+    "Doubtful|FP|LISTED_MISSED|knee": [
+     3,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|hamstring": [
+     18,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|hamstring": [
+     156,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|knee": [
+     175,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|ankle": [
+     163,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|hamstring": [
+     9,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|upper_body": [
+     15,
+     0
+    ],
+    "Out|FP|LISTED_MISSED|upper_body": [
+     1,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|foot": [
+     87,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|ankle": [
+     11,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|hand_wrist": [
+     7,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|upper_body": [
+     34,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|foot": [
+     10,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|hand_wrist": [
+     3,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|knee": [
+     13,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|concussion": [
+     24,
+     0
+    ],
+    "Out|FP|LISTED_MISSED|leg_muscle": [
+     2,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|groin_hip": [
+     61,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|illness": [
+     12,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|leg_muscle": [
+     78,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|leg_muscle": [
+     22,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|knee": [
+     11,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|hand_wrist": [
+     31,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|concussion": [
+     2,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|foot": [
+     9,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|hamstring": [
+     15,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|foot": [
+     5,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|knee": [
+     4,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|concussion": [
+     2,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|leg_muscle": [
+     2,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|ankle": [
+     3,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|illness": [
+     1,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|ankle": [
+     12,
+     0
+    ],
+    "Doubtful|FP|LISTED_MISSED|groin_hip": [
+     1,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|upper_body": [
+     5,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|upper_body": [
+     9,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|hamstring": [
+     4,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|leg_muscle": [
+     1,
+     0
+    ],
+    "Questionable|LP|LISTED_MISSED|illness": [
+     2,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|hand_wrist": [
+     5,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|concussion": [
+     8,
+     0
+    ],
+    "Out|FP|LISTED_MISSED|concussion": [
+     1,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|other": [
+     3,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|leg_muscle": [
+     1,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|illness": [
+     1,
+     0
+    ],
+    "Out|FP|LISTED_MISSED|hamstring": [
+     2,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|groin_hip": [
+     3,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|other": [
+     1,
+     0
+    ],
+    "NONE|LP|LISTED_MISSED|hand_wrist": [
+     1,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|groin_hip": [
+     1,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|hand_wrist": [
+     2,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|upper_body": [
+     4,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|groin_hip": [
+     1,
+     0
+    ],
+    "Doubtful|FP|LISTED_MISSED|upper_body": [
+     1,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|hand_wrist": [
+     1,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|foot": [
+     4,
+     0
+    ],
+    "Doubtful|FP|LISTED_MISSED|leg_muscle": [
+     1,
+     0
+    ],
+    "Out|FP|LISTED_MISSED|knee": [
+     2,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|groin_hip": [
+     1,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|illness": [
+     1,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|ankle": [
+     231,
+     230
+    ],
+    "NONE|FP|LISTED_PLAYED|knee": [
+     356,
+     354
+    ],
+    "NONE|FP|LISTED_PLAYED|hand_wrist": [
+     120,
+     120
+    ],
+    "NONE|FP|LISTED_PLAYED|upper_body": [
+     398,
+     392
+    ],
+    "NONE|FP|LISTED_PLAYED|leg_muscle": [
+     67,
+     66
+    ],
+    "NONE|FP|LISTED_PLAYED|foot": [
+     180,
+     177
+    ],
+    "Questionable|FP|LISTED_PLAYED|upper_body": [
+     25,
+     24
+    ],
+    "NONE|FP|LISTED_PLAYED|groin_hip": [
+     173,
+     170
+    ],
+    "Questionable|FP|LISTED_PLAYED|foot": [
+     7,
+     7
+    ],
+    "Questionable|LP|LISTED_PLAYED|leg_muscle": [
+     45,
+     40
+    ],
+    "Questionable|LP|LISTED_PLAYED|knee": [
+     117,
+     100
+    ],
+    "Questionable|DNP|LISTED_PLAYED|knee": [
+     22,
+     14
+    ],
+    "Questionable|LP|LISTED_PLAYED|hamstring": [
+     84,
+     64
+    ],
+    "Questionable|LP|LISTED_PLAYED|foot": [
+     51,
+     45
+    ],
+    "Questionable|FP|LISTED_PLAYED|knee": [
+     22,
+     22
+    ],
+    "Questionable|FP|LISTED_PLAYED|ankle": [
+     16,
+     16
+    ],
+    "NONE|LP|LISTED_PLAYED|upper_body": [
+     54,
+     53
+    ],
+    "Questionable|FP|LISTED_PLAYED|hamstring": [
+     9,
+     6
+    ],
+    "Questionable|FP|LISTED_PLAYED|leg_muscle": [
+     5,
+     4
+    ],
+    "Questionable|DNP|LISTED_PLAYED|leg_muscle": [
+     4,
+     2
+    ],
+    "Questionable|LP|LISTED_PLAYED|upper_body": [
+     110,
+     88
+    ],
+    "NONE|FP|LISTED_PLAYED|hamstring": [
+     110,
+     108
+    ],
+    "Questionable|LP|LISTED_PLAYED|groin_hip": [
+     56,
+     48
+    ],
+    "Questionable|DNP|LISTED_PLAYED|hamstring": [
+     10,
+     6
+    ],
+    "NONE|DNP|LISTED_PLAYED|illness": [
+     7,
+     6
+    ],
+    "Questionable|LP|LISTED_PLAYED|ankle": [
+     101,
+     84
+    ],
+    "Questionable|FP|LISTED_PLAYED|groin_hip": [
+     6,
+     6
+    ],
+    "NONE|LP|LISTED_PLAYED|knee": [
+     82,
+     82
+    ],
+    "NONE|LP|LISTED_PLAYED|groin_hip": [
+     45,
+     43
+    ],
+    "Questionable|DNP|LISTED_PLAYED|groin_hip": [
+     13,
+     7
+    ],
+    "NONE|LP|LISTED_PLAYED|hamstring": [
+     36,
+     35
+    ],
+    "NONE|LP|LISTED_PLAYED|ankle": [
+     77,
+     77
+    ],
+    "Questionable|DNP|LISTED_PLAYED|foot": [
+     11,
+     6
+    ],
+    "NONE|LP|LISTED_PLAYED|hand_wrist": [
+     18,
+     18
+    ],
+    "Questionable|LP|LISTED_PLAYED|illness": [
+     7,
+     7
+    ],
+    "NONE|DNP|LISTED_PLAYED|upper_body": [
+     6,
+     2
+    ],
+    "NONE|LP|LISTED_PLAYED|foot": [
+     53,
+     51
+    ],
+    "Questionable|LP|LISTED_PLAYED|hand_wrist": [
+     15,
+     12
+    ],
+    "NONE|DNP|LISTED_PLAYED|hand_wrist": [
+     2,
+     1
+    ],
+    "NONE|FP|LISTED_PLAYED|not_injury": [
+     9,
+     9
+    ],
+    "NONE|FP|LISTED_PLAYED|concussion": [
+     9,
+     9
+    ],
+    "NONE|FP|LISTED_PLAYED|illness": [
+     26,
+     25
+    ],
+    "NONE|FP|LISTED_PLAYED|other": [
+     4,
+     4
+    ],
+    "Questionable|FP|LISTED_PLAYED|concussion": [
+     8,
+     7
+    ],
+    "Questionable|DNP|LISTED_PLAYED|upper_body": [
+     13,
+     8
+    ],
+    "Questionable|DNP|LISTED_PLAYED|illness": [
+     13,
+     9
+    ],
+    "Questionable|DNP|LISTED_PLAYED|ankle": [
+     22,
+     11
+    ],
+    "NONE|LP|LISTED_PLAYED|leg_muscle": [
+     21,
+     21
+    ],
+    "NONE|DNP|LISTED_PLAYED|not_injury": [
+     7,
+     7
+    ],
+    "NONE|DNP|LISTED_PLAYED|ankle": [
+     4,
+     2
+    ],
+    "Questionable|FP|LISTED_PLAYED|hand_wrist": [
+     6,
+     6
+    ],
+    "NONE|DNP|LISTED_PLAYED|leg_muscle": [
+     4,
+     2
+    ],
+    "NONE|DNP|LISTED_PLAYED|knee": [
+     8,
+     6
+    ],
+    "NONE|LP|LISTED_PLAYED|illness": [
+     4,
+     4
+    ],
+    "Questionable|NONE|LISTED_PLAYED|upper_body": [
+     1,
+     1
+    ],
+    "NONE|DNP|LISTED_PLAYED|foot": [
+     5,
+     4
+    ],
+    "Questionable|LP|LISTED_PLAYED|concussion": [
+     6,
+     3
+    ],
+    "Questionable|NONE|LISTED_PLAYED|other": [
+     1,
+     1
+    ],
+    "Out|DNP|LISTED_PLAYED|upper_body": [
+     45,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|hamstring": [
+     9,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|groin_hip": [
+     4,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|leg_muscle": [
+     5,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|knee": [
+     54,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|knee": [
+     10,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|upper_body": [
+     16,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|upper_body": [
+     1,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|concussion": [
+     29,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|foot": [
+     27,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|foot": [
+     2,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|ankle": [
+     45,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED|upper_body": [
+     3,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|leg_muscle": [
+     12,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|ankle": [
+     7,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|groin_hip": [
+     17,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|concussion": [
+     2,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|hamstring": [
+     35,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|foot": [
+     2,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|hand_wrist": [
+     11,
+     0
+    ],
+    "Questionable|DNP|LISTED_PLAYED|hand_wrist": [
+     2,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|groin_hip": [
+     2,
+     0
+    ],
+    "Questionable|FP|LISTED_PLAYED|illness": [
+     1,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED|groin_hip": [
+     1,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED|ankle": [
+     1,
+     0
+    ],
+    "Out|FP|LISTED_PLAYED|ankle": [
+     1,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|illness": [
+     2,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED|knee": [
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|knee": [
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|concussion": [
+     2,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|hamstring": [
+     4,
+     0
+    ],
+    "Out|NONE|LISTED_PLAYED|other": [
+     1,
+     0
+    ],
+    "Out|NONE|LISTED_PLAYED|hamstring": [
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|hand_wrist": [
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|leg_muscle": [
+     1,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|concussion": [
+     2,
+     0
+    ],
+    "Questionable|DNP|LISTED_PLAYED|concussion": [
+     1,
+     0
+    ],
+    "NONE|FP|NOT_LISTED|ankle": [
+     250,
+     242
+    ],
+    "Questionable|FP|NOT_LISTED|hand_wrist": [
+     15,
+     12
+    ],
+    "Questionable|FP|NOT_LISTED|knee": [
+     38,
+     36
+    ],
+    "Questionable|LP|NOT_LISTED|upper_body": [
+     199,
+     141
+    ],
+    "Questionable|LP|NOT_LISTED|knee": [
+     164,
+     116
+    ],
+    "Questionable|LP|NOT_LISTED|hamstring": [
+     147,
+     83
+    ],
+    "Questionable|LP|NOT_LISTED|hand_wrist": [
+     23,
+     15
+    ],
+    "NONE|FP|NOT_LISTED|upper_body": [
+     496,
+     473
+    ],
+    "NONE|FP|NOT_LISTED|knee": [
+     290,
+     276
+    ],
+    "NONE|FP|NOT_LISTED|hamstring": [
+     111,
+     106
+    ],
+    "NONE|FP|NOT_LISTED|leg_muscle": [
+     134,
+     131
+    ],
+    "Questionable|FP|NOT_LISTED|ankle": [
+     46,
+     43
+    ],
+    "NONE|LP|NOT_LISTED|knee": [
+     47,
+     42
+    ],
+    "Questionable|LP|NOT_LISTED|leg_muscle": [
+     82,
+     60
+    ],
+    "Questionable|LP|NOT_LISTED|foot": [
+     68,
+     48
+    ],
+    "Questionable|FP|NOT_LISTED|upper_body": [
+     71,
+     62
+    ],
+    "Questionable|LP|NOT_LISTED|ankle": [
+     142,
+     105
+    ],
+    "NONE|FP|NOT_LISTED|groin_hip": [
+     147,
+     142
+    ],
+    "NONE|FP|NOT_LISTED|concussion": [
+     78,
+     75
+    ],
+    "NONE|FP|NOT_LISTED|illness": [
+     192,
+     168
+    ],
+    "Questionable|FP|NOT_LISTED|foot": [
+     18,
+     15
+    ],
+    "Questionable|FP|NOT_LISTED|leg_muscle": [
+     21,
+     20
+    ],
+    "Questionable|LP|NOT_LISTED|groin_hip": [
+     109,
+     83
+    ],
+    "NONE|FP|NOT_LISTED|foot": [
+     143,
+     137
+    ],
+    "NONE|FP|NOT_LISTED|not_injury": [
+     3,
+     3
+    ],
+    "Questionable|FP|NOT_LISTED|hamstring": [
+     28,
+     21
+    ],
+    "Questionable|FP|NOT_LISTED|concussion": [
+     36,
+     29
+    ],
+    "NONE|DNP|NOT_LISTED|groin_hip": [
+     10,
+     1
+    ],
+    "NONE|FP|NOT_LISTED|hand_wrist": [
+     132,
+     125
+    ],
+    "Questionable|DNP|NOT_LISTED|leg_muscle": [
+     31,
+     11
+    ],
+    "Questionable|DNP|NOT_LISTED|knee": [
+     37,
+     14
+    ],
+    "Questionable|FP|NOT_LISTED|groin_hip": [
+     26,
+     22
+    ],
+    "NONE|LP|NOT_LISTED|illness": [
+     12,
+     12
+    ],
+    "NONE|DNP|NOT_LISTED|illness": [
+     29,
+     16
+    ],
+    "NONE|FP|NOT_LISTED|other": [
+     18,
+     15
+    ],
+    "Questionable|LP|NOT_LISTED|concussion": [
+     39,
+     27
+    ],
+    "NONE|LP|NOT_LISTED|groin_hip": [
+     27,
+     27
+    ],
+    "Questionable|LP|NOT_LISTED|other": [
+     2,
+     2
+    ],
+    "Questionable|DNP|NOT_LISTED|hamstring": [
+     35,
+     7
+    ],
+    "NONE|LP|NOT_LISTED|ankle": [
+     36,
+     34
+    ],
+    "Questionable|DNP|NOT_LISTED|upper_body": [
+     48,
+     15
+    ],
+    "NONE|LP|NOT_LISTED|foot": [
+     30,
+     28
+    ],
+    "NONE|LP|NOT_LISTED|hamstring": [
+     27,
+     23
+    ],
+    "Questionable|DNP|NOT_LISTED|ankle": [
+     32,
+     10
+    ],
+    "Questionable|LP|NOT_LISTED|illness": [
+     33,
+     23
+    ],
+    "Questionable|FP|NOT_LISTED|illness": [
+     14,
+     10
+    ],
+    "NONE|LP|NOT_LISTED|upper_body": [
+     57,
+     52
+    ],
+    "Questionable|DNP|NOT_LISTED|illness": [
+     79,
+     49
+    ],
+    "NONE|LP|NOT_LISTED|concussion": [
+     4,
+     4
+    ],
+    "NONE|LP|NOT_LISTED|leg_muscle": [
+     15,
+     14
+    ],
+    "NONE|LP|NOT_LISTED|hand_wrist": [
+     7,
+     6
+    ],
+    "Questionable|DNP|NOT_LISTED|groin_hip": [
+     23,
+     16
+    ],
+    "NONE|DNP|NOT_LISTED|knee": [
+     15,
+     3
+    ],
+    "Questionable|DNP|NOT_LISTED|foot": [
+     27,
+     10
+    ],
+    "Doubtful|DNP|NOT_LISTED|ankle": [
+     23,
+     1
+    ],
+    "Questionable|NONE|NOT_LISTED|upper_body": [
+     4,
+     2
+    ],
+    "Questionable|NONE|NOT_LISTED|illness": [
+     14,
+     12
+    ],
+    "NONE|LP|NOT_LISTED|not_injury": [
+     1,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|not_injury": [
+     4,
+     4
+    ],
+    "Doubtful|DNP|NOT_LISTED|concussion": [
+     10,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|foot": [
+     5,
+     1
+    ],
+    "Questionable|NONE|NOT_LISTED|foot": [
+     3,
+     3
+    ],
+    "Doubtful|LP|NOT_LISTED|hamstring": [
+     4,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|concussion": [
+     4,
+     1
+    ],
+    "Questionable|NONE|NOT_LISTED|groin_hip": [
+     1,
+     1
+    ],
+    "Questionable|DNP|NOT_LISTED|concussion": [
+     8,
+     1
+    ],
+    "Questionable|NONE|NOT_LISTED|knee": [
+     4,
+     4
+    ],
+    "Questionable|NONE|NOT_LISTED|leg_muscle": [
+     1,
+     1
+    ],
+    "Questionable|NONE|NOT_LISTED|hamstring": [
+     3,
+     2
+    ],
+    "NONE|DNP|NOT_LISTED|hand_wrist": [
+     5,
+     1
+    ],
+    "Questionable|DNP|NOT_LISTED|hand_wrist": [
+     4,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|ankle": [
+     11,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|hamstring": [
+     8,
+     1
+    ],
+    "Doubtful|LP|NOT_LISTED|upper_body": [
+     12,
+     1
+    ],
+    "Out|DNP|NOT_LISTED|ankle": [
+     138,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|concussion": [
+     154,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|knee": [
+     11,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|knee": [
+     143,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|hamstring": [
+     21,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|foot": [
+     6,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|foot": [
+     50,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|hamstring": [
+     126,
+     0
+    ],
+    "Out|LP|NOT_LISTED|concussion": [
+     10,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|upper_body": [
+     134,
+     0
+    ],
+    "Out|LP|NOT_LISTED|knee": [
+     7,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|upper_body": [
+     24,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|groin_hip": [
+     53,
+     0
+    ],
+    "Out|FP|NOT_LISTED|concussion": [
+     6,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|groin_hip": [
+     19,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|illness": [
+     19,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|hand_wrist": [
+     28,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|groin_hip": [
+     4,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|leg_muscle": [
+     56,
+     0
+    ],
+    "Out|LP|NOT_LISTED|ankle": [
+     4,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|knee": [
+     4,
+     0
+    ],
+    "Out|LP|NOT_LISTED|hamstring": [
+     4,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|leg_muscle": [
+     17,
+     0
+    ],
+    "Doubtful|FP|NOT_LISTED|leg_muscle": [
+     1,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|concussion": [
+     2,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|leg_muscle": [
+     1,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|illness": [
+     3,
+     0
+    ],
+    "Out|NONE|NOT_LISTED|illness": [
+     4,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|foot": [
+     2,
+     0
+    ],
+    "Out|FP|NOT_LISTED|illness": [
+     1,
+     0
+    ],
+    "Questionable|DNP|NOT_LISTED|other": [
+     1,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|hand_wrist": [
+     4,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|ankle": [
+     3,
+     0
+    ],
+    "Out|FP|NOT_LISTED|groin_hip": [
+     1,
+     0
+    ],
+    "Doubtful|FP|NOT_LISTED|other": [
+     1,
+     0
+    ],
+    "Out|LP|NOT_LISTED|hand_wrist": [
+     3,
+     0
+    ],
+    "Doubtful|FP|NOT_LISTED|ankle": [
+     1,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|upper_body": [
+     15,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|hand_wrist": [
+     1,
+     0
+    ],
+    "Out|FP|NOT_LISTED|hamstring": [
+     2,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|other": [
+     3,
+     0
+    ],
+    "Out|LP|NOT_LISTED|upper_body": [
+     3,
+     0
+    ],
+    "Out|NONE|NOT_LISTED|upper_body": [
+     1,
+     0
+    ],
+    "Out|FP|NOT_LISTED|leg_muscle": [
+     1,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|leg_muscle": [
+     6,
+     0
+    ],
+    "Doubtful|NONE|NOT_LISTED|illness": [
+     1,
+     0
+    ],
+    "Out|FP|NOT_LISTED|knee": [
+     2,
+     0
+    ],
+    "Out|LP|NOT_LISTED|foot": [
+     1,
+     0
+    ],
+    "Doubtful|NONE|NOT_LISTED|hamstring": [
+     1,
+     0
+    ]
+   }
+  },
+  "bucket_this_game": {
+   "ALL": {
+    "ALL": [
+     7337,
+     1460,
+     1303,
+     1224
+    ]
+   },
+   "report_status": {
+    "Questionable": [
+     2362,
+     570,
+     255,
+     204
+    ],
+    "NONE": [
+     4968,
+     101,
+     83,
+     196
+    ],
+    "Doubtful": [
+     6,
+     166,
+     132,
+     75
+    ],
+    "Out": [
+     1,
+     623,
+     833,
+     749
+    ]
+   },
+   "report_status/practice_status": {
+    "Questionable|LP": [
+     1573,
+     377,
+     153,
+     111
+    ],
+    "Questionable|FP": [
+     555,
+     68,
+     25,
+     25
+    ],
+    "NONE|FP": [
+     4242,
+     88,
+     67,
+     73
+    ],
+    "Questionable|DNP": [
+     207,
+     124,
+     77,
+     65
+    ],
+    "NONE|LP": [
+     667,
+     8,
+     3,
+     19
+    ],
+    "Doubtful|DNP": [
+     4,
+     116,
+     95,
+     60
+    ],
+    "Out|DNP": [
+     1,
+     547,
+     780,
+     704
+    ],
+    "Doubtful|LP": [
+     2,
+     46,
+     33,
+     13
+    ],
+    "Doubtful|FP": [
+     0,
+     4,
+     3,
+     1
+    ],
+    "Out|FP": [
+     0,
+     11,
+     3,
+     8
+    ],
+    "Out|LP": [
+     0,
+     64,
+     44,
+     37
+    ],
+    "NONE|DNP": [
+     59,
+     5,
+     13,
+     104
+    ],
+    "Questionable|NONE": [
+     27,
+     1,
+     0,
+     3
+    ],
+    "Out|NONE": [
+     0,
+     1,
+     6,
+     0
+    ],
+    "Doubtful|NONE": [
+     0,
+     0,
+     1,
+     1
+    ]
+   },
+   "report_status/practice_status/prev_week_state": {
+    "Questionable|LP|LISTED_MISSED": [
+     379,
+     170,
+     65,
+     40
+    ],
+    "Questionable|FP|LISTED_MISSED": [
+     187,
+     36,
+     16,
+     17
+    ],
+    "NONE|FP|LISTED_MISSED": [
+     685,
+     50,
+     38,
+     31
+    ],
+    "Questionable|DNP|LISTED_MISSED": [
+     10,
+     20,
+     14,
+     13
+    ],
+    "NONE|LP|LISTED_MISSED": [
+     40,
+     3,
+     0,
+     5
+    ],
+    "Doubtful|DNP|LISTED_MISSED": [
+     2,
+     42,
+     29,
+     28
+    ],
+    "Out|DNP|LISTED_MISSED": [
+     1,
+     265,
+     338,
+     323
+    ],
+    "Doubtful|LP|LISTED_MISSED": [
+     0,
+     25,
+     19,
+     11
+    ],
+    "Doubtful|FP|LISTED_MISSED": [
+     0,
+     2,
+     3,
+     1
+    ],
+    "Out|FP|LISTED_MISSED": [
+     0,
+     4,
+     0,
+     4
+    ],
+    "Out|LP|LISTED_MISSED": [
+     0,
+     49,
+     31,
+     29
+    ],
+    "NONE|DNP|LISTED_MISSED": [
+     0,
+     0,
+     3,
+     23
+    ],
+    "NONE|FP|LISTED_PLAYED": [
+     1664,
+     11,
+     3,
+     1
+    ],
+    "Questionable|FP|LISTED_PLAYED": [
+     98,
+     6,
+     1,
+     0
+    ],
+    "Questionable|LP|LISTED_PLAYED": [
+     491,
+     49,
+     16,
+     16
+    ],
+    "Questionable|DNP|LISTED_PLAYED": [
+     63,
+     20,
+     9,
+     11
+    ],
+    "NONE|LP|LISTED_PLAYED": [
+     384,
+     2,
+     2,
+     2
+    ],
+    "NONE|DNP|LISTED_PLAYED": [
+     30,
+     1,
+     1,
+     17
+    ],
+    "Questionable|NONE|LISTED_PLAYED": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED": [
+     0,
+     67,
+     97,
+     91
+    ],
+    "Doubtful|DNP|LISTED_PLAYED": [
+     0,
+     24,
+     14,
+     11
+    ],
+    "Out|LP|LISTED_PLAYED": [
+     0,
+     1,
+     4,
+     2
+    ],
+    "Doubtful|LP|LISTED_PLAYED": [
+     0,
+     5,
+     1,
+     0
+    ],
+    "Out|FP|LISTED_PLAYED": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|NONE|LISTED_PLAYED": [
+     0,
+     0,
+     2,
+     0
+    ],
+    "NONE|FP|NOT_LISTED": [
+     1893,
+     27,
+     26,
+     41
+    ],
+    "Questionable|FP|NOT_LISTED": [
+     270,
+     26,
+     8,
+     8
+    ],
+    "Questionable|LP|NOT_LISTED": [
+     703,
+     158,
+     72,
+     55
+    ],
+    "NONE|LP|NOT_LISTED": [
+     243,
+     3,
+     1,
+     12
+    ],
+    "NONE|DNP|NOT_LISTED": [
+     29,
+     4,
+     9,
+     64
+    ],
+    "Questionable|DNP|NOT_LISTED": [
+     134,
+     84,
+     54,
+     41
+    ],
+    "Doubtful|DNP|NOT_LISTED": [
+     2,
+     50,
+     52,
+     21
+    ],
+    "Questionable|NONE|NOT_LISTED": [
+     25,
+     1,
+     0,
+     3
+    ],
+    "Doubtful|LP|NOT_LISTED": [
+     2,
+     16,
+     13,
+     2
+    ],
+    "Out|DNP|NOT_LISTED": [
+     0,
+     215,
+     345,
+     290
+    ],
+    "Out|LP|NOT_LISTED": [
+     0,
+     14,
+     9,
+     6
+    ],
+    "Out|FP|NOT_LISTED": [
+     0,
+     6,
+     3,
+     4
+    ],
+    "Doubtful|FP|NOT_LISTED": [
+     0,
+     2,
+     0,
+     0
+    ],
+    "Out|NONE|NOT_LISTED": [
+     0,
+     1,
+     4,
+     0
+    ],
+    "Doubtful|NONE|NOT_LISTED": [
+     0,
+     0,
+     1,
+     1
+    ]
+   },
+   "report_status/practice_status/prev_week_state/body_part_group": {
+    "Questionable|LP|LISTED_MISSED|knee": [
+     73,
+     27,
+     9,
+     6
+    ],
+    "Questionable|FP|LISTED_MISSED|upper_body": [
+     36,
+     3,
+     2,
+     3
+    ],
+    "Questionable|LP|LISTED_MISSED|hamstring": [
+     89,
+     39,
+     14,
+     12
+    ],
+    "NONE|FP|LISTED_MISSED|leg_muscle": [
+     44,
+     6,
+     1,
+     0
+    ],
+    "NONE|FP|LISTED_MISSED|upper_body": [
+     130,
+     11,
+     7,
+     8
+    ],
+    "Questionable|LP|LISTED_MISSED|upper_body": [
+     54,
+     25,
+     7,
+     11
+    ],
+    "NONE|FP|LISTED_MISSED|ankle": [
+     82,
+     9,
+     3,
+     0
+    ],
+    "NONE|FP|LISTED_MISSED|knee": [
+     81,
+     8,
+     5,
+     9
+    ],
+    "Questionable|LP|LISTED_MISSED|foot": [
+     28,
+     12,
+     8,
+     1
+    ],
+    "NONE|FP|LISTED_MISSED|hamstring": [
+     116,
+     5,
+     2,
+     1
+    ],
+    "Questionable|FP|LISTED_MISSED|knee": [
+     32,
+     10,
+     3,
+     1
+    ],
+    "Questionable|FP|LISTED_MISSED|hamstring": [
+     24,
+     6,
+     4,
+     2
+    ],
+    "NONE|FP|LISTED_MISSED|concussion": [
+     110,
+     3,
+     7,
+     5
+    ],
+    "Questionable|FP|LISTED_MISSED|concussion": [
+     11,
+     2,
+     0,
+     1
+    ],
+    "Questionable|LP|LISTED_MISSED|ankle": [
+     63,
+     27,
+     14,
+     6
+    ],
+    "Questionable|LP|LISTED_MISSED|hand_wrist": [
+     10,
+     6,
+     4,
+     0
+    ],
+    "NONE|FP|LISTED_MISSED|foot": [
+     29,
+     2,
+     3,
+     0
+    ],
+    "NONE|FP|LISTED_MISSED|groin_hip": [
+     57,
+     1,
+     3,
+     2
+    ],
+    "Questionable|FP|LISTED_MISSED|leg_muscle": [
+     12,
+     3,
+     1,
+     4
+    ],
+    "Questionable|FP|LISTED_MISSED|groin_hip": [
+     20,
+     1,
+     1,
+     2
+    ],
+    "Questionable|DNP|LISTED_MISSED|knee": [
+     2,
+     1,
+     3,
+     3
+    ],
+    "NONE|FP|LISTED_MISSED|hand_wrist": [
+     18,
+     2,
+     4,
+     6
+    ],
+    "Questionable|FP|LISTED_MISSED|ankle": [
+     29,
+     5,
+     3,
+     1
+    ],
+    "Questionable|LP|LISTED_MISSED|concussion": [
+     11,
+     5,
+     1,
+     2
+    ],
+    "NONE|LP|LISTED_MISSED|illness": [
+     2,
+     0,
+     0,
+     1
+    ],
+    "Questionable|DNP|LISTED_MISSED|ankle": [
+     4,
+     6,
+     1,
+     2
+    ],
+    "NONE|LP|LISTED_MISSED|ankle": [
+     6,
+     0,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_MISSED|illness": [
+     18,
+     3,
+     3,
+     0
+    ],
+    "Questionable|LP|LISTED_MISSED|leg_muscle": [
+     25,
+     12,
+     5,
+     2
+    ],
+    "Questionable|FP|LISTED_MISSED|foot": [
+     12,
+     3,
+     0,
+     2
+    ],
+    "NONE|LP|LISTED_MISSED|hamstring": [
+     9,
+     0,
+     0,
+     1
+    ],
+    "Questionable|FP|LISTED_MISSED|hand_wrist": [
+     7,
+     3,
+     2,
+     1
+    ],
+    "Questionable|FP|LISTED_MISSED|illness": [
+     4,
+     0,
+     0,
+     0
+    ],
+    "NONE|LP|LISTED_MISSED|foot": [
+     5,
+     0,
+     0,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|illness": [
+     1,
+     2,
+     0,
+     1
+    ],
+    "Doubtful|DNP|LISTED_MISSED|groin_hip": [
+     1,
+     6,
+     5,
+     0
+    ],
+    "Questionable|LP|LISTED_MISSED|groin_hip": [
+     24,
+     15,
+     3,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|foot": [
+     1,
+     3,
+     3,
+     2
+    ],
+    "NONE|LP|LISTED_MISSED|upper_body": [
+     3,
+     2,
+     0,
+     1
+    ],
+    "NONE|LP|LISTED_MISSED|knee": [
+     6,
+     0,
+     0,
+     1
+    ],
+    "Questionable|DNP|LISTED_MISSED|leg_muscle": [
+     1,
+     2,
+     0,
+     1
+    ],
+    "Doubtful|DNP|LISTED_MISSED|ankle": [
+     1,
+     9,
+     5,
+     0
+    ],
+    "NONE|LP|LISTED_MISSED|groin_hip": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "NONE|LP|LISTED_MISSED|concussion": [
+     5,
+     0,
+     0,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|hamstring": [
+     1,
+     3,
+     5,
+     1
+    ],
+    "Out|DNP|LISTED_MISSED|concussion": [
+     1,
+     21,
+     15,
+     40
+    ],
+    "Questionable|LP|LISTED_MISSED|other": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "NONE|LP|LISTED_MISSED|leg_muscle": [
+     2,
+     1,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|upper_body": [
+     0,
+     36,
+     40,
+     59
+    ],
+    "Doubtful|LP|LISTED_MISSED|knee": [
+     0,
+     4,
+     2,
+     1
+    ],
+    "Doubtful|FP|LISTED_MISSED|knee": [
+     0,
+     1,
+     2,
+     0
+    ],
+    "Doubtful|DNP|LISTED_MISSED|hamstring": [
+     0,
+     7,
+     5,
+     6
+    ],
+    "Out|DNP|LISTED_MISSED|hamstring": [
+     0,
+     57,
+     62,
+     31
+    ],
+    "Out|DNP|LISTED_MISSED|knee": [
+     0,
+     55,
+     74,
+     34
+    ],
+    "Out|DNP|LISTED_MISSED|ankle": [
+     0,
+     39,
+     53,
+     55
+    ],
+    "Doubtful|LP|LISTED_MISSED|hamstring": [
+     0,
+     5,
+     2,
+     2
+    ],
+    "Doubtful|LP|LISTED_MISSED|upper_body": [
+     0,
+     7,
+     6,
+     1
+    ],
+    "Out|FP|LISTED_MISSED|upper_body": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|foot": [
+     0,
+     13,
+     22,
+     48
+    ],
+    "Doubtful|LP|LISTED_MISSED|ankle": [
+     0,
+     3,
+     6,
+     2
+    ],
+    "Doubtful|DNP|LISTED_MISSED|hand_wrist": [
+     0,
+     1,
+     3,
+     3
+    ],
+    "Out|LP|LISTED_MISSED|upper_body": [
+     0,
+     13,
+     15,
+     5
+    ],
+    "Doubtful|DNP|LISTED_MISSED|foot": [
+     0,
+     4,
+     2,
+     4
+    ],
+    "Out|LP|LISTED_MISSED|hand_wrist": [
+     0,
+     1,
+     2,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|knee": [
+     0,
+     10,
+     2,
+     1
+    ],
+    "Out|LP|LISTED_MISSED|concussion": [
+     0,
+     8,
+     2,
+     12
+    ],
+    "Out|FP|LISTED_MISSED|leg_muscle": [
+     0,
+     1,
+     0,
+     1
+    ],
+    "Out|DNP|LISTED_MISSED|groin_hip": [
+     0,
+     11,
+     19,
+     26
+    ],
+    "Out|DNP|LISTED_MISSED|illness": [
+     0,
+     4,
+     4,
+     4
+    ],
+    "Out|DNP|LISTED_MISSED|leg_muscle": [
+     0,
+     21,
+     32,
+     19
+    ],
+    "Doubtful|DNP|LISTED_MISSED|leg_muscle": [
+     0,
+     7,
+     7,
+     6
+    ],
+    "Questionable|DNP|LISTED_MISSED|concussion": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|foot": [
+     0,
+     2,
+     1,
+     5
+    ],
+    "Out|LP|LISTED_MISSED|hamstring": [
+     0,
+     8,
+     5,
+     2
+    ],
+    "Doubtful|DNP|LISTED_MISSED|knee": [
+     0,
+     4,
+     2,
+     2
+    ],
+    "Out|DNP|LISTED_MISSED|hand_wrist": [
+     0,
+     7,
+     15,
+     7
+    ],
+    "Out|LP|LISTED_MISSED|illness": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|ankle": [
+     0,
+     5,
+     3,
+     4
+    ],
+    "Doubtful|FP|LISTED_MISSED|groin_hip": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Questionable|DNP|LISTED_MISSED|upper_body": [
+     0,
+     2,
+     1,
+     2
+    ],
+    "Doubtful|DNP|LISTED_MISSED|upper_body": [
+     0,
+     4,
+     0,
+     5
+    ],
+    "Doubtful|LP|LISTED_MISSED|foot": [
+     0,
+     1,
+     1,
+     2
+    ],
+    "Doubtful|LP|LISTED_MISSED|leg_muscle": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Questionable|LP|LISTED_MISSED|illness": [
+     0,
+     2,
+     0,
+     0
+    ],
+    "Doubtful|LP|LISTED_MISSED|hand_wrist": [
+     0,
+     2,
+     2,
+     1
+    ],
+    "Out|FP|LISTED_MISSED|concussion": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_MISSED|other": [
+     0,
+     1,
+     2,
+     0
+    ],
+    "Out|LP|LISTED_MISSED|leg_muscle": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|FP|LISTED_MISSED|hamstring": [
+     0,
+     1,
+     0,
+     1
+    ],
+    "Doubtful|LP|LISTED_MISSED|groin_hip": [
+     0,
+     1,
+     0,
+     2
+    ],
+    "Doubtful|LP|LISTED_MISSED|other": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|concussion": [
+     0,
+     0,
+     0,
+     7
+    ],
+    "NONE|LP|LISTED_MISSED|hand_wrist": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "NONE|DNP|LISTED_MISSED|hamstring": [
+     0,
+     0,
+     0,
+     3
+    ],
+    "Out|LP|LISTED_MISSED|groin_hip": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|hand_wrist": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "NONE|DNP|LISTED_MISSED|upper_body": [
+     0,
+     0,
+     0,
+     4
+    ],
+    "Questionable|DNP|LISTED_MISSED|groin_hip": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "Doubtful|FP|LISTED_MISSED|upper_body": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "Questionable|DNP|LISTED_MISSED|hand_wrist": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|foot": [
+     0,
+     0,
+     1,
+     3
+    ],
+    "Doubtful|FP|LISTED_MISSED|leg_muscle": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "NONE|DNP|LISTED_MISSED|ankle": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "Out|FP|LISTED_MISSED|knee": [
+     0,
+     0,
+     0,
+     2
+    ],
+    "Doubtful|DNP|LISTED_MISSED|concussion": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "NONE|DNP|LISTED_MISSED|leg_muscle": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "NONE|DNP|LISTED_MISSED|knee": [
+     0,
+     0,
+     0,
+     2
+    ],
+    "NONE|DNP|LISTED_MISSED|groin_hip": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "Doubtful|DNP|LISTED_MISSED|illness": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "NONE|FP|LISTED_PLAYED|ankle": [
+     230,
+     0,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|knee": [
+     354,
+     2,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|hand_wrist": [
+     120,
+     0,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|upper_body": [
+     392,
+     4,
+     0,
+     1
+    ],
+    "NONE|FP|LISTED_PLAYED|leg_muscle": [
+     66,
+     0,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|foot": [
+     177,
+     1,
+     2,
+     0
+    ],
+    "Questionable|FP|LISTED_PLAYED|upper_body": [
+     24,
+     0,
+     1,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|groin_hip": [
+     170,
+     2,
+     0,
+     0
+    ],
+    "Questionable|FP|LISTED_PLAYED|foot": [
+     7,
+     0,
+     0,
+     0
+    ],
+    "Questionable|LP|LISTED_PLAYED|leg_muscle": [
+     40,
+     2,
+     2,
+     0
+    ],
+    "Questionable|LP|LISTED_PLAYED|knee": [
+     100,
+     5,
+     4,
+     2
+    ],
+    "Questionable|DNP|LISTED_PLAYED|knee": [
+     14,
+     2,
+     1,
+     2
+    ],
+    "Questionable|LP|LISTED_PLAYED|hamstring": [
+     64,
+     13,
+     3,
+     4
+    ],
+    "Questionable|LP|LISTED_PLAYED|foot": [
+     45,
+     2,
+     0,
+     2
+    ],
+    "Questionable|FP|LISTED_PLAYED|knee": [
+     22,
+     0,
+     0,
+     0
+    ],
+    "Questionable|FP|LISTED_PLAYED|ankle": [
+     16,
+     0,
+     0,
+     0
+    ],
+    "NONE|LP|LISTED_PLAYED|upper_body": [
+     53,
+     0,
+     1,
+     0
+    ],
+    "Questionable|FP|LISTED_PLAYED|hamstring": [
+     6,
+     3,
+     0,
+     0
+    ],
+    "Questionable|FP|LISTED_PLAYED|leg_muscle": [
+     4,
+     1,
+     0,
+     0
+    ],
+    "Questionable|DNP|LISTED_PLAYED|leg_muscle": [
+     2,
+     2,
+     0,
+     0
+    ],
+    "Questionable|LP|LISTED_PLAYED|upper_body": [
+     88,
+     11,
+     4,
+     2
+    ],
+    "NONE|FP|LISTED_PLAYED|hamstring": [
+     108,
+     1,
+     1,
+     0
+    ],
+    "Questionable|LP|LISTED_PLAYED|groin_hip": [
+     48,
+     3,
+     2,
+     1
+    ],
+    "Questionable|DNP|LISTED_PLAYED|hamstring": [
+     6,
+     2,
+     2,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|illness": [
+     6,
+     0,
+     0,
+     1
+    ],
+    "Questionable|LP|LISTED_PLAYED|ankle": [
+     84,
+     8,
+     1,
+     4
+    ],
+    "Questionable|FP|LISTED_PLAYED|groin_hip": [
+     6,
+     0,
+     0,
+     0
+    ],
+    "NONE|LP|LISTED_PLAYED|knee": [
+     82,
+     0,
+     0,
+     0
+    ],
+    "NONE|LP|LISTED_PLAYED|groin_hip": [
+     43,
+     1,
+     0,
+     1
+    ],
+    "Questionable|DNP|LISTED_PLAYED|groin_hip": [
+     7,
+     3,
+     1,
+     0
+    ],
+    "NONE|LP|LISTED_PLAYED|hamstring": [
+     35,
+     0,
+     1,
+     0
+    ],
+    "NONE|LP|LISTED_PLAYED|ankle": [
+     77,
+     0,
+     0,
+     0
+    ],
+    "Questionable|DNP|LISTED_PLAYED|foot": [
+     6,
+     1,
+     1,
+     3
+    ],
+    "NONE|LP|LISTED_PLAYED|hand_wrist": [
+     18,
+     0,
+     0,
+     0
+    ],
+    "Questionable|LP|LISTED_PLAYED|illness": [
+     7,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|upper_body": [
+     2,
+     0,
+     1,
+     2
+    ],
+    "NONE|LP|LISTED_PLAYED|foot": [
+     51,
+     1,
+     0,
+     1
+    ],
+    "Questionable|LP|LISTED_PLAYED|hand_wrist": [
+     12,
+     2,
+     0,
+     1
+    ],
+    "NONE|DNP|LISTED_PLAYED|hand_wrist": [
+     1,
+     0,
+     0,
+     1
+    ],
+    "NONE|FP|LISTED_PLAYED|not_injury": [
+     9,
+     0,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|concussion": [
+     9,
+     0,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|illness": [
+     25,
+     1,
+     0,
+     0
+    ],
+    "NONE|FP|LISTED_PLAYED|other": [
+     4,
+     0,
+     0,
+     0
+    ],
+    "Questionable|FP|LISTED_PLAYED|concussion": [
+     7,
+     1,
+     0,
+     0
+    ],
+    "Questionable|DNP|LISTED_PLAYED|upper_body": [
+     8,
+     4,
+     0,
+     1
+    ],
+    "Questionable|DNP|LISTED_PLAYED|illness": [
+     9,
+     1,
+     1,
+     0
+    ],
+    "Questionable|DNP|LISTED_PLAYED|ankle": [
+     11,
+     3,
+     3,
+     4
+    ],
+    "NONE|LP|LISTED_PLAYED|leg_muscle": [
+     21,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|not_injury": [
+     7,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|ankle": [
+     2,
+     0,
+     0,
+     1
+    ],
+    "Questionable|FP|LISTED_PLAYED|hand_wrist": [
+     6,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|leg_muscle": [
+     2,
+     0,
+     0,
+     2
+    ],
+    "NONE|DNP|LISTED_PLAYED|knee": [
+     6,
+     0,
+     0,
+     2
+    ],
+    "NONE|LP|LISTED_PLAYED|illness": [
+     4,
+     0,
+     0,
+     0
+    ],
+    "Questionable|NONE|LISTED_PLAYED|upper_body": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|foot": [
+     4,
+     0,
+     0,
+     1
+    ],
+    "Questionable|LP|LISTED_PLAYED|concussion": [
+     3,
+     3,
+     0,
+     0
+    ],
+    "Questionable|NONE|LISTED_PLAYED|other": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|upper_body": [
+     0,
+     13,
+     12,
+     16
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|hamstring": [
+     0,
+     3,
+     4,
+     2
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|groin_hip": [
+     0,
+     2,
+     1,
+     0
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|leg_muscle": [
+     0,
+     2,
+     1,
+     1
+    ],
+    "Out|DNP|LISTED_PLAYED|knee": [
+     0,
+     13,
+     20,
+     18
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|knee": [
+     0,
+     5,
+     2,
+     3
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|upper_body": [
+     0,
+     8,
+     3,
+     3
+    ],
+    "Out|LP|LISTED_PLAYED|upper_body": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|concussion": [
+     0,
+     15,
+     6,
+     7
+    ],
+    "Out|DNP|LISTED_PLAYED|foot": [
+     0,
+     3,
+     11,
+     10
+    ],
+    "Doubtful|LP|LISTED_PLAYED|upper_body": [
+     0,
+     3,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|leg_muscle": [
+     0,
+     1,
+     6,
+     2
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|ankle": [
+     0,
+     3,
+     3,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|ankle": [
+     0,
+     13,
+     13,
+     16
+    ],
+    "Out|DNP|LISTED_PLAYED|groin_hip": [
+     0,
+     3,
+     7,
+     6
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|concussion": [
+     0,
+     1,
+     0,
+     1
+    ],
+    "Out|DNP|LISTED_PLAYED|hand_wrist": [
+     0,
+     2,
+     2,
+     6
+    ],
+    "Out|DNP|LISTED_PLAYED|hamstring": [
+     0,
+     4,
+     19,
+     10
+    ],
+    "Questionable|DNP|LISTED_PLAYED|hand_wrist": [
+     0,
+     2,
+     0,
+     0
+    ],
+    "NONE|DNP|LISTED_PLAYED|groin_hip": [
+     0,
+     1,
+     0,
+     1
+    ],
+    "Questionable|FP|LISTED_PLAYED|illness": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED|groin_hip": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED|ankle": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|FP|LISTED_PLAYED|ankle": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|DNP|LISTED_PLAYED|illness": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Doubtful|LP|LISTED_PLAYED|knee": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|knee": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|concussion": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "NONE|DNP|LISTED_PLAYED|hamstring": [
+     0,
+     0,
+     0,
+     4
+    ],
+    "Out|NONE|LISTED_PLAYED|other": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|NONE|LISTED_PLAYED|hamstring": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|hand_wrist": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|foot": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|LP|LISTED_PLAYED|leg_muscle": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "NONE|DNP|LISTED_PLAYED|concussion": [
+     0,
+     0,
+     0,
+     2
+    ],
+    "Questionable|DNP|LISTED_PLAYED|concussion": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "Doubtful|DNP|LISTED_PLAYED|foot": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "NONE|FP|NOT_LISTED|ankle": [
+     242,
+     2,
+     3,
+     3
+    ],
+    "Questionable|FP|NOT_LISTED|hand_wrist": [
+     12,
+     2,
+     1,
+     0
+    ],
+    "Questionable|FP|NOT_LISTED|knee": [
+     36,
+     0,
+     1,
+     1
+    ],
+    "Questionable|LP|NOT_LISTED|upper_body": [
+     141,
+     30,
+     14,
+     9
+    ],
+    "Questionable|LP|NOT_LISTED|knee": [
+     116,
+     23,
+     7,
+     14
+    ],
+    "Questionable|LP|NOT_LISTED|hamstring": [
+     83,
+     33,
+     20,
+     10
+    ],
+    "Questionable|LP|NOT_LISTED|hand_wrist": [
+     15,
+     3,
+     4,
+     1
+    ],
+    "NONE|FP|NOT_LISTED|upper_body": [
+     473,
+     7,
+     4,
+     11
+    ],
+    "NONE|FP|NOT_LISTED|knee": [
+     276,
+     2,
+     8,
+     4
+    ],
+    "NONE|FP|NOT_LISTED|hamstring": [
+     106,
+     4,
+     0,
+     1
+    ],
+    "NONE|FP|NOT_LISTED|leg_muscle": [
+     131,
+     0,
+     0,
+     1
+    ],
+    "Questionable|FP|NOT_LISTED|ankle": [
+     43,
+     3,
+     0,
+     0
+    ],
+    "NONE|LP|NOT_LISTED|knee": [
+     42,
+     1,
+     0,
+     3
+    ],
+    "Questionable|LP|NOT_LISTED|leg_muscle": [
+     60,
+     10,
+     8,
+     4
+    ],
+    "Questionable|LP|NOT_LISTED|foot": [
+     48,
+     13,
+     4,
+     2
+    ],
+    "Questionable|FP|NOT_LISTED|upper_body": [
+     62,
+     3,
+     3,
+     3
+    ],
+    "Questionable|LP|NOT_LISTED|ankle": [
+     105,
+     17,
+     7,
+     10
+    ],
+    "NONE|FP|NOT_LISTED|groin_hip": [
+     142,
+     1,
+     2,
+     2
+    ],
+    "NONE|FP|NOT_LISTED|concussion": [
+     75,
+     2,
+     0,
+     0
+    ],
+    "NONE|FP|NOT_LISTED|illness": [
+     168,
+     5,
+     4,
+     13
+    ],
+    "Questionable|FP|NOT_LISTED|foot": [
+     15,
+     1,
+     0,
+     2
+    ],
+    "Questionable|FP|NOT_LISTED|leg_muscle": [
+     20,
+     1,
+     0,
+     0
+    ],
+    "Questionable|LP|NOT_LISTED|groin_hip": [
+     83,
+     16,
+     4,
+     4
+    ],
+    "NONE|FP|NOT_LISTED|foot": [
+     137,
+     3,
+     1,
+     2
+    ],
+    "NONE|FP|NOT_LISTED|not_injury": [
+     3,
+     0,
+     0,
+     0
+    ],
+    "Questionable|FP|NOT_LISTED|hamstring": [
+     21,
+     4,
+     1,
+     2
+    ],
+    "Questionable|FP|NOT_LISTED|concussion": [
+     29,
+     7,
+     0,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|groin_hip": [
+     1,
+     0,
+     2,
+     7
+    ],
+    "NONE|FP|NOT_LISTED|hand_wrist": [
+     125,
+     1,
+     2,
+     3
+    ],
+    "Questionable|DNP|NOT_LISTED|leg_muscle": [
+     11,
+     8,
+     7,
+     4
+    ],
+    "Questionable|DNP|NOT_LISTED|knee": [
+     14,
+     7,
+     9,
+     5
+    ],
+    "Questionable|FP|NOT_LISTED|groin_hip": [
+     22,
+     2,
+     1,
+     0
+    ],
+    "NONE|LP|NOT_LISTED|illness": [
+     12,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|illness": [
+     16,
+     4,
+     2,
+     5
+    ],
+    "NONE|FP|NOT_LISTED|other": [
+     15,
+     0,
+     2,
+     1
+    ],
+    "Questionable|LP|NOT_LISTED|concussion": [
+     27,
+     8,
+     2,
+     1
+    ],
+    "NONE|LP|NOT_LISTED|groin_hip": [
+     27,
+     0,
+     0,
+     0
+    ],
+    "Questionable|LP|NOT_LISTED|other": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "Questionable|DNP|NOT_LISTED|hamstring": [
+     7,
+     14,
+     8,
+     5
+    ],
+    "NONE|LP|NOT_LISTED|ankle": [
+     34,
+     1,
+     0,
+     0
+    ],
+    "Questionable|DNP|NOT_LISTED|upper_body": [
+     15,
+     17,
+     6,
+     9
+    ],
+    "NONE|LP|NOT_LISTED|foot": [
+     28,
+     0,
+     0,
+     2
+    ],
+    "NONE|LP|NOT_LISTED|hamstring": [
+     23,
+     0,
+     0,
+     4
+    ],
+    "Questionable|DNP|NOT_LISTED|ankle": [
+     10,
+     9,
+     5,
+     5
+    ],
+    "Questionable|LP|NOT_LISTED|illness": [
+     23,
+     5,
+     2,
+     0
+    ],
+    "Questionable|FP|NOT_LISTED|illness": [
+     10,
+     3,
+     1,
+     0
+    ],
+    "NONE|LP|NOT_LISTED|upper_body": [
+     52,
+     1,
+     0,
+     2
+    ],
+    "Questionable|DNP|NOT_LISTED|illness": [
+     49,
+     10,
+     9,
+     8
+    ],
+    "NONE|LP|NOT_LISTED|concussion": [
+     4,
+     0,
+     0,
+     0
+    ],
+    "NONE|LP|NOT_LISTED|leg_muscle": [
+     14,
+     0,
+     0,
+     1
+    ],
+    "NONE|LP|NOT_LISTED|hand_wrist": [
+     6,
+     0,
+     1,
+     0
+    ],
+    "Questionable|DNP|NOT_LISTED|groin_hip": [
+     16,
+     4,
+     2,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|knee": [
+     3,
+     0,
+     2,
+     9
+    ],
+    "Questionable|DNP|NOT_LISTED|foot": [
+     10,
+     9,
+     6,
+     1
+    ],
+    "Doubtful|DNP|NOT_LISTED|ankle": [
+     1,
+     8,
+     13,
+     0
+    ],
+    "Questionable|NONE|NOT_LISTED|upper_body": [
+     2,
+     0,
+     0,
+     2
+    ],
+    "Questionable|NONE|NOT_LISTED|illness": [
+     12,
+     1,
+     0,
+     1
+    ],
+    "NONE|LP|NOT_LISTED|not_injury": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|not_injury": [
+     4,
+     0,
+     0,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|concussion": [
+     1,
+     4,
+     1,
+     2
+    ],
+    "NONE|DNP|NOT_LISTED|foot": [
+     1,
+     0,
+     0,
+     4
+    ],
+    "Questionable|NONE|NOT_LISTED|foot": [
+     3,
+     0,
+     0,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|hamstring": [
+     1,
+     2,
+     1,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|concussion": [
+     1,
+     0,
+     0,
+     3
+    ],
+    "Questionable|NONE|NOT_LISTED|groin_hip": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "Questionable|DNP|NOT_LISTED|concussion": [
+     1,
+     2,
+     2,
+     3
+    ],
+    "Questionable|NONE|NOT_LISTED|knee": [
+     4,
+     0,
+     0,
+     0
+    ],
+    "Questionable|NONE|NOT_LISTED|leg_muscle": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "Questionable|NONE|NOT_LISTED|hamstring": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|hand_wrist": [
+     1,
+     0,
+     1,
+     2
+    ],
+    "Questionable|DNP|NOT_LISTED|hand_wrist": [
+     1,
+     3,
+     0,
+     0
+    ],
+    "NONE|DNP|NOT_LISTED|ankle": [
+     1,
+     0,
+     0,
+     9
+    ],
+    "NONE|DNP|NOT_LISTED|hamstring": [
+     1,
+     0,
+     1,
+     5
+    ],
+    "Doubtful|LP|NOT_LISTED|upper_body": [
+     1,
+     4,
+     6,
+     1
+    ],
+    "Out|DNP|NOT_LISTED|ankle": [
+     0,
+     27,
+     57,
+     46
+    ],
+    "Out|DNP|NOT_LISTED|concussion": [
+     0,
+     63,
+     41,
+     42
+    ],
+    "Doubtful|DNP|NOT_LISTED|knee": [
+     0,
+     3,
+     4,
+     2
+    ],
+    "Out|DNP|NOT_LISTED|knee": [
+     0,
+     20,
+     65,
+     51
+    ],
+    "Doubtful|DNP|NOT_LISTED|hamstring": [
+     0,
+     6,
+     13,
+     1
+    ],
+    "Doubtful|DNP|NOT_LISTED|foot": [
+     0,
+     2,
+     2,
+     2
+    ],
+    "Out|DNP|NOT_LISTED|foot": [
+     0,
+     5,
+     20,
+     24
+    ],
+    "Out|DNP|NOT_LISTED|hamstring": [
+     0,
+     33,
+     55,
+     33
+    ],
+    "Out|LP|NOT_LISTED|concussion": [
+     0,
+     7,
+     1,
+     1
+    ],
+    "Out|DNP|NOT_LISTED|upper_body": [
+     0,
+     32,
+     50,
+     42
+    ],
+    "Out|LP|NOT_LISTED|knee": [
+     0,
+     2,
+     4,
+     1
+    ],
+    "Doubtful|DNP|NOT_LISTED|upper_body": [
+     0,
+     8,
+     5,
+     6
+    ],
+    "Out|DNP|NOT_LISTED|groin_hip": [
+     0,
+     20,
+     10,
+     21
+    ],
+    "Out|FP|NOT_LISTED|concussion": [
+     0,
+     4,
+     0,
+     2
+    ],
+    "Doubtful|DNP|NOT_LISTED|groin_hip": [
+     0,
+     11,
+     6,
+     1
+    ],
+    "Out|DNP|NOT_LISTED|hand_wrist": [
+     0,
+     2,
+     8,
+     12
+    ],
+    "Doubtful|LP|NOT_LISTED|groin_hip": [
+     0,
+     3,
+     1,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|leg_muscle": [
+     0,
+     7,
+     30,
+     14
+    ],
+    "Doubtful|LP|NOT_LISTED|knee": [
+     0,
+     2,
+     2,
+     0
+    ],
+    "Out|LP|NOT_LISTED|hamstring": [
+     0,
+     3,
+     1,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|leg_muscle": [
+     0,
+     4,
+     7,
+     5
+    ],
+    "Doubtful|FP|NOT_LISTED|leg_muscle": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|illness": [
+     0,
+     6,
+     7,
+     4
+    ],
+    "Doubtful|LP|NOT_LISTED|concussion": [
+     0,
+     2,
+     0,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|leg_muscle": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|illness": [
+     0,
+     3,
+     0,
+     0
+    ],
+    "Out|LP|NOT_LISTED|ankle": [
+     0,
+     1,
+     1,
+     0
+    ],
+    "Out|NONE|NOT_LISTED|illness": [
+     0,
+     1,
+     3,
+     0
+    ],
+    "Doubtful|LP|NOT_LISTED|foot": [
+     0,
+     1,
+     0,
+     1
+    ],
+    "Out|FP|NOT_LISTED|illness": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Questionable|DNP|NOT_LISTED|other": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Doubtful|DNP|NOT_LISTED|hand_wrist": [
+     0,
+     1,
+     1,
+     2
+    ],
+    "Doubtful|LP|NOT_LISTED|ankle": [
+     0,
+     1,
+     2,
+     0
+    ],
+    "Out|FP|NOT_LISTED|groin_hip": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Doubtful|FP|NOT_LISTED|other": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "Out|LP|NOT_LISTED|hand_wrist": [
+     0,
+     1,
+     1,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|upper_body": [
+     0,
+     0,
+     1,
+     14
+    ],
+    "Doubtful|LP|NOT_LISTED|hand_wrist": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|FP|NOT_LISTED|hamstring": [
+     0,
+     0,
+     2,
+     0
+    ],
+    "Out|DNP|NOT_LISTED|other": [
+     0,
+     0,
+     2,
+     1
+    ],
+    "Out|LP|NOT_LISTED|upper_body": [
+     0,
+     0,
+     1,
+     2
+    ],
+    "Out|NONE|NOT_LISTED|upper_body": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|FP|NOT_LISTED|leg_muscle": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "NONE|DNP|NOT_LISTED|leg_muscle": [
+     0,
+     0,
+     0,
+     6
+    ],
+    "Doubtful|NONE|NOT_LISTED|illness": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "Out|FP|NOT_LISTED|knee": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "Out|LP|NOT_LISTED|foot": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "Doubtful|NONE|NOT_LISTED|hamstring": [
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  "play_next_game": {
+   "ALL": {
+    "ALL": [
+     10881,
+     7644
+    ]
+   },
+   "report_status": {
+    "Questionable": [
+     3250,
+     2501
+    ],
+    "NONE": [
+     5046,
+     4349
+    ],
+    "Doubtful": [
+     379,
+     170
+    ],
+    "Out": [
+     2206,
+     624
+    ]
+   },
+   "report_status/practice_status": {
+    "Questionable|LP": [
+     2125,
+     1653
+    ],
+    "Questionable|FP": [
+     639,
+     534
+    ],
+    "NONE|FP": [
+     4230,
+     3723
+    ],
+    "Questionable|DNP": [
+     456,
+     290
+    ],
+    "NONE|LP": [
+     641,
+     573
+    ],
+    "Doubtful|DNP": [
+     275,
+     118
+    ],
+    "Out|DNP": [
+     2032,
+     548
+    ],
+    "Doubtful|LP": [
+     94,
+     48
+    ],
+    "Doubtful|FP": [
+     8,
+     4
+    ],
+    "Out|FP": [
+     22,
+     11
+    ],
+    "Out|LP": [
+     145,
+     64
+    ],
+    "NONE|DNP": [
+     175,
+     53
+    ],
+    "Questionable|NONE": [
+     30,
+     24
+    ],
+    "Out|NONE": [
+     7,
+     1
+    ],
+    "Doubtful|NONE": [
+     2,
+     0
+    ]
+   },
+   "report_status/practice_status/played_this_game": {
+    "Questionable|LP|True": [
+     1484,
+     1276
+    ],
+    "Questionable|FP|True": [
+     521,
+     466
+    ],
+    "NONE|FP|True": [
+     4002,
+     3635
+    ],
+    "Questionable|DNP|True": [
+     190,
+     166
+    ],
+    "NONE|LP|True": [
+     611,
+     565
+    ],
+    "Doubtful|DNP|True": [
+     4,
+     2
+    ],
+    "Out|DNP|True": [
+     1,
+     1
+    ],
+    "Out|DNP|False": [
+     2031,
+     547
+    ],
+    "NONE|FP|False": [
+     228,
+     88
+    ],
+    "Questionable|LP|False": [
+     641,
+     377
+    ],
+    "Doubtful|LP|False": [
+     92,
+     46
+    ],
+    "Doubtful|FP|False": [
+     8,
+     4
+    ],
+    "Doubtful|DNP|False": [
+     271,
+     116
+    ],
+    "Questionable|FP|False": [
+     118,
+     68
+    ],
+    "Out|FP|False": [
+     22,
+     11
+    ],
+    "Out|LP|False": [
+     145,
+     64
+    ],
+    "NONE|LP|False": [
+     30,
+     8
+    ],
+    "Questionable|DNP|False": [
+     266,
+     124
+    ],
+    "NONE|DNP|False": [
+     122,
+     5
+    ],
+    "NONE|DNP|True": [
+     53,
+     48
+    ],
+    "Questionable|NONE|True": [
+     26,
+     23
+    ],
+    "Out|NONE|False": [
+     7,
+     1
+    ],
+    "Doubtful|LP|True": [
+     2,
+     2
+    ],
+    "Questionable|NONE|False": [
+     4,
+     1
+    ],
+    "Doubtful|NONE|False": [
+     2,
+     0
+    ]
+   }
+  },
+  "roster_next_game": {
+   "ALL": {
+    "ALL": [
+     92631,
+     41820
+    ]
+   },
+   "roster_status": {
+    "DEV": [
+     16462,
+     967
+    ],
+    "INA": [
+     2948,
+     655
+    ],
+    "EXE": [
+     29,
+     5
+    ],
+    "ACT": [
+     48546,
+     39658
+    ],
+    "RES": [
+     10294,
+     373
+    ],
+    "SUS": [
+     237,
+     25
+    ],
+    "RSN": [
+     140,
+     2
+    ],
+    "NWT": [
+     275,
+     1
+    ],
+    "UFA": [
+     52,
+     0
+    ],
+    "RFA": [
+     2,
+     0
+    ],
+    "CUT": [
+     12897,
+     107
+    ],
+    "PUP": [
+     311,
+     8
+    ],
+    "E01": [
+     1,
+     0
+    ],
+    "TRD": [
+     10,
+     0
+    ],
+    "E14": [
+     16,
+     0
+    ],
+    "RET": [
+     342,
+     0
+    ],
+    "TRC": [
+     26,
+     4
+    ],
+    "RSR": [
+     43,
+     15
+    ]
+   }
+  }
+ }
+}
