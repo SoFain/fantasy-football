@@ -69,6 +69,44 @@ class PromoteStandardQbGuardedTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             validate_board(board)
 
+    def test_cutline_crossing_is_recorded_not_blocking(self):
+        board = self._board()
+        # Anchor QB7 promoted to QB6, anchor QB6 dropped to QB7: both cross QB6.
+        board[5].update(anchor_rank=7, guarded_qb6_crossing=True)
+        board[6].update(anchor_rank=6, guarded_qb6_crossing=True)
+        summary = validate_board(board)
+        self.assertEqual(
+            [(row["player_name"], row["anchor_rank"], row["guarded_rank"]) for row in summary["recorded_cutline_crossings"]],
+            [("QB 6", 7, 6), ("QB 7", 6, 7)],
+        )
+        self.assertIn("Cutline crossing recorded for review", board[5]["cutline_adjustment_note"])
+        self.assertNotIn("cutline_adjustment_note", board[0])
+        sql = build_promotion_sql(
+            board, project="p", dataset="d", ranking_version="v", model_run_id="m", prior_ranking_version="old",
+        )
+        self.assertIn("CUTLINE_CROSSING_RECORDED", sql)
+        self.assertNotIn("OWNER_APPROVED_CUTLINE_CROSSING", sql)
+
+    def test_structural_invariants_still_fail_with_crossings(self):
+        board = self._board()[:39]
+        board[5].update(anchor_rank=7)
+        with self.assertRaises(RuntimeError):
+            validate_board(board)
+
+    def _board(self):
+        board = [self._record() for _ in range(45)]
+        for rank, record in enumerate(board, start=1):
+            record.update(
+                player_id=str(rank), player_name=f"QB {rank}", guarded_consensus_rank=rank, anchor_rank=rank,
+                consensus_75_25_rank=rank, linear_70_30_rank=rank,
+                consensus_movement_from_anchor=0, linear_movement_from_anchor=0,
+                consensus_movement_review=False, linear_movement_review=False, guarded_movement_review=False,
+                consensus_rushing_only_riser=False, linear_rushing_only_riser=False,
+                consensus_qb6_crossing=False, consensus_qb12_crossing=False, consensus_qb24_crossing=False,
+                linear_qb6_crossing=False, linear_qb12_crossing=False, linear_qb24_crossing=False,
+            )
+        return board
+
     @staticmethod
     def _record():
         return {

@@ -2,6 +2,8 @@
 
 Every decision the Pigskin ranking pipeline makes about a player or a board, compiled read-only on 2026-09-27 for the AI decision layer work (`docs/ai-decision-layer.md`). Sources: the files listed at the end, the chain logs in `output/daily-publish/chain-*.log` (26 runs, 2026-09-14 to 09-27), the local feed in `output/public-rankings/*.json`, and git history. BigQuery was not queried; current values come from the local JSON written 2026-09-27 20:24.
 
+**Update 2026-09-27 (branch `owner-rules-removal`):** the owner exceptions below (items 1 to 6, 9, 10, 11) were removed and the judgment gates now log instead of block. See "Owner Rules Removed 2026-09-27" in `docs/rankings-production-runbook.md`. The inventory is otherwise the pre-change snapshot.
+
 **Chain health, 2026-09-14 to 09-27:** 2 of 26 runs succeeded (`chain-20260921-233946`, `chain-20260927-201604`).
 - 21 failed at the coverage gate on MarShawn Lloyd (blocking omission).
 - 2 failed at stage 9, after writes had begun (exit 3): `standard overall board contains teamless players: Darius Slayton`.

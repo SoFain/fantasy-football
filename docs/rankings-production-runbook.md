@@ -33,7 +33,7 @@ Current injury and suspension information is post-formula context. A designation
 |---|---|---|
 | Standard | QB | Guarded Standard 75/25 queue |
 | Standard | RB | RB Fable 0.1 |
-| Standard | WR | WR Fable v1 current candidates: exact qualified score plus prior-qualified veteran coverage fallback, followed by post-formula review and the elite-order guardrail |
+| Standard | WR | WR Fable v1 current candidates: exact qualified score plus prior-qualified veteran coverage fallback, followed by post-formula review |
 | Standard | TE | TE Fable v1.0a no-man |
 | PPR and Half-PPR | QB | Guarded Standard queue, because QB scoring is unchanged |
 | PPR and Half-PPR | RB | RB Fable 0.1 with 2% shifted from non-garbage-time touches to target share |
@@ -41,7 +41,36 @@ Current injury and suspension information is post-formula context. A designation
 | PPR and Half-PPR | TE | TE Fable v1.0a no-man transferred unchanged |
 | GNG Keeper | All | Approved GNG position-specific formulas and Sleeper layer |
 
-Reception-profile candidate tables are `ppr_fable_rankings_current` and `half_ppr_fable_rankings_current`. They contain ranks and formula scores, not the advanced fields required for public explanations. `scripts/promote_ppr_fable_v1_positional.py` must join the scored RB, WR, and TE views when generating Pigskin verdicts.
+Reception-profile candidates are rebuilt on every promotion by `reception_candidates_sql()` in `scripts/promote_ppr_fable_v1_positional.py` from the same RB, WR, and TE formula views. They carry ranks and formula scores only, so the promoter joins the scored views when generating Pigskin verdicts. The old static `ppr_fable_rankings_current` and `half_ppr_fable_rankings_current` tables are no longer read.
+
+## Owner Rules Removed 2026-09-27
+
+The owner removed every handwritten ranking rule ("Remove any of my handwritten rules. Period. I want to start fresh."). The standing rule: no player-specific hand rules. Uncertain judgments are left as the formula produced them and logged, never hard-coded, and never allowed to fail the daily cron. They will come from the AI decision layer (`docs/ai-decision-layer.md`) after each decision family is backtested.
+
+What was removed:
+
+| Rule | Where | Replacement |
+|---|---|---|
+| Standard WR elite order (Brown, Jefferson, Wilson) and its ASSERT | `build_standard_wr_fable_v1_safety_review.py`, `promote_standard_fable_v1_positional.py` | Formula score plus the shared role adjustment decides the order |
+| GNG owner watchlist names | `build_gng_2026_candidate_boards.py` | Only the structural teamless and unknown-team watchlist remains |
+| Coverage-gate exceptions (Theo Wease, MarShawn Lloyd) | `audit_current_player_ranking_coverage.py` | Review-only status by trace code for every player |
+| GNG injured-starter exception (Caleb Williams) | `gng_sleeper_safety.py` | Hard reviews no longer block; the player stays with his flags |
+| PPR/Half July pins and exclusions, `recommended_rank` | `publish_ppr_fable_v1_candidate_boards.py` (deleted), `promote_ppr_fable_v1_positional.py` | Candidates rebuilt from the formula views on every run |
+| GNG unified floors (Jeremiyah Love, QB4) | `build_unified_gng_2026_top100.py` | Pure VORP interleave |
+| GNG WR live-rank continuity protection | `build_gng_2026_candidate_boards.py` | Formula order, not yesterday's rank |
+
+Kept as facts or backtested formula: the Marvin Harrison Jr identity override, the three documented GNG Sleeper identity aliases, `player_identity_overrides`, `manual_market_values`, `data/coaching_staff.csv`, and the Situation v1 `EFFECTS` and `WINPCT_2025` coefficients.
+
+Gate behavior:
+
+| Gate | Blocks | Logged, review-only |
+|---|---|---|
+| Coverage gate | `FABLE_FORMULA_TRANSFORM_DROPOUT`, `IDENTITY_BRIDGE_COLLISION`, `IDENTITY_BRIDGE_UNMAPPED`, `NOT_IN_RECEPTION_CANDIDATE_TABLES` for an established player | `NO_2025_SITUATIONAL_SOURCE_ROW`, `BELOW_2025_FABLE_QUALIFICATION_THRESHOLD`, `ROOKIE_SYSTEM_REQUIRED`, `QB_COVERAGE_REVIEW`, `POSITIONAL_PROMOTION_OR_BOARD_CUTOFF` |
+| GNG promote preflight | 260 positional and 150 unified rows, zero teamless, zero non-contiguous positions, zero queue mismatches | Sleeper hard reviews (QB depth over 1, injury, inactive) |
+| Standard WR preflight | 100 rows, zero teamless, zero missing Sleeper context, stale-snapshot mismatch | Sleeper hard reviews (IR, PUP, other non-Active status) |
+| Standard QB promote | 40 to 45 rows, unique ranks, weak-passing guard, depth-order role buckets | QB6/QB24 cutline crossings, written to `rank_rationale` as `CUTLINE_CROSSING_RECORDED` |
+
+Review-only cases are appended to `output/review-log/<gate>.jsonl` (`coverage-gate-review-only`, `gng-sleeper-hard-review`, `standard-wr-sleeper-hard-review`, `standard-qb-cutline-crossing`). SHA and version checks and zero-warning feed validation are unchanged.
 
 ## Release Invariants
 
@@ -59,7 +88,7 @@ A release is invalid if any of these checks fail:
 - A public board hash differs from the SHA-256 recorded in the manifest.
 - A current team or positional context value is borrowed from a stale board.
 - A GNG positional row lacks the GNG-only `context` field or exceeds 320 characters.
-- An established, active Sleeper depth-order-1 player with a current team disappears before the candidate stage because of identity failure, a one-season qualification threshold, missing situational source data, or a formula transform dropout.
+- An established, active Sleeper depth-order-1 player with a current team disappears before the candidate stage because of identity failure, a formula transform dropout, or a reception-candidate derivation loss. A missing 2025 sample or a thin sample under the formula's own qualification rule is a logged review item, not a release failure.
 
 Current positional row contracts:
 
@@ -104,7 +133,7 @@ Run the current-player coverage gate before any positional promotion:
 .\venv\Scripts\python.exe scripts\audit_current_player_ranking_coverage.py --fail-on-blocking
 ```
 
-The command is read-only against BigQuery. It writes a local JSON audit and rebuild report, then exits `2` if an established depth-order-1 player has been lost before the candidate or positional board. Rookie-system gaps and players who have valid formula rows below a documented board cutoff remain visible in the report but do not trip this gate. Exact, bounded owner decisions in `src/ranking_owner_decisions.py` move a source-verified correct omission (for example a temporarily promoted player with no 2025 regular-season games) to `review_only_omissions`; they expire when team, experience, trace code, games, or volume leave the recorded bounds.
+The command is read-only against BigQuery. It writes a local JSON audit and rebuild report, then exits `2` only if an established depth-order-1 player was lost to a pipeline defect (see "Owner Rules Removed 2026-09-27"). Every other omission is listed in `review_only_omissions` with its trace code and appended to `output/review-log/coverage-gate-review-only.jsonl`. There are no per-player exceptions.
 
 ### 3. Dry-run positional promotion
 
@@ -251,7 +280,7 @@ The existing Windows task `PigskinDailyPublishImport` runs `scripts/daily_pigski
 The Windows host uses `Eastern Standard Time`. Both daily trigger boundaries omit a fixed UTC offset, so their local clock times follow daylight-saving changes.
 
 1. Refresh the current NFL season in `weekly_metrics` transactionally. Preserve historical seasons, reject lost source keys, and report games awaiting upstream stats. See `docs/current-season-stats-refresh.md`.
-2. Refresh roster safety context and rebuild the materialized Standard WR safety candidates. A candidate snapshot must match the current safety timestamp and team before promotion. Rostered inactive injuries remain review-only with zero absence adjustment; missing identity, teamless players, stale context, and other hard reviews still block.
+2. Refresh roster safety context and rebuild the materialized Standard WR safety candidates. A candidate snapshot must match the current safety timestamp and team before promotion. Rostered inactive injuries and other Sleeper hard reviews are review-only with zero absence adjustment and are logged; missing identity, teamless players, and stale context still block.
 3. Run focused tests, coverage audit, positional dry runs and gated promotions, then recheck coverage. Rebuild unified boards and the existing situation adjustments. Every profile must pass the release invariants before publication.
 4. Build local public JSON for all profiles. Preserve preseason formula provenance and add a separate schema 1.4 `current_season` block with observed production and coverage caveats. Stats ingestion does not introduce an in-season formula.
 5. Reconstruct current GNG scoring and generate the separate experimental weekly and ROS dataset using the frozen calibration in `docs/inseason-shrinkage-v1-calibration.json`. Preserve the original draft formulas. See `docs/inseason-rankings-baseline.md` for validation limits and unavailable-player handling.

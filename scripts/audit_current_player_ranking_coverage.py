@@ -15,8 +15,9 @@ from google.cloud import bigquery
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.promote_ppr_fable_v1_positional import reception_candidates_sql
+from src.review_log import append_review_items
 from src.sleeper_player_snapshot import fetch_sleeper_players
-from src.ranking_owner_decisions import COVERAGE_GATE_REVIEW_ONLY_DECISIONS
 
 
 PROFILES = ("standard", "ppr", "half_ppr")
@@ -28,12 +29,27 @@ EXPECTED_COUNTS = {
     "half_ppr": {"QB": 45, "RB": 80, "WR": 100, "TE": 35},
 }
 HIGH_SIGNAL_POSITION_RANK = {"QB": 16, "RB": 36, "WR": 55, "TE": 12}
+# Gate policy (owner rules removed 2026-09-27). A code blocks only when it
+# means the pipeline lost a player who has usable source data. A code that
+# records a judgment (no sample, a thin sample under the formula's own
+# qualification rule, a depth-chart slot conflict, a rookie or QB lane, a
+# board cutoff) is review-only: reported and logged, never blocking, and never
+# resolved by a player-specific exception.
 BLOCKING_TRACE_CODES = {
-    "BELOW_2025_FABLE_QUALIFICATION_THRESHOLD",
+    # Qualified 2025 source row, but no formula score came out.
     "FABLE_FORMULA_TRANSFORM_DROPOUT",
+    # Source row exists, but the identity join failed or collided.
     "IDENTITY_BRIDGE_COLLISION",
     "IDENTITY_BRIDGE_UNMAPPED",
+    # Formula score exists, but the reception-profile candidate derivation lost it.
+    "NOT_IN_RECEPTION_CANDIDATE_TABLES",
+}
+REVIEW_ONLY_TRACE_CODES = {
+    "BELOW_2025_FABLE_QUALIFICATION_THRESHOLD",
     "NO_2025_SITUATIONAL_SOURCE_ROW",
+    "POSITIONAL_PROMOTION_OR_BOARD_CUTOFF",
+    "QB_COVERAGE_REVIEW",
+    "ROOKIE_SYSTEM_REQUIRED",
 }
 
 
@@ -156,26 +172,9 @@ def classify_omission(
     return "POSITIONAL_PROMOTION_OR_BOARD_CUTOFF"
 
 
-def coverage_gate_review_only_reason(row: dict[str, Any]) -> str | None:
-    decision = COVERAGE_GATE_REVIEW_ONLY_DECISIONS.get(
-        (str(row.get("position") or ""), str(row.get("player_name") or ""))
-    )
-    if decision is None:
-        return None
-    trace_code = decision.get("trace_code")
-    if trace_code is not None and row.get("trace_code") != trace_code:
-        return None
-    qualification = row.get("qualification") or {}
-    if not qualification and trace_code != "NO_2025_SITUATIONAL_SOURCE_ROW":
-        return None
-    if (
-        row.get("team") != decision["team"]
-        or row.get("years_exp") != decision["years_exp"]
-        or float(qualification.get("games_played") or 0) > decision["max_games_played"]
-        or float(qualification.get("qualification_volume") or 0) > decision["max_qualification_volume"]
-    ):
-        return None
-    return str(decision["reason"])
+def is_blocking_omission(row: dict[str, Any]) -> bool:
+    """A frontline omission blocks only for an established player lost to a pipeline defect."""
+    return row.get("years_exp") not in (None, 0) and row["trace_code"] in BLOCKING_TRACE_CODES
 
 
 def markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
@@ -315,8 +314,8 @@ This phase was read-only against BigQuery and the public rankings. It made no li
 | Identity | The GNG point pool starts from canonical internal player IDs and then joins Sleeper context. | Fable situational data uses a name-based identity bridge. Same-name collisions can block an otherwise complete source row. |
 | Current Sleeper layer | Formula score is calculated first. A bounded depth-order adjustment is added; teamless players move to the watchlist. | The same post-formula safety view is joined after scoring. It cannot restore a player who never reached a Fable candidate table. |
 | Rookie handling | Explicit market-ranked rookie overlay with depth-chart penalties. | No equivalent rookie overlay in the current shared redraft promotion path. |
-| WR continuity | Existing live GNG top-six and top-12 WRs receive bounded merge-priority protection. | Standard has the approved A.J. Brown elite-order guardrail, but no general current-star coverage floor. |
-| Unified board | Position-locked interleaving plus the approved Jeremiyah Love and QB4 floors. | Position-locked interleaving preserves only players already present on active positional boards. |
+| Player-specific rules | None. Owner rules were removed 2026-09-27. | None. Owner rules were removed 2026-09-27. |
+| Unified board | Position-locked VORP interleaving. | Position-locked interleaving preserves only players already present on active positional boards. |
 
 ## Malik Nabers Trace
 
@@ -395,17 +394,22 @@ def main() -> int:
           PARTITION BY scoring_profile_id, position, player_id ORDER BY generated_at DESC
         ) = 1
     """)
+    # A formula row means a scored row: a qualified player whose score is NULL
+    # falls through to FABLE_FORMULA_TRANSFORM_DROPOUT.
     formula_rows = query_rows(client, f"""
         SELECT 'RB' position, player_name, candidate_internal_player_id player_id,
                CAST(NULL AS STRING) coverage_method, CAST(NULL AS INT64) score_source_season
-        FROM `{args.project}.{args.metrics_dataset}.v_rb_fable_01_scored_seasons` WHERE season = 2025
+        FROM `{args.project}.{args.metrics_dataset}.v_rb_fable_01_scored_seasons`
+        WHERE season = 2025 AND rb_fable_01_score IS NOT NULL
         UNION ALL
         SELECT 'WR', player_name, candidate_internal_player_id, coverage_method, score_source_season
         FROM `{args.project}.{args.metrics_dataset}.v_wr_fable_v1_current_candidates`
+        WHERE wr_fable_v1_score IS NOT NULL
         UNION ALL
         SELECT 'TE', player_name, candidate_internal_player_id,
                CAST(NULL AS STRING), CAST(NULL AS INT64)
-        FROM `{args.project}.{args.metrics_dataset}.v_te_fable_v1a_scored_seasons` WHERE season = 2025
+        FROM `{args.project}.{args.metrics_dataset}.v_te_fable_v1a_scored_seasons`
+        WHERE season = 2025 AND te_fable_v1a_no_man_score IS NOT NULL
     """)
     qualification_rows = query_rows(client, f"""
         SELECT 'RB' position, player_name, candidate_internal_player_id player_id, games_played,
@@ -441,15 +445,9 @@ def main() -> int:
         FROM `{args.project}.{args.metrics_dataset}.v_te_fable_v1a_situational_splits`
         WHERE season = 2025
     """)
-    candidate_rows = query_rows(client, f"""
-        SELECT 'ppr' profile, position, player_id, player_name, formula_rank, recommended_rank,
-               promotion_eligible, decision_code
-        FROM `{args.project}.{args.brain_dataset}.ppr_fable_rankings_current`
-        UNION ALL
-        SELECT 'half_ppr', position, player_id, player_name, formula_rank, recommended_rank,
-               promotion_eligible, decision_code
-        FROM `{args.project}.{args.brain_dataset}.half_ppr_fable_rankings_current`
-    """)
+    # The same current-formula candidate derivation the PPR/Half promoter uses.
+    reception_rows = query_rows(client, reception_candidates_sql(args.project, args.metrics_dataset))
+    candidate_rows = [{**row, "profile": profile} for profile in ("ppr", "half_ppr") for row in reception_rows]
     market_rows = query_rows(client, f"""
         SELECT position, display_name player_name, rank_position, rank_overall, market_value
         FROM `{args.project}.{args.brain_dataset}.market_consensus_baseline_current`
@@ -573,14 +571,9 @@ def main() -> int:
         )
     ]
     for row in omissions:
-        row["coverage_gate_review_only_reason"] = coverage_gate_review_only_reason(row)
-    blocking = [
-        row for row in omissions
-        if row.get("years_exp") not in (None, 0)
-        and row["trace_code"] in BLOCKING_TRACE_CODES
-        and row["coverage_gate_review_only_reason"] is None
-    ]
-    review_only = [row for row in omissions if row["coverage_gate_review_only_reason"] is not None]
+        row["gate_status"] = "blocking" if is_blocking_omission(row) else "review_only"
+    blocking = [row for row in omissions if row["gate_status"] == "blocking"]
+    review_only = [row for row in omissions if row["gate_status"] == "review_only"]
 
     ppr_half_mismatches = []
     for key in sorted(set(active_canonical["ppr"]) | set(active_canonical["half_ppr"])):
@@ -629,6 +622,14 @@ def main() -> int:
     args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
     args.json_output.write_text(json.dumps(report, indent=2, default=json_value) + "\n", encoding="utf-8")
     args.markdown_output.write_text(build_markdown(report), encoding="utf-8")
+    review_log = append_review_items("coverage-gate-review-only", [
+        {
+            "position": row["position"], "player_name": row["player_name"], "team": row["team"],
+            "years_exp": row.get("years_exp"), "trace_code": row["trace_code"],
+            "missing_profiles": row["missing_profiles"], "action": "REPORTED_NOT_BLOCKING",
+        }
+        for row in review_only
+    ])
     print(json.dumps({
         "read_only": True,
         "json_output": str(args.json_output),
@@ -640,7 +641,8 @@ def main() -> int:
         "frontline_omissions": len(omissions),
         "high_signal_omissions": [row["player_name"] for row in high_signal],
         "blocking_omissions": [row["player_name"] for row in blocking],
-        "review_only_omissions": [row["player_name"] for row in review_only],
+        "review_only_omissions": [f"{row['player_name']} ({row['trace_code']})" for row in review_only],
+        "review_log": str(review_log) if review_log else None,
         "bigquery_context_age_hours": freshness["context_age_hours"],
     }, indent=2, default=json_value))
     return 2 if args.fail_on_blocking and blocking else 0

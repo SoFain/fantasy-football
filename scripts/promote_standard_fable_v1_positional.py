@@ -42,8 +42,10 @@ ASSERT (
     AND context.current_board_rank_eligible
 ) AS 'Standard RB safety preflight failed';
 
+-- Structural only. A Sleeper hard review (IR, PUP, other non-Active status)
+-- keeps the WR on the board with his flags; the safety review builder logs it.
 ASSERT (
-  SELECT COUNT(*) = 100 AND COUNTIF(current_team IS NULL OR teamless_unranked OR sleeper_hard_review) = 0
+  SELECT COUNT(*) = 100 AND COUNTIF(current_team IS NULL OR teamless_unranked OR sleeper_context_missing) = 0
   FROM {wr}
 ) AS 'Standard WR repaired-board preflight failed';
 
@@ -292,14 +294,6 @@ ASSERT NOT EXISTS (
   )
   WHERE row_count!=distinct_ranks OR min_rank!=1 OR max_rank!=row_count
 ) AS 'Active Standard position ranks are not contiguous';
-
-ASSERT (
-  SELECT COUNT(*) = 3
-    AND STRING_AGG(player_name, '|' ORDER BY rank) = 'A.J. Brown|Justin Jefferson|Garrett Wilson'
-  FROM {live}
-  WHERE is_active AND scoring_profile_id='standard' AND position='WR'
-    AND player_name IN ('A.J. Brown', 'Justin Jefferson', 'Garrett Wilson')
-) AS 'Approved Standard WR elite order was not preserved';
 
 COMMIT TRANSACTION;
 """

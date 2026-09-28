@@ -3,9 +3,11 @@ from __future__ import annotations
 import unittest
 
 from scripts.audit_current_player_ranking_coverage import (
+    BLOCKING_TRACE_CODES,
+    REVIEW_ONLY_TRACE_CODES,
     classify_omission,
-    coverage_gate_review_only_reason,
     identity_keys,
+    is_blocking_omission,
     live_frontline_players,
     normalize_name,
 )
@@ -52,49 +54,40 @@ class CurrentPlayerRankingCoverageTest(unittest.TestCase):
             ),
         )
 
-    def test_theo_wease_sleeper_slot_false_positive_is_review_only_within_bounds(self) -> None:
-        omission = {
-            "player_name": "Theo Wease",
-            "position": "WR",
-            "team": "MIA",
-            "years_exp": 1,
-            "qualification": {"games_played": 3, "qualification_volume": 10.0},
+    def test_every_trace_code_has_exactly_one_gate_status(self) -> None:
+        emitted = {
+            "ROOKIE_SYSTEM_REQUIRED", "QB_COVERAGE_REVIEW", "NO_2025_SITUATIONAL_SOURCE_ROW",
+            "IDENTITY_BRIDGE_COLLISION", "IDENTITY_BRIDGE_UNMAPPED",
+            "BELOW_2025_FABLE_QUALIFICATION_THRESHOLD", "FABLE_FORMULA_TRANSFORM_DROPOUT",
+            "NOT_IN_RECEPTION_CANDIDATE_TABLES", "POSITIONAL_PROMOTION_OR_BOARD_CUTOFF",
         }
-        self.assertIn("third column", coverage_gate_review_only_reason(omission) or "")
+        self.assertEqual(emitted, BLOCKING_TRACE_CODES | REVIEW_ONLY_TRACE_CODES)
+        self.assertFalse(BLOCKING_TRACE_CODES & REVIEW_ONLY_TRACE_CODES)
 
-        omission["qualification"]["qualification_volume"] = 11.0
-        self.assertIsNone(coverage_gate_review_only_reason(omission))
-
-    def test_marshawn_lloyd_missing_2025_sample_is_review_only_within_bounds(self) -> None:
-        omission = {
-            "player_name": "MarShawn Lloyd",
-            "position": "RB",
-            "team": "GB",
-            "years_exp": 2,
-            "trace_code": "NO_2025_SITUATIONAL_SOURCE_ROW",
-            "qualification": None,
-        }
-        self.assertIn("no 2025 regular-season games", coverage_gate_review_only_reason(omission) or "")
-
-        for change in (
-            {"team": "PIT"},
-            {"years_exp": 3},
-            {"trace_code": "IDENTITY_BRIDGE_UNMAPPED"},
-            {"trace_code": "BELOW_2025_FABLE_QUALIFICATION_THRESHOLD",
-             "qualification": {"games_played": 2, "qualification_volume": 12.0}},
+    def test_judgment_codes_are_review_only_for_any_player(self) -> None:
+        # MarShawn Lloyd (no 2025 sample) and Theo Wease (thin sample, slot
+        # conflict) used to need named exceptions. Now the code decides.
+        for trace_code in (
+            "NO_2025_SITUATIONAL_SOURCE_ROW",
+            "BELOW_2025_FABLE_QUALIFICATION_THRESHOLD",
+            "QB_COVERAGE_REVIEW",
+            "POSITIONAL_PROMOTION_OR_BOARD_CUTOFF",
         ):
-            self.assertIsNone(coverage_gate_review_only_reason({**omission, **change}), change)
+            omission = {"player_name": "Any Veteran", "position": "RB", "years_exp": 4, "trace_code": trace_code}
+            self.assertFalse(is_blocking_omission(omission), trace_code)
 
-    def test_decision_without_trace_code_still_requires_a_qualification_row(self) -> None:
-        omission = {
-            "player_name": "Theo Wease",
-            "position": "WR",
-            "team": "MIA",
-            "years_exp": 1,
-            "trace_code": "NO_2025_SITUATIONAL_SOURCE_ROW",
-            "qualification": None,
-        }
-        self.assertIsNone(coverage_gate_review_only_reason(omission))
+    def test_pipeline_loss_codes_block_established_players_only(self) -> None:
+        for trace_code in sorted(BLOCKING_TRACE_CODES):
+            veteran = {"player_name": "Any Veteran", "position": "WR", "years_exp": 3, "trace_code": trace_code}
+            self.assertTrue(is_blocking_omission(veteran), trace_code)
+            self.assertFalse(is_blocking_omission({**veteran, "years_exp": 0}), trace_code)
+            self.assertFalse(is_blocking_omission({**veteran, "years_exp": None}), trace_code)
+
+    def test_formula_row_without_reception_candidate_is_blocking_code(self) -> None:
+        veteran = {"position": "WR", "years_exp": 5}
+        code = classify_omission(veteran, {"coverage_method": None}, {"identity_accepted": True}, set())
+        self.assertEqual("NOT_IN_RECEPTION_CANDIDATE_TABLES", code)
+        self.assertTrue(is_blocking_omission({**veteran, "trace_code": code}))
 
 
 if __name__ == "__main__":

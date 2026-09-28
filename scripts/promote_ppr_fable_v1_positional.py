@@ -1,4 +1,12 @@
-"""Promote reviewed PPR Fable RB/WR/TE queues with archive and rollback provenance."""
+"""Promote PPR and Half-PPR Fable RB/WR/TE queues from the current formula views.
+
+Candidates are rebuilt on every run from the approved formula views (RB Fable
+0.1 with the 2% target-share shift, WR Fable v1 current candidates, TE Fable
+v1.0a no-man), then pass through the shared post-formula safety layer exactly
+like Standard. There is no hand-written decisions layer: no pins, no manual
+exclusions, no recommended ranks (owner rules removed 2026-09-27). Players who
+gain a current team re-enter as soon as their formula score qualifies them.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +21,34 @@ WRITE_GATE="ALLOW_PPR_FABLE_POSITIONAL_PROMOTION"
 VERSION="ppr-fable-v1-20260711"
 
 
+def reception_candidates_sql(project: str, metrics_dataset: str) -> str:
+    """Current RB/WR/TE formula candidates for PPR and Half-PPR, ranked by raw formula score.
+
+    Half-PPR uses the same approved transform as PPR (runbook: Active Formula
+    Sources). Only the RB score changes: 2% moves from non-garbage-time touches
+    to target share. WR and TE scores transfer unchanged.
+    """
+    metrics = f"{project}.{metrics_dataset}"
+    return f"""
+SELECT player_id, player_name, position, formula_score,
+  ROW_NUMBER() OVER (PARTITION BY position ORDER BY formula_score DESC, player_name) AS formula_rank
+FROM (
+  SELECT candidate_internal_player_id AS player_id, player_name, 'RB' AS position,
+    rb_fable_01_score + 0.02*z_target_share - 0.02*z_ngt_tpg AS formula_score
+  FROM `{metrics}.v_rb_fable_01_scored_seasons`
+  WHERE season=2025 AND rb_fable_01_score IS NOT NULL
+  UNION ALL
+  SELECT candidate_internal_player_id, player_name, 'WR', wr_fable_v1_score
+  FROM `{metrics}.v_wr_fable_v1_current_candidates`
+  WHERE wr_fable_v1_score IS NOT NULL
+  UNION ALL
+  SELECT candidate_internal_player_id, player_name, 'TE', te_fable_v1a_no_man_score
+  FROM `{metrics}.v_te_fable_v1a_scored_seasons`
+  WHERE season=2025 AND te_fable_v1a_no_man_score IS NOT NULL
+)
+"""
+
+
 def build_sql(
     project: str,
     dataset: str,
@@ -22,8 +58,7 @@ def build_sql(
 ) -> str:
     live=f"`{project}.{dataset}.analytics_pigskin_rankings`"
     history=f"`{project}.{dataset}.analytics_pigskin_rankings_history`"
-    prefix="ppr_fable" if scoring_profile=="ppr" else "half_ppr_fable"
-    candidates=f"`{project}.{dataset}.{prefix}_rankings_current`"
+    candidates="reception_candidates"
     safety=f"`{project}.{metrics_dataset}.v_ranking_post_formula_safety`"
     rb=f"`{project}.{metrics_dataset}.v_rb_fable_01_scored_seasons`"
     wr=f"`{project}.{metrics_dataset}.v_wr_fable_v1_current_candidates`"
@@ -31,17 +66,42 @@ def build_sql(
     profile_label="PPR" if scoring_profile=="ppr" else "Half-PPR"
     version=version or (VERSION if scoring_profile=="ppr" else "half-ppr-fable-v1-20260711")
     return f"""
+CREATE TEMP TABLE {candidates} AS
+{reception_candidates_sql(project, metrics_dataset)};
+
 ASSERT NOT EXISTS (
   SELECT 1
   FROM {candidates} AS candidate
   LEFT JOIN {safety} AS context
     ON context.gsis_id=candidate.player_id AND context.position=candidate.position
-  WHERE (candidate.promotion_eligible OR candidate.recommended_rank IS NOT NULL)
-    AND candidate.formula_rank <= CASE candidate.position
+  WHERE candidate.formula_rank <= CASE candidate.position
       WHEN 'RB' THEN 80 WHEN 'WR' THEN 100 WHEN 'TE' THEN 35
     END
     AND context.gsis_id IS NULL
 ) AS 'Selected Fable rows contain missing Sleeper identity context';
+
+-- Promotion builds each row from the player's latest analytics_pigskin_rankings
+-- row. A formula-eligible player inside the board limit without one would be
+-- dropped silently, so fail closed instead (structural data loss).
+ASSERT NOT EXISTS (
+  SELECT 1
+  FROM (
+    SELECT candidate.player_id, candidate.position,
+      ROW_NUMBER() OVER (
+        PARTITION BY candidate.position
+        ORDER BY candidate.formula_score + context.post_formula_adjustment DESC, candidate.formula_rank, candidate.player_name
+      ) AS eligible_rank
+    FROM {candidates} AS candidate
+    JOIN {safety} AS context
+      ON context.gsis_id=candidate.player_id AND context.position=candidate.position
+    WHERE context.current_board_rank_eligible
+  ) AS eligible
+  WHERE eligible.eligible_rank <= CASE eligible.position WHEN 'RB' THEN 80 WHEN 'WR' THEN 100 WHEN 'TE' THEN 35 END
+    AND NOT EXISTS (
+      SELECT 1 FROM {live} AS template
+      WHERE template.player_id=eligible.player_id AND template.position=eligible.position
+    )
+) AS 'Eligible Fable candidate has no ranking row template';
 
 CREATE TEMP TABLE promoted AS
 WITH templates AS (
@@ -86,8 +146,7 @@ WITH templates AS (
     ON c.position='WR' AND wr.candidate_internal_player_id=c.player_id
   LEFT JOIN {te} te
     ON c.position='TE' AND te.season=2025 AND te.candidate_internal_player_id=c.player_id
-  WHERE (c.promotion_eligible OR c.recommended_rank IS NOT NULL)
-    AND context.current_board_rank_eligible
+  WHERE context.current_board_rank_eligible
 ), adjusted AS (
   SELECT
     c.*,
@@ -100,13 +159,7 @@ WITH templates AS (
 ), candidate_pre AS (
   SELECT
     adjusted.*,
-    ROW_NUMBER() OVER (
-      PARTITION BY position
-      ORDER BY COALESCE(
-        IF(decision_code='FORMULA_DEFAULT',NULL,recommended_rank),
-        adjusted_formula_rank
-      ),adjusted_formula_rank,formula_rank,player_name
-    ) AS new_rank
+    adjusted_formula_rank AS new_rank
   FROM adjusted
 ), candidate_rows AS (
   SELECT
@@ -130,7 +183,7 @@ WITH templates AS (
           c.wr_score_source_season,c.wr_prior_v1_score,c.wr_prior_v1_age_availability_component,
           c.wr_current_age_availability_component,c.formula_score,c.wr_games_played,c.wr_targets,
           context.post_formula_adjustment_detail)
-        ELSE CONCAT('{profile_label} Fable v1; ',context.post_formula_adjustment_detail,' ',c.decision_note)
+        ELSE CONCAT('{profile_label} Fable v1; ',context.post_formula_adjustment_detail)
       END AS rank_rationale,
       CASE c.position
         WHEN 'RB' THEN CONCAT(
@@ -185,13 +238,7 @@ WITH templates AS (
           END
         )
       END AS pigskin_verdict,
-      ARRAY_TO_STRING(ARRAY(
-        SELECT flag FROM UNNEST([
-          NULLIF(c.risk_flags,''),
-          NULLIF(context.review_flags_text,''),
-          c.decision_code
-        ]) flag WHERE flag IS NOT NULL
-      ),'; ') AS risk_flags,
+      NULLIF(context.review_flags_text,'') AS risk_flags,
       context.sleeper_player_id AS sleeper_player_id,
       context.team AS sleeper_team,
       context.active AS sleeper_active,

@@ -4,7 +4,7 @@ from scripts.run_gng_advanced_hypotheses import player_audit, weighted_average
 from scripts.run_gng_position_candidate_expansion import ROUND1_CANDIDATES, ROUND2_CANDIDATES, percent_ranks
 from src.gng_sleeper_safety import apply_sleeper_safety
 from scripts.build_gng_2026_candidate_boards import FORMULAS, LIMITS, build_query
-from scripts.build_unified_gng_2026_top100 import REPLACEMENT, apply_position_locked_floors, apply_position_locked_overall_floor
+from scripts.build_unified_gng_2026_top100 import REPLACEMENT
 from scripts.promote_gng_2026_rankings import build_sql as build_gng_promotion_sql
 
 
@@ -80,29 +80,6 @@ class GngAdvancedHypothesesTest(unittest.TestCase):
 
     def test_gng_unified_replacement_contract(self):
         self.assertEqual(REPLACEMENT, {"QB": 13, "RB": 36, "WR": 55, "TE": 12})
-
-    def test_rookie_floor_preserves_position_order(self):
-        board=[
-            {"overall_rank":1,"player_id":"rb1","player_name":"RB One","position":"RB","position_rank":1,"adjusted_vorp":5.0},
-            {"overall_rank":2,"player_id":"love","player_name":"Jeremiyah Love","position":"RB","position_rank":2,"adjusted_vorp":4.0},
-            {"overall_rank":3,"player_id":"rb3","player_name":"RB Three","position":"RB","position_rank":3,"adjusted_vorp":3.0},
-            {"overall_rank":4,"player_id":"wr1","player_name":"WR One","position":"WR","position_rank":1,"adjusted_vorp":2.0},
-            {"overall_rank":5,"player_id":"wr2","player_name":"WR Two","position":"WR","position_rank":2,"adjusted_vorp":1.0},
-        ]
-        adjusted=apply_position_locked_overall_floor(board,player_name="Jeremiyah Love",minimum_overall=4)
-        self.assertEqual([row["player_id"] for row in adjusted],["rb1","wr1","wr2","love","rb3"])
-
-    def test_multiple_position_floors_compose(self):
-        board=[
-            {"overall_rank":1,"player_id":"rb1","player_name":"RB One","position":"RB","position_rank":1},
-            {"overall_rank":2,"player_id":"love","player_name":"Jeremiyah Love","position":"RB","position_rank":2},
-            {"overall_rank":3,"player_id":"qb1","player_name":"QB One","position":"QB","position_rank":1},
-            {"overall_rank":4,"player_id":"hurts","player_name":"Jalen Hurts","position":"QB","position_rank":2},
-            {"overall_rank":5,"player_id":"wr1","player_name":"WR One","position":"WR","position_rank":1},
-        ]
-        adjusted=apply_position_locked_floors(board,{"Jeremiyah Love":4,"Jalen Hurts":5})
-        self.assertEqual(next(row["overall_rank"] for row in adjusted if row["player_id"]=="love"),4)
-        self.assertEqual(next(row["overall_rank"] for row in adjusted if row["player_id"]=="hurts"),5)
 
     def test_gng_promotion_is_profile_scoped_and_transactional(self):
         sql=build_gng_promotion_sql("project","brain","metrics","version")

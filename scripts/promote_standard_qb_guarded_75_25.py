@@ -18,6 +18,7 @@ from scripts.run_standard_qb_2026_owner_review import (
     build_owner_review_sql,
     summarize,
 )
+from src.review_log import append_review_items
 
 
 WRITE_GATE = "ALLOW_STANDARD_QB_GUARDED_PROMOTION"
@@ -35,16 +36,14 @@ def _sql_number(value: object) -> str:
     return "NULL" if value is None else str(value)
 
 
-def validate_board(board: list[dict], *, acknowledged_reason: str | None = None) -> dict:
+def validate_board(board: list[dict]) -> dict:
     """Enforce the guarded-board invariants.
 
-    QB6/QB24 cutline crossings normally fail the board. When the owner has
-    approved the specific movement, pass the approval text as
-    acknowledged_reason: the crossings are then recorded onto the crossing
-    records (and into their adjustment provenance at promotion) instead of
-    failing. One-time acknowledgment per the runbook's safety-layer change
-    class; the daily automation never passes a reason, so this can never
-    become a standing bypass. All other invariants still fail hard.
+    QB6/QB24 cutline crossings are a judgment signal, not a structural error:
+    the guarded formula rank stands, each crossing is recorded onto its record
+    (and into rank_rationale and adjustment provenance at promotion) and
+    returned in the summary for the review log. Row count, unique ranks, the
+    weak-passing guard, and the depth-order role buckets still fail hard.
     """
     summary = summarize(board)
     failures = []
@@ -54,29 +53,24 @@ def validate_board(board: list[dict], *, acknowledged_reason: str | None = None)
         failures.append("guarded ranks must be unique")
     if summary["guarded_weak_passing_riser_count"]:
         failures.append("weak-passing upward guard failed")
-    crossing_count = summary["guarded_qb6_crossing_count"] + summary["guarded_qb24_crossing_count"]
-    if crossing_count and acknowledged_reason:
-        acknowledged = []
-        for record in board:
-            anchor = record.get("anchor_rank")
-            rank = record["guarded_consensus_rank"]
-            if anchor is None:
-                continue
-            if (anchor <= 6) != (rank <= 6) or (anchor <= 24) != (rank <= 24):
-                record["cutline_adjustment_note"] = (
-                    f" Owner-approved cutline movement: anchor QB{anchor} to final QB{rank}. "
-                    f"{acknowledged_reason}"
-                )
-                acknowledged.append(
-                    {"player_name": record.get("player_name"), "anchor_rank": anchor, "guarded_rank": rank}
-                )
-        summary["acknowledged_crossings"] = acknowledged
-        summary["acknowledged_reason"] = acknowledged_reason
-    else:
-        if summary["guarded_qb6_crossing_count"]:
-            failures.append("QB6 cutline must remain stable")
-        if summary["guarded_qb24_crossing_count"]:
-            failures.append("QB24 cutline must remain stable")
+    crossings = []
+    for record in board:
+        anchor = record.get("anchor_rank")
+        rank = record["guarded_consensus_rank"]
+        if anchor is None:
+            continue
+        if (anchor <= 6) != (rank <= 6) or (anchor <= 24) != (rank <= 24):
+            record["cutline_adjustment_note"] = (
+                f" Cutline crossing recorded for review: anchor QB{anchor} to guarded QB{rank}; "
+                "the guarded formula rank stands."
+            )
+            crossings.append({
+                "player_id": record.get("player_id"),
+                "player_name": record.get("player_name"),
+                "anchor_rank": anchor,
+                "guarded_rank": rank,
+            })
+    summary["recorded_cutline_crossings"] = crossings
     third_count = sum((r.get("sleeper_depth_chart_order") or 0) >= 3 for r in board)
     second_count = sum(r.get("sleeper_depth_chart_order") == 2 for r in board)
     second_end = len(board) - third_count
@@ -128,7 +122,7 @@ def build_promotion_sql(
             f"{_sql_number(record.get('sleeper_depth_chart_order'))} AS depth_order, "
             f"{_sql_string(record.get('review_lane'))} AS review_lane, "
             # Typed NULL: bare NULL leaves the STRUCT array without a common
-            # supertype when only some rows carry an acknowledgment.
+            # supertype when only some rows carry a crossing note.
             f"{'CAST(NULL AS STRING)' if record.get('cutline_adjustment_note') is None else _sql_string(record['cutline_adjustment_note'])} AS adjustment_note)"
         )
     promoted_sql = ",\n    ".join(promoted_records)
@@ -250,10 +244,10 @@ SELECT prior_board.* REPLACE(
   TRUE AS is_active,
   'standard_qb_guarded_75_25' AS rank_source,
   '{model_run_id}' AS model_run_id,
-  IF(promoted.adjustment_note IS NULL, 'NO_ADJUSTMENT', 'OWNER_APPROVED_CUTLINE_CROSSING') AS llm_adjustment_code,
+  IF(promoted.adjustment_note IS NULL, 'NO_ADJUSTMENT', 'CUTLINE_CROSSING_RECORDED') AS llm_adjustment_code,
   IF(promoted.adjustment_note IS NULL,
      'Deterministic formula promotion; no LLM movement applied.',
-     'Owner-approved QB24/QB6 cutline movement recorded in rank_rationale; raw formula score unchanged.') AS llm_adjustment_detail,
+     'QB6/QB24 cutline crossing recorded for review in rank_rationale; guarded formula rank kept; raw formula score unchanged.') AS llm_adjustment_detail,
   IF(promoted.adjustment_note IS NULL,
      'Phases 35.9-35.11 historical, owner-review, and depth-order evidence.',
      promoted.adjustment_note) AS llm_adjustment_evidence,
@@ -295,16 +289,6 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--apply", action="store_true")
-    parser.add_argument(
-        "--acknowledge-crossings",
-        metavar="REASON",
-        help=(
-            "Owner approval text for the current QB6/QB24 cutline crossings. "
-            "Records the movement into rank_rationale and the adjustment "
-            "provenance fields instead of failing the board. One-time use; "
-            "the daily automation never passes this."
-        ),
-    )
     args = parser.parse_args(argv)
 
     if args.apply and os.environ.get(WRITE_GATE) != "true":
@@ -314,7 +298,12 @@ def main(argv: list[str] | None = None) -> int:
     client = bigquery.Client(project=args.project)
     review_job = client.query(build_owner_review_sql(args.project, args.dataset))
     board = assign_guarded_consensus_ranks([dict(record) for record in review_job.result()])
-    summary = validate_board(board, acknowledged_reason=args.acknowledge_crossings)
+    summary = validate_board(board)
+    append_review_items(
+        "standard-qb-cutline-crossing",
+        [{**crossing, "mode": "apply" if args.apply else "dry_run", "action": "RECORDED_FORMULA_RANK_KEPT"}
+         for crossing in summary["recorded_cutline_crossings"]],
+    )
     now = datetime.now(timezone.utc)
     ranking_version = now.strftime("standard-qb-guarded-75-25-%Y%m%d%H%M%S")
     model_run_id = now.strftime("standard_qb_guarded_75_25-%Y%m%dT%H%M%SZ")

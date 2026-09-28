@@ -17,36 +17,6 @@ from scripts.build_unified_fable_v1_top100 import OVERALL_BOARD_SIZE,assert_posi
 REPLACEMENT={"QB":13,"RB":36,"WR":55,"TE":12}
 
 
-def apply_position_locked_overall_floor(board, *, player_name, minimum_overall):
-    target=next(row for row in board if row["player_name"]==player_name)
-    if target["overall_rank"]>=minimum_overall: return board
-    unconstrained=[row for row in board if not (row["position"]==target["position"] and row["position_rank"]>=target["position_rank"])]
-    ceiling=unconstrained[minimum_overall-2]["adjusted_vorp"]
-    guarded=[]
-    for row in board:
-        order_score=row["adjusted_vorp"]
-        if row["position"]==target["position"] and row["position_rank"]>=target["position_rank"]:
-            offset=row["position_rank"]-target["position_rank"]+1
-            order_score=min(order_score,ceiling-offset*1e-6)
-        guarded.append({**row,"raw_adjusted_vorp":row.get("raw_adjusted_vorp",row["adjusted_vorp"]),"adjusted_vorp":order_score,"_order_score":order_score})
-    guarded.sort(key=lambda row:(-row["_order_score"],row["overall_rank"]))
-    return [{key:value for key,value in {**row,"overall_rank":rank}.items() if key!="_order_score"} for rank,row in enumerate(guarded,1)]
-
-
-def apply_position_locked_floors(board, floors):
-    queues={position:[row for row in board if row["position"]==position] for position in ("QB","RB","WR","TE")}
-    output=[]
-    while len(output)<len(board):
-        next_rank=len(output)+1
-        eligible=[]
-        for queue in queues.values():
-            if queue and next_rank>=floors.get(queue[0]["player_name"],1): eligible.append(queue[0])
-        if not eligible: raise ValueError(f"No position queue eligible at overall rank {next_rank}")
-        selected=min(eligible,key=lambda row:row["overall_rank"])
-        queues[selected["position"]].pop(0);output.append({**selected,"overall_rank":next_rank})
-    return output
-
-
 def main():
     parser=argparse.ArgumentParser();parser.add_argument("--project",default="fantasy-football-498121");parser.add_argument("--brain-dataset",default="fantasy_football_brain");parser.add_argument("--metrics-dataset",default="fantasy_football_advanced_metrics");parser.add_argument("--apply",action="store_true");parser.add_argument("--output",type=Path,default=Path("output/unified-gng-2026-top150.json"));args=parser.parse_args()
     client=bigquery.Client(project=args.project)
@@ -69,9 +39,9 @@ SELECT * FROM `{args.project}.{args.metrics_dataset}.gng_2026_positional_boards_
         curves[position]=fit_log_curve([(row["position_rank"],row["ppg"]) for row in rows])
         cohort=[row for row in historical if row["position"]==position and row["position_rank"]<=replacement]
         availability[position]=sum(min(row["games_played"]/17,1) for row in cohort)/len(cohort)
+    # Pure VORP interleave. No name- or slot-keyed overall floors (owner rules
+    # removed 2026-09-27).
     board=interleave(queues,curves,availability,replacement_rank=REPLACEMENT)
-    qb4=next(row["player_name"] for row in board if row["position"]=="QB" and row["position_rank"]==4)
-    board=apply_position_locked_floors(board,{"Jeremiyah Love":20,qb4:25})
     assert_position_order(board)
     for row in board:
         row["source_position_rank"]=row.pop("rank");row["guardrail_labels"]=row.get("sleeper_review_flags_json") or "[]"

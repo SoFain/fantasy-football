@@ -11,13 +11,7 @@ from google.cloud import bigquery
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.ranking_owner_decisions import (
-    STANDARD_WR_ELITE_ORDER,
-)
-
-
-def _sql_strings(values: tuple[str, ...]) -> str:
-    return ",".join(f"'{value.replace(chr(39), chr(39) * 2)}'" for value in values)
+from src.review_log import append_review_items
 
 
 def _base_ctes(project: str, metrics_dataset: str, brain_dataset: str) -> str:
@@ -78,11 +72,9 @@ def build_query(
     metrics_dataset: str,
     brain_dataset: str = "fantasy_football_brain",
 ) -> str:
-    elite_order = _sql_strings(STANDARD_WR_ELITE_ORDER)
-    elite_rank_cases = "\n".join(
-        f"      WHEN '{player}' THEN elite_slots.occupied_ranks[SAFE_OFFSET({index})]"
-        for index, player in enumerate(STANDARD_WR_ELITE_ORDER)
-    )
+    # Final rank is the formula score plus the shared bounded role adjustment.
+    # No player-specific order is imposed after the formula (owner rules
+    # removed 2026-09-27).
     return f"""
 {_base_ctes(project, metrics_dataset, brain_dataset)}, eligible AS (
   SELECT * FROM joined WHERE NOT teamless_unranked
@@ -92,38 +84,15 @@ def build_query(
     formula_score + post_formula_adjustment AS post_formula_score,
     ROW_NUMBER() OVER (
       ORDER BY formula_score + post_formula_adjustment DESC, player_name
-    ) AS post_formula_rank
+    ) AS final_rank
   FROM eligible
-), elite_slots AS (
-  SELECT ARRAY_AGG(post_formula_rank ORDER BY post_formula_rank) AS occupied_ranks
-  FROM ranked
-  WHERE player_name IN ({elite_order})
-), guarded AS (
-  SELECT
-    ranked.*,
-    CASE player_name
-{elite_rank_cases}
-      ELSE post_formula_rank
-    END AS final_rank
-  FROM ranked
-  CROSS JOIN elite_slots
 )
 SELECT
   *,
-  formula_rank - post_formula_rank AS safety_rank_delta,
-  post_formula_rank - final_rank AS elite_order_rank_delta,
   formula_rank - final_rank AS rank_delta,
-  IF(
-    player_name IN ({elite_order}) AND post_formula_rank != final_rank,
-    'OWNER_APPROVED_ELITE_ORDER',
-    post_formula_adjustment_code
-  ) AS final_adjustment_code,
-  IF(
-    player_name IN ({elite_order}) AND post_formula_rank != final_rank,
-    CONCAT(post_formula_adjustment_detail, ' Owner-approved elite order: A.J. Brown, Justin Jefferson, Garrett Wilson.'),
-    post_formula_adjustment_detail
-  ) AS final_adjustment_detail
-FROM guarded
+  post_formula_adjustment_code AS final_adjustment_code,
+  post_formula_adjustment_detail AS final_adjustment_detail
+FROM ranked
 WHERE final_rank <= 100
 ORDER BY final_rank
 """
@@ -192,16 +161,23 @@ def main() -> int:
         raise RuntimeError("Standard WR safety review must contain 100 unique players")
     if {row["final_rank"] for row in rows} != set(range(1, 101)):
         raise RuntimeError("Standard WR final ranks must be unique and contiguous from 1 through 100")
-    elite_rows = sorted(
-        (row for row in rows if row["player_name"] in STANDARD_WR_ELITE_ORDER),
-        key=lambda row: row["final_rank"],
-    )
-    if tuple(row["player_name"] for row in elite_rows) != STANDARD_WR_ELITE_ORDER:
-        raise RuntimeError(f"Elite WR guardrail failed: {elite_rows}")
     if any(not row["sleeper_hard_review"] or row["current_team"] is not None for row in watchlist_rows):
         raise RuntimeError("Teamless watchlist contains a player without a current roster hard review")
     if any(row["teamless_unranked"] for row in rows):
         raise RuntimeError("Teamless player remained on the candidate board")
+    if any(row["sleeper_context_missing"] for row in rows):
+        raise RuntimeError("Standard WR candidate board contains a player without Sleeper context")
+    # Judgment calls stay on the board with their flags and are logged.
+    append_review_items("standard-wr-sleeper-hard-review", [
+        {
+            "position": "WR", "rank": row["final_rank"], "player_id": row["player_id"],
+            "player_name": row["player_name"], "current_team": row["current_team"],
+            "sleeper_status": row["sleeper_status"], "sleeper_injury_status": row["sleeper_injury_status"],
+            "sleeper_review_flags_json": row["review_flags_json"],
+            "mode": "apply" if args.apply else "dry_run", "action": "KEPT_ON_BOARD_WITH_FLAGS",
+        }
+        for row in rows if row["sleeper_hard_review"]
+    ])
 
     args.json_output.parent.mkdir(parents=True, exist_ok=True)
     args.watchlist_output.parent.mkdir(parents=True, exist_ok=True)
@@ -224,10 +200,6 @@ def main() -> int:
         "injury_reviews": sum("INJURY_UNCERTAIN" in row["review_flags_json"] for row in rows),
         "context_missing": sum(row["sleeper_context_missing"] for row in rows),
         "adjusted_rows": sum(row["post_formula_adjustment"] != 0.0 for row in rows),
-        "elite_order": [
-            {"final_rank": row["final_rank"], "player_name": row["player_name"]}
-            for row in elite_rows
-        ],
         "watchlist": [row["player_name"] for row in watchlist_rows],
         "watchlist_count": len(watchlist_rows),
         "largest_absolute_rank_delta": max(abs(row["rank_delta"]) for row in rows),

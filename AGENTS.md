@@ -156,8 +156,8 @@ You own final judgment and integration.
 - Rebuild Standard RB, WR, and TE together with `scripts/promote_standard_fable_v1_positional.py`; run it without `--apply` before opening the write gate.
 - Current redraft WR candidates come from `v_wr_fable_v1_current_candidates`: preserve every qualified WR Fable v1 score exactly, allow only the documented prior-qualified veteran carry-forward when the latest season misses the volume threshold, and never admit a rookie through that fallback. Apply Sleeper status only afterward through `v_ranking_post_formula_safety`.
 - Run `scripts/audit_current_player_ranking_coverage.py --fail-on-blocking` after candidate materialization and again after positional promotion. Do not build unified boards while it reports a blocking established-player omission.
-- A source-verified Sleeper depth-chart false positive, or a depth-order-1 player whose missing 2025 formula sample is source-verified (no 2025 regular-season games, accepted identity), may be classified as review-only only through an exact, bounded entry in `src/ranking_owner_decisions.py`. The exemption must expire automatically when team, experience, games, qualification volume, or the recorded trace code leaves the recorded bounds. A missing qualification row is exempt only for an entry bound to `NO_2025_SITUATIONAL_SOURCE_ROW`.
-- A GNG `SLEEPER_HARD_REVIEW` caused only by an injured starting QB dropping down the Sleeper depth chart (Active, injury tag, depth order 2 to the recorded maximum, flags exactly `QB_BACKUP_ROLE_REVIEW` + `INJURY_UNCERTAIN`) may be cleared only through an exact entry in `GNG_INJURED_STARTER_HARD_REVIEW_DECISIONS` (`src/ranking_owner_decisions.py`, checked by `is_owner_approved_injured_starter()`). It expires when the tag clears, he goes on IR, changes team, falls below the recorded depth, or gains another flag. The shared safety view is unchanged. First entry: Caleb Williams, owner-approved 2026-09-27. Dry GNG promote validates the review tables left by the last apply run, so after adding an entry, rebuild them with `build_gng_2026_candidate_boards.py --apply` and `build_unified_gng_2026_top100.py --output output/board-refresh/unified-gng-top150.json --apply` before rerunning the chain.
+- Never add a player-specific exception to a gate. Judgment trace codes are review-only by code, and Sleeper hard reviews and QB cutline crossings are logged, not blocking. See "Owner Rules Removed 2026-09-27".
+- Dry GNG promote validates the review tables left by the last apply run.
 - Public `pigskin_verdict` text must explain the rank with concrete formula inputs, tradeoffs, or risk. A sentence that only repeats the player and positional rank is invalid.
 - Every identity repair, qualification fallback, guardrail, or manual adjustment that changes player coverage or order must persist a human-readable explanation in `rank_rationale` and granular warehouse evidence in `llm_adjustment_evidence`. The explanation must name the applicable source season, threshold, raw score, formula change status, and post-formula movement. Verify that both fields survive public JSON publication and the IONOS rankings import so Pigskin can defend the number. A phase report alone is not enough.
 - Cloud ranking data is strictly scientific. Do not put Pigskin's site personality, roasts, slang, or show copy into formulas, warehouse evidence, model-run metadata, or `rank_rationale`. The GNG site prompt owns personality at response time.
@@ -169,6 +169,29 @@ You own final judgment and integration.
 - Normal production publication must include Standard, PPR, Half-PPR, and GNG Keeper together, with exactly 150 overall players per profile. A profile subset replaces rather than merges the manifest.
 - Missing positional context must remain null with a named warning. Never borrow stale context or fabricate a public verdict.
 - The feed contract and consumer instructions live in `docs/public-rankings-json-feed.md`.
+
+## Owner Rules Removed 2026-09-27
+
+Owner directive: "Remove any of my handwritten rules. Period. I want to start fresh."
+
+Standing rule: no player-specific hand rules anywhere in the ranking pipeline. No name lists, pins, exclusions, floors, forced orders, or per-player gate exceptions. An uncertain judgment is left as the formula produced it and logged, never hard-coded, and never allowed to fail the daily cron. Those judgments will come from the AI decision layer (`docs/ai-decision-layer.md`) once each decision family is backtested.
+
+Removed:
+
+- `src/ranking_owner_decisions.py` (deleted): `STANDARD_WR_ELITE_ORDER` (plus its reorder in `build_standard_wr_fable_v1_safety_review.py` and the ASSERT in `promote_standard_fable_v1_positional.py`), `GNG_WATCHLIST_NAMES`, `COVERAGE_GATE_REVIEW_ONLY_DECISIONS` (Theo Wease, MarShawn Lloyd), and `GNG_INJURED_STARTER_HARD_REVIEW_DECISIONS` (Caleb Williams) with `is_owner_approved_injured_starter()`.
+- The July PPR/Half `DECISIONS` pins and exclusions (`scripts/publish_ppr_fable_v1_candidate_boards.py`, deleted) and the `recommended_rank` override. `promote_ppr_fable_v1_positional.py` now rebuilds its candidates on every run from the approved formula views through `reception_candidates_sql()`; the static `ppr_fable_rankings_current` and `half_ppr_fable_rankings_current` tables are no longer read.
+- GNG unified name and slot floors (Jeremiyah Love, QB4) in `build_unified_gng_2026_top100.py`.
+- GNG WR live-rank continuity protection in `build_gng_2026_candidate_boards.py` (a floor anchored to yesterday's board, not part of any approved formula spec).
+
+Kept, because they are facts or backtested formula, not opinions: the Marvin Harrison Jr identity override, the three documented GNG Sleeper identity aliases, `player_identity_overrides`, `manual_market_values`, `data/coaching_staff.csv`, and the Situation v1 `EFFECTS` and `WINPCT_2025` coefficients.
+
+Gate behavior:
+
+- Coverage gate blocks only on pipeline loss of an established player: `FABLE_FORMULA_TRANSFORM_DROPOUT`, `IDENTITY_BRIDGE_COLLISION`, `IDENTITY_BRIDGE_UNMAPPED`, `NOT_IN_RECEPTION_CANDIDATE_TABLES`. Judgment codes are review-only: `NO_2025_SITUATIONAL_SOURCE_ROW`, `BELOW_2025_FABLE_QUALIFICATION_THRESHOLD` (thin samples and depth-chart slot conflicts), `ROOKIE_SYSTEM_REQUIRED`, `QB_COVERAGE_REVIEW`, `POSITIONAL_PROMOTION_OR_BOARD_CUTOFF`.
+- A Sleeper hard review (QB depth over 1, injury-driven depth drop, IR or another non-Active status) no longer blocks the GNG promote preflight or the Standard WR preflight. The player stays on the board with his flags.
+- A Standard QB6/QB24 cutline crossing is recorded in `rank_rationale` and provenance (`CUTLINE_CROSSING_RECORDED`); the guarded formula rank stands. `--acknowledge-crossings` is gone.
+- Every review-only case is appended to `output/review-log/<gate>.jsonl` through `src/review_log.py`.
+- Structural gates are unchanged and still fail closed: row contracts, teamless players, missing Sleeper context, contiguity, queue mismatches, SHA and version checks, and zero-warning feed validation.
 
 ## Ranking Backtests
 

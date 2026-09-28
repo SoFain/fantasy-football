@@ -21,7 +21,7 @@ This subtree owns runtime and orchestration behavior. Keep Python focused on con
 - Sleeper status refreshes update display context only. New OUT or IR transitions create an auditable pending review and never change ranks automatically.
 - GNG current-board Sleeper safety uses bounded depth-chart adjustments. Teamless players are structurally unranked; inactive, injury, unknown-depth, and rookie states produce review flags rather than automatic status-based rank changes.
 - Future Fable board builders must consume `fantasy_football_advanced_metrics.v_ranking_post_formula_safety` after formula scoring instead of copying current-status rules into each promotion path.
-- Durable owner-approved ranking exceptions live in `src/ranking_owner_decisions.py`; current-board builders must import them instead of keeping divergent local name lists.
+- No player-specific ranking exceptions (owner rules removed 2026-09-27). Judgment calls a gate would otherwise block on are recorded through `src/review_log.py`; structural checks still fail closed.
 - Player Profiles `ALL` boards and Pigskin `ALL` context must use `unified_draft_rankings_current`; positional scores must never be re-sorted into a substitute overall board.
 - Player-facing adjustment labels must explain the effect in plain language while preserving the stored adjustment code for audit.
 - Write paths require phase-specific gates and must fail closed.

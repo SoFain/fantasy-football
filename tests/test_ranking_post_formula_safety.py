@@ -2,10 +2,6 @@ import unittest
 
 from scripts.build_ranking_post_formula_safety import render_sql, validation_sql
 from scripts.build_standard_wr_fable_v1_safety_review import build_query, build_watchlist_query
-from src.ranking_owner_decisions import (
-    GNG_WATCHLIST_NAMES,
-    STANDARD_WR_ELITE_ORDER,
-)
 
 
 class RankingPostFormulaSafetyTest(unittest.TestCase):
@@ -38,11 +34,8 @@ class RankingPostFormulaSafetyTest(unittest.TestCase):
         self.assertIn("formula_score + post_formula_adjustment AS post_formula_score", sql)
         self.assertIn("COALESCE(safety.sleeper_hard_review, TRUE)", sql)
         self.assertIn("analytics_pigskin_rankings", sql)
-        self.assertIn("occupied_ranks[SAFE_OFFSET(0)]", sql)
-        self.assertIn("occupied_ranks[SAFE_OFFSET(1)]", sql)
-        self.assertIn("occupied_ranks[SAFE_OFFSET(2)]", sql)
-        self.assertIn("OWNER_APPROVED_ELITE_ORDER", sql)
         self.assertIn("WHERE final_rank <= 100", sql)
+        self.assertIn("post_formula_adjustment_code AS final_adjustment_code", sql)
 
     def test_rostered_injury_exception_preserves_freshness_and_zero_movement(self):
         sql = render_sql("project", "metrics")
@@ -51,13 +44,10 @@ class RankingPostFormulaSafetyTest(unittest.TestCase):
         self.assertIn("AND context_age_hours <= 72", sql)
         self.assertIn("WHEN NOT roster_context_eligible OR years_exp = 0 THEN 0.0", sql)
 
-    def test_elite_order_is_shared_and_teamless_is_structural(self):
-        self.assertEqual(
-            STANDARD_WR_ELITE_ORDER,
-            ("A.J. Brown", "Justin Jefferson", "Garrett Wilson"),
-        )
-        self.assertIn("Gabe Davis", GNG_WATCHLIST_NAMES)
-        self.assertIn("Sterling Shepard", GNG_WATCHLIST_NAMES)
+    def test_no_player_specific_order_and_teamless_is_structural(self):
+        sql = build_query("project", "metrics")
+        for removed in ("A.J. Brown", "Justin Jefferson", "Garrett Wilson", "OWNER_APPROVED_ELITE_ORDER", "elite_slots"):
+            self.assertNotIn(removed, sql)
         watchlist_sql = build_watchlist_query("project", "metrics")
         self.assertIn("TEAMLESS_UNRANKED", watchlist_sql)
         self.assertIn("WHERE teamless_unranked", watchlist_sql)

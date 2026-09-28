@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -13,8 +12,7 @@ from google.cloud import bigquery
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.run_gng_advanced_hypotheses import weighted_average
 from scripts.run_gng_position_candidate_expansion import percent_ranks
-from src.ranking_owner_decisions import GNG_INJURED_STARTER_HARD_REVIEW_DECISIONS, GNG_WATCHLIST_NAMES
-from src.gng_sleeper_safety import is_owner_approved_injured_starter, is_rostered_injury_review_only
+from src.gng_sleeper_safety import is_rostered_injury_review_only
 
 
 FORMULAS = {
@@ -24,7 +22,6 @@ FORMULAS = {
     "TE": ("h5_stability_hybrid", {"profile": .25, "gng_weighted_opp": .20, "first_down_any": .10, "xfp_share": .10, "opportunity_quality": .10, "snap_share": .08, "snap_stability": .07, "availability": .05, "ngs_any": .05}),
 }
 LIMITS = {"QB": 45, "RB": 80, "WR": 100, "TE": 35}
-WATCHLIST_NAMES = GNG_WATCHLIST_NAMES
 
 
 def build_query(project, brain, metrics):
@@ -83,6 +80,16 @@ WITH identity_keys AS (
  WHERE sleeper_player_id IS NOT NULL AND key IS NOT NULL
  QUALIFY ROW_NUMBER() OVER(PARTITION BY key ORDER BY source_confidence DESC,updated_at DESC)=1
 ), aliases AS (
+ -- Identity facts, not ranking opinions (verified 2026-09-27). The GSIS-keyed
+ -- player_identity_bridge rows for these players carry no Sleeper ID, the
+ -- Sleeper-keyed rows carry no GSIS ID, and the bridge names differ from
+ -- Sleeper's, so neither the bridge nor the unique-name fallback (the points
+ -- pool uses abbreviated names such as 'Z.Knight') can join them:
+ --   00-0037157 = Sleeper 8122  Zonovan "Bam" Knight (bridge: Bam Knight)
+ --   00-0039373 = Sleeper 11579 Audric Estime (bridge: Audric Estimé)
+ --   00-0036988 = Sleeper 7670  Joshua Palmer (bridge: Josh Palmer)
+ -- Without a pair the player gets no Sleeper context and is unranked as
+ -- CURRENT_TEAM_UNKNOWN_UNRANKED. Remove a pair once the bridge links both IDs.
  SELECT '00-0037157' player_id,'8122' sleeper_player_id UNION ALL
  SELECT '00-0039373','11579' UNION ALL
  SELECT '00-0036988','7670'
@@ -119,10 +126,6 @@ def main():
     parser.add_argument("--apply",action="store_true")
     args=parser.parse_args(); client=bigquery.Client(project=args.project)
     rows=[dict(row) for row in client.query(build_query(args.project,args.brain_dataset,args.metrics_dataset)).result()]
-    live_position_ranks={(row["position"],re.sub(r"[^a-z0-9]","",row["player_name"].lower())):row["rank"] for row in map(dict,client.query(f"""
-SELECT position,player_name,rank FROM `{args.project}.{args.brain_dataset}.analytics_pigskin_rankings`
-WHERE is_active AND scoring_profile_id='gng_keeper' AND position IN ('QB','RB','WR','TE')
-""").result())}
     generated_at=datetime.now(timezone.utc).isoformat(); candidate_pool=[]; unranked_watchlist=[]
     for position,(formula,weights) in FORMULAS.items():
         candidates=[row for row in rows if row["position"]==position]
@@ -138,7 +141,6 @@ WHERE is_active AND scoring_profile_id='gng_keeper' AND position IN ('QB','RB','
             row["sleeper_hard_review"]=(
                 row.get("sleeper_hard_review") is not False
                 and not is_rostered_injury_review_only(row)
-                and not is_owner_approved_injured_starter(row, GNG_INJURED_STARTER_HARD_REVIEW_DECISIONS)
             )
             row["sleeper_review_flags_json"]=row.get("sleeper_review_flags_json") or '["SLEEPER_CONTEXT_MISSING"]'
             scored.append(row)
@@ -156,16 +158,14 @@ WHERE is_active AND scoring_profile_id='gng_keeper' AND position IN ('QB','RB','
                 "sleeper_hard_review":row["sleeper_hard_review"],"sleeper_review_flags_json":row["sleeper_review_flags_json"],
                 "sleeper_fetched_at":row.get("sleeper_fetched_at").isoformat() if row.get("sleeper_fetched_at") else None,
             }
-            no_current_team=not row.get("sleeper_team")
-            teamless="SLEEPER_TEAMLESS" in row["sleeper_review_flags_json"]
-            owner_watchlist=row["player_name"] in WATCHLIST_NAMES and row["sleeper_hard_review"]
-            if no_current_team or owner_watchlist:
+            # Structural only: a player without a current Sleeper team is
+            # unranked. A hard review (QB depth over 1, injury, inactive) keeps
+            # the player on the board with his flags; the GNG promote logs it.
+            if not row.get("sleeper_team"):
                 item["watchlist_reason"]=(
                     "TEAMLESS_UNRANKED"
-                    if teamless
+                    if "SLEEPER_TEAMLESS" in row["sleeper_review_flags_json"]
                     else "CURRENT_TEAM_UNKNOWN_UNRANKED"
-                    if no_current_team
-                    else "OWNER_APPROVED_WATCHLIST"
                 )
                 unranked_watchlist.append(item)
                 continue
@@ -217,12 +217,6 @@ ORDER BY position,COALESCE(market.rank_position,999),COALESCE(depth_chart_order,
              "sleeper_depth_chart_position":rookie["depth_chart_position"],"sleeper_depth_chart_order":depth,
              "sleeper_hard_review":False,"sleeper_review_flags_json":json.dumps(["ROOKIE_CONTEXT_REQUIRED"]),
              "sleeper_fetched_at":rookie["fetched_at"],"merge_priority":priority,"rank_source":"market_rookie_overlay"})
-        if position=="WR":
-            for row in entries:
-                live_rank=live_position_ranks.get(("WR",re.sub(r"[^a-z0-9]","",row["player_name"].lower())))
-                row["live_position_rank"]=live_rank
-                if live_rank is not None and live_rank<=6: row["merge_priority"]=min(row["merge_priority"],6+live_rank)
-                elif live_rank is not None and live_rank<=12: row["merge_priority"]=min(row["merge_priority"],12+live_rank)
         entries.sort(key=lambda row:(row["merge_priority"],row["rank_source"]=="market_rookie_overlay",row["player_name"]))
         for rank,item in enumerate(entries[:LIMITS[position]],1): item["rank"]=rank;merged.append(item)
     if args.apply:

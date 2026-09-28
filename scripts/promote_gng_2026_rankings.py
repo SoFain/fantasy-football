@@ -1,13 +1,35 @@
 """Guarded promotion package for 2026 GNG positional and unified rankings."""
 from __future__ import annotations
 
-import argparse,os
+import argparse,json,os
 from datetime import datetime,timezone
+from pathlib import Path
+import sys
 
 from google.cloud import bigquery
 
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from src.review_log import append_review_items
+
 
 WRITE_GATE="ALLOW_GNG_2026_PRODUCTION_PROMOTION"
+# Structural preflight: these block. Sleeper hard reviews (QB depth over 1,
+# injury-driven depth drops, inactive statuses) are judgment calls: the player
+# stays on the board with his flags and the case is logged, never blocked.
+STRUCTURAL_PREFLIGHT={"positional_rows":260,"unified_rows":150,"teamless_positional":0,"teamless_unified":0,"noncontiguous_positions":0,"queue_mismatches":0}
+
+
+def check_preflight(state):
+    """Raise on a structural mismatch. `hard_reviews` is reported, not enforced."""
+    structural={key:state.get(key) for key in STRUCTURAL_PREFLIGHT}
+    if structural!=STRUCTURAL_PREFLIGHT: raise RuntimeError(f"Preflight failed: {state}")
+
+
+def hard_review_sql(project,metrics):
+    return f"""SELECT position,rank,player_id,player_name,current_team,sleeper_status,sleeper_injury_status,
+ sleeper_depth_chart_position,sleeper_depth_chart_order,sleeper_review_flags_json
+FROM `{project}.{metrics}.gng_2026_positional_boards_with_rookies`
+WHERE sleeper_hard_review ORDER BY position,rank"""
 
 
 def build_sql(project,brain,metrics,version):
@@ -68,7 +90,10 @@ def main():
      USING(player_id,position)
    WHERE overall.position_rank!=positional.rank) queue_mismatches"""
  state=dict(next(iter(client.query(preflight).result())))
- if state!={"positional_rows":260,"unified_rows":150,"hard_reviews":0,"teamless_positional":0,"teamless_unified":0,"noncontiguous_positions":0,"queue_mismatches":0}: raise RuntimeError(f"Preflight failed: {state}")
+ check_preflight(state)
+ hard_reviews=[dict(row) for row in client.query(hard_review_sql(args.project,args.metrics_dataset)).result()]
+ log_path=append_review_items("gng-sleeper-hard-review",[{**row,"mode":"apply" if args.apply else "dry_run","action":"KEPT_ON_BOARD_WITH_FLAGS"} for row in hard_reviews])
+ if hard_reviews: print(json.dumps({"review_only_sleeper_hard_reviews":[f"{row['position']}{row['rank']} {row['player_name']}" for row in hard_reviews],"review_log":str(log_path)},default=str))
  sql=build_sql(args.project,args.brain_dataset,args.metrics_dataset,version)
  if not args.apply:
   job=client.query(sql,job_config=bigquery.QueryJobConfig(dry_run=True,use_query_cache=False));print({"dry_run":True,"bytes":job.total_bytes_processed,"preflight":state,"version":version});return 0

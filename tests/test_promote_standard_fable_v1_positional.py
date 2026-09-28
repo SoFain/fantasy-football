@@ -39,12 +39,16 @@ class StandardFablePositionalPromotionTest(unittest.TestCase):
         self.assertNotIn("WR Fable v1 ranks %s at WR%d", self.sql)
         self.assertNotIn("TE Fable v1.0a ranks %s at TE%d", self.sql)
 
-    def test_elite_guardrail_preserves_order_without_freezing_rank_numbers(self):
+    def test_no_owner_elite_order_assert(self):
+        self.assertNotIn("A.J. Brown", self.sql)
+        self.assertNotIn("elite order", self.sql)
+
+    def test_wr_preflight_blocks_structural_gaps_not_hard_reviews(self):
         self.assertIn(
-            "STRING_AGG(player_name, '|' ORDER BY rank) = 'A.J. Brown|Justin Jefferson|Garrett Wilson'",
+            "COUNTIF(current_team IS NULL OR teamless_unranked OR sleeper_context_missing) = 0",
             self.sql,
         )
-        self.assertNotIn("STRUCT('A.J. Brown' AS player_name, 13 AS expected_rank)", self.sql)
+        self.assertNotIn("teamless_unranked OR sleeper_hard_review", self.sql)
 
     def test_rb_preflight_allows_bounded_roster_growth(self):
         self.assertIn("COUNT(*) BETWEEN 80 AND 100", self.sql)
